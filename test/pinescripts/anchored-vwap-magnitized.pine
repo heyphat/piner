@@ -1,0 +1,641 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+//
+// ██████╗ ██████╗  ██████╗ ██████╗  █████╗ ██╗     ██╗███████╗████████╗
+// ██╔══██╗██╔══██╗██╔═══██╗██╔══██╗██╔══██╗██║     ██║██╔════╝╚══██╔══╝
+// ██████╔╝██████╔╝██║   ██║██████╔╝███████║██║     ██║███████╗   ██║
+// ██╔═══╝ ██╔══██╗██║   ██║██╔══██╗██╔══██║██║     ██║╚════██║   ██║
+// ██║     ██║  ██║╚██████╔╝██████╔╝██║  ██║███████╗██║███████║   ██║
+// ╚═╝     ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝╚══════╝   ╚═╝
+
+// Original code by @Probalist on TradingView.com
+// Refactored, visually updated, and alert-optimized by LuxAlgo Quant Agent
+
+//@version=6
+indicator("Anchored VWAP Magnetized [Probalist Essentials]", shorttitle = "AVWAP [P]", overlay = true, max_labels_count = 500, max_lines_count = 100, max_boxes_count = 300, max_polylines_count = 10)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Inputs
+//---------------------------------------------------------------------------------------------------------------------{
+
+anchorInput = input.string("Session", "Anchor", options = ["Session", "Week", "Month", "Custom"], group = "■ Anchor", tooltip = "When to reset the VWAP accumulation. Session = daily open; Week/Month = Monday/month-start; Custom = a specific date you set below.")
+customYearInput = input.int(2024, "Custom year", minval = 2000, maxval = 2100, group = "■ Anchor", tooltip = "Year of the custom anchor bar. Active only when Anchor = Custom.")
+customMonthInput = input.int(1, "Custom month", minval = 1, maxval = 12, group = "■ Anchor", tooltip = "Month of the custom anchor bar (1–12). Active only when Anchor = Custom.")
+customDayInput = input.int(1, "Custom day", minval = 1, maxval = 31, group = "■ Anchor", tooltip = "Day of the custom anchor bar. Active only when Anchor = Custom.")
+
+srcInput = input.source(hlc3, "Source", group = "■ Calculation", tooltip = "Price input for VWAP. HLC/3 (typical price) is the canonical default.")
+band1Input = input.float(1.0, "Inner band (σ)", minval = 0.1, maxval = 5.0, step = 0.1, group = "■ Calculation", tooltip = "First deviation band multiplier. 1.0 = one standard deviation from VWAP.")
+band2Input = input.float(2.0, "Outer band (σ)", minval = 0.1, maxval = 10.0, step = 0.1, group = "■ Calculation", tooltip = "Second deviation band multiplier — the primary fade-signal trigger. 2.0 is the canonical default.")
+
+confirmInput = input.int(1, "Confirm bars", minval = 0, maxval = 5, group = "■ Signals", tooltip = "Bars of confirmation before a signal fires. 0 = realtime (may repaint on the live bar); 1+ = confirmed close, no repaint. Default 1 is non-repainting.")
+
+htfOnInput = input.bool(false, "Show HTF AVWAP", group = "■ Higher Timeframe", tooltip = "Display the same session-anchored VWAP from a higher timeframe as a faint reference line. Display only — does not gate or score signals.")
+htfInput = input.timeframe("D", "HTF timeframe", group = "■ Higher Timeframe", tooltip = "Timeframe for the optional HTF AVWAP reference line.")
+
+probOnInput = input.bool(true, "Probability Read (master)", group = "■ Probability Read", tooltip = "Master toggle for the entire probability layer: records outcomes, shows stats, draws the cone and distribution panel. Describes past signals on this chart — not a prediction.")
+readoutOnInput = input.bool(true, "↳ Readout panel", group = "■ Probability Read", tooltip = "Show the compact mini-readout labels to the right of the last bar.")
+coneOnInput = input.bool(true, "↳ Projection Cone", group = "■ Probability Read", tooltip = "Draw the forward ±1σ cone from the most recent signal bar to the horizon.")
+distOnInput = input.bool(true, "↳ Distribution Panel (bell curve)", group = "■ Probability Read", tooltip = "Draw the kernel-smoothed return distribution to the right of the last bar.")
+horizonInput = input.int(10, "Horizon (bars)", minval = 1, maxval = 100, group = "■ Probability Read", tooltip = "How many bars forward to measure outcome. Longer = captures slower moves; shorter = captures quick reactions.")
+maxSamplesInput = input.int(200, "Max samples", minval = 20, maxval = 500, group = "■ Probability Read", tooltip = "Maximum stored outcomes per direction. Older samples roll off when the cap is hit.")
+minSamplesInput = input.int(20, "Min samples", minval = 5, maxval = 50, group = "■ Probability Read", tooltip = "Minimum samples before showing statistics. Below this only 'gathering — n=x' is shown.")
+recentWinInput = input.int(60, "Recent Window (outcomes)", minval = 15, maxval = 200, group = "■ Probability Read", tooltip = "Number of most-recent outcomes used for the Recent Form read. Markets shift regimes; this captures the current one.")
+wilsonZStrInput = input.string("80%", "Evidence Strictness (Wilson)", options = ["80%", "90%", "95%"], group = "■ Probability Read", tooltip = "Confidence level for the Wilson lower-bound test. 80% = more sensitive (fires earlier); 95% = stricter (fires only on strong evidence).")
+
+glowInput = input.bool(true, "Glow Effect", group = "■ Probalist Theme", tooltip = "Stack a soft halo around the AVWAP line and fill the bands with gradient shading. Turn off for a clean minimal look.")
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Constants & Theme
+//---------------------------------------------------------------------------------------------------------------------{
+
+COLOR_BULL = #089981
+COLOR_BEAR = #f23645
+COLOR_NEUTRAL = #5b9cf6
+
+DIST_X_START = 6
+KDE_BINS = 40
+PANEL_FRAC = 0.55
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Functions
+//---------------------------------------------------------------------------------------------------------------------{
+
+normScore(float score) =>
+    (math.max(-100.0, math.min(100.0, score)) + 100.0) / 200.0
+
+heatCol(float pos, float transp) =>
+    color col = na
+    if pos >= 0.80
+        col := color.from_gradient(pos, 0.80, 1.0, color.new(COLOR_BULL, 50), COLOR_BULL)
+    else if pos >= 0.62
+        col := color.from_gradient(pos, 0.62, 0.80, color.new(COLOR_BULL, 70), color.new(COLOR_BULL, 50))
+    else if pos >= 0.50
+        col := color.from_gradient(pos, 0.50, 0.62, COLOR_NEUTRAL, color.new(COLOR_BULL, 70))
+    else if pos >= 0.40
+        col := color.from_gradient(pos, 0.40, 0.50, COLOR_NEUTRAL, color.new(COLOR_BEAR, 70))
+    else if pos >= 0.22
+        col := color.from_gradient(pos, 0.22, 0.40, color.new(COLOR_BEAR, 50), color.new(COLOR_BEAR, 70))
+    else
+        col := color.from_gradient(pos, 0.0, 0.22, COLOR_BEAR, color.new(COLOR_BEAR, 50))
+    color.new(col, transp)
+
+calcStats(array<float> arr, int recentK, float zW) =>
+    int n = array.size(arr)
+    float wr = 0.0
+    float med = 0.0
+    float p16 = 0.0
+    float p84 = 0.0
+    int rN = 0
+    float rWR = 0.0
+    float rMed = 0.0
+    float wLB = 0.0
+    float rWLB = 0.0
+    if n > 0
+        int wins = 0
+        for i = 0 to n - 1
+            if array.get(arr, i) > 0
+                wins += 1
+        wr := wins / n * 100.0
+        med := array.median(arr)
+        p16 := array.percentile_nearest_rank(arr, 16)
+        p84 := array.percentile_nearest_rank(arr, 84)
+        
+        float pHat = wr / 100.0
+        float denom = 1.0 + zW * zW / n
+        float centre = pHat + zW * zW / (2.0 * n)
+        float spread = zW * math.sqrt(pHat * (1.0 - pHat) / n + zW * zW / (4.0 * n * n))
+        wLB := (centre - spread) / denom * 100.0
+        
+        int rStart = math.max(0, n - recentK)
+        array<float> rSlice = array.slice(arr, rStart, n)
+        rN := array.size(rSlice)
+        if rN > 0
+            int rWins = 0
+            for j = 0 to rN - 1
+                if array.get(rSlice, j) > 0
+                    rWins += 1
+            rWR := rWins / rN * 100.0
+            rMed := array.median(rSlice)
+            float rPHat = rWR / 100.0
+            float rDenom = 1.0 + zW * zW / rN
+            float rCentre = rPHat + zW * zW / (2.0 * rN)
+            float rSpread = zW * math.sqrt(rPHat * (1.0 - rPHat) / rN + zW * zW / (4.0 * rN * rN))
+            rWLB := (rCentre - rSpread) / rDenom * 100.0
+    [n, wr, med, p16, p84, rN, rWR, rMed, wLB, rWLB]
+
+getVerdict(float wlb, float rwlb, float med, float rMed, float rwr, int n, int rn, int minS, bool isBull) =>
+    string dir = isBull ? "bullish" : "bearish"
+    string v = ""
+    if n < minS
+        v := "gathering — n=" + str.tostring(n)
+    else if rwlb > 50.0 and rMed > 0 and wlb > 50.0 and med > 0
+        v := "recent + long-run back follow-through"
+    else if rwlb > 50.0 and rMed > 0
+        v := "recent form backs it — long-run mixed"
+    else if rn >= 15 and rMed > 0 and rwr >= 55.0
+        v := "recent form leans " + dir + " — building, not yet evidence"
+    else if wlb > 50.0 and med > 0
+        v := "long-run backed, but recent form cooled"
+    else
+        v := "no edge in history here — treat as noise"
+    v
+
+edgeTimeStr(int t) =>
+    string s = ""
+    if na(t)
+        s := "—"
+    else
+        int elapsed = (time - t) / 1000
+        if elapsed < 3600
+            s := "now"
+        else if elapsed < 172800
+            s := str.tostring(math.round(elapsed / 3600)) + "h ago"
+        else
+            s := str.tostring(math.round(elapsed / 86400)) + "d ago"
+    s
+
+getDotSize(float strength) =>
+    string sz = size.normal
+    if strength >= 0.9
+        sz := size.huge
+    else if strength >= 0.4
+        sz := size.large
+    sz
+
+getDotTransp(float strength) =>
+    float t = 28.0
+    if strength >= 0.9
+        t := 0.0
+    else if strength >= 0.4
+        t := 12.0
+    t
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Anchor Detection
+//---------------------------------------------------------------------------------------------------------------------{
+
+isCustomAnchor = year == customYearInput and month == customMonthInput and dayofmonth == customDayInput
+
+isAnchor = switch anchorInput
+    "Session" => timeframe.change("D")
+    "Week"    => timeframe.change("W")
+    "Month"   => timeframe.change("M")
+    "Custom"  => isCustomAnchor and not isCustomAnchor[1]
+    => false
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Anchored VWAP Calculation
+//---------------------------------------------------------------------------------------------------------------------{
+
+var float cumPV = 0.0
+var float cumV = 0.0
+var float cumPV2 = 0.0 
+
+if isAnchor
+    cumPV := 0.0
+    cumV := 0.0
+    cumPV2 := 0.0
+
+tpVol = srcInput * volume
+cumPV := cumPV + tpVol
+cumV := cumV + volume
+cumPV2 := cumPV2 + volume * srcInput * srcInput
+
+vwapVal = cumV > 0 ? cumPV / cumV : na
+
+vwapVar = cumV > 0 ? (cumPV2 / cumV) - (vwapVal * vwapVal) : na
+vwapDev = not na(vwapVar) and vwapVar >= 0 ? math.sqrt(vwapVar) : na
+
+band1Up = not na(vwapVal) and not na(vwapDev) ? vwapVal + band1Input * vwapDev : na
+band1Dn = not na(vwapVal) and not na(vwapDev) ? vwapVal - band1Input * vwapDev : na
+band2Up = not na(vwapVal) and not na(vwapDev) ? vwapVal + band2Input * vwapDev : na
+band2Dn = not na(vwapVal) and not na(vwapDev) ? vwapVal - band2Input * vwapDev : na
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Heat Score
+//---------------------------------------------------------------------------------------------------------------------{
+
+rawScore = not na(vwapDev) and vwapDev > 0 ? math.max(-100.0, math.min(100.0, ((close - vwapVal) / vwapDev) * 50.0)) : 0.0
+cMainPos = normScore(rawScore)
+cMain = heatCol(cMainPos, 0)
+cMainFade = heatCol(cMainPos, 45)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// HTF VWAP (Display Only)
+//---------------------------------------------------------------------------------------------------------------------{
+
+htfVwap = request.security(syminfo.tickerid, htfInput, vwapVal[1], lookahead = barmerge.lookahead_off)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Signal Detection
+//---------------------------------------------------------------------------------------------------------------------{
+
+bullTouchRaw = not na(band2Dn) and close < band2Dn
+bearTouchRaw = not na(band2Up) and close > band2Up
+
+bullSig = bullTouchRaw[confirmInput] and barstate.isconfirmed
+bearSig = bearTouchRaw[confirmInput] and barstate.isconfirmed
+
+isBullish = not na(vwapVal) and close > vwapVal
+isBearish = not na(vwapVal) and close < vwapVal
+
+zoneStr = not na(band2Up) and close > band2Up ? "above 2σ" : not na(band2Dn) and close < band2Dn ? "below 2σ" : not na(band1Up) and close > band1Up ? "above 1σ" : not na(band1Dn) and close < band1Dn ? "below 1σ" : "inside bands"
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Probability Read
+//---------------------------------------------------------------------------------------------------------------------{
+
+wilsonZ = wilsonZStrInput == "95%" ? 1.960 : wilsonZStrInput == "90%" ? 1.645 : 1.282
+
+var array<float> probArrBull = array.new<float>()
+var array<float> probArrBear = array.new<float>()
+
+bullAtHorizon = not na(band2Dn[horizonInput]) and close[horizonInput] < band2Dn[horizonInput]
+bearAtHorizon = not na(band2Up[horizonInput]) and close[horizonInput] > band2Up[horizonInput]
+
+if probOnInput and barstate.isconfirmed
+    if bullAtHorizon
+        float ret = (close - close[horizonInput]) / close[horizonInput] * 100.0
+        array.push(probArrBull, ret)
+        if array.size(probArrBull) > maxSamplesInput
+            array.shift(probArrBull)
+    if bearAtHorizon
+        float ret = -(close - close[horizonInput]) / close[horizonInput] * 100.0
+        array.push(probArrBear, ret)
+        if array.size(probArrBear) > maxSamplesInput
+            array.shift(probArrBear)
+
+[bN, bWR, bMed, bP16, bP84, bRN, bRWR, bRMed, bWLB, bRWLB] = calcStats(probArrBull, recentWinInput, wilsonZ)
+[eN, eWR, eMed, eP16, eP84, eRN, eRWR, eRMed, eWLB, eRWLB] = calcStats(probArrBear, recentWinInput, wilsonZ)
+
+bullVerdict = getVerdict(bWLB, bRWLB, bMed, bRMed, bRWR, bN, bRN, minSamplesInput, true)
+bearVerdict = getVerdict(eWLB, eRWLB, eMed, eRMed, eRWR, eN, eRN, minSamplesInput, false)
+
+bullBacked = probOnInput and bN >= minSamplesInput and bRWLB > 50.0 and bRMed > 0
+bearBacked = probOnInput and eN >= minSamplesInput and eRWLB > 50.0 and eRMed > 0
+
+bullGlyph = bN < minSamplesInput ? "○" : bullBacked ? "●" : bRN >= 15 and bRMed > 0 ? "◐" : "○"
+bearGlyph = eN < minSamplesInput ? "○" : bearBacked ? "●" : eRN >= 15 and eRMed > 0 ? "◐" : "○"
+
+var int bullEdgeTime = na
+var int bearEdgeTime = na
+
+if barstate.isconfirmed
+    if bullBacked
+        bullEdgeTime := time
+    if bearBacked
+        bearEdgeTime := time
+
+bullEdgeStr = edgeTimeStr(bullEdgeTime)
+bearEdgeStr = edgeTimeStr(bearEdgeTime)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Signal Dots
+//---------------------------------------------------------------------------------------------------------------------{
+
+atrVal = ta.atr(14)
+dotLaneBull = low - 1.4 * atrVal
+dotLaneBear = high + 1.4 * atrVal
+
+bullStrength = not na(vwapDev) and vwapDev > 0 and not na(band2Dn) ? math.max(0.0, (band2Dn - close) / vwapDev) : 0.0
+bearStrength = not na(vwapDev) and vwapDev > 0 and not na(band2Up) ? math.max(0.0, (close - band2Up) / vwapDev) : 0.0
+
+var array<label> bullDotLabels = array.new<label>()
+var array<int> bullDotBars = array.new<int>()
+var array<string> bullDotBase = array.new<string>()
+var array<label> bearDotLabels = array.new<label>()
+var array<int> bearDotBars = array.new<int>()
+var array<string> bearDotBase = array.new<string>()
+
+buildTipBull() =>
+    string statsLine = bN >= minSamplesInput ? "recent " + str.tostring(math.round(bRWR)) + "% ↑ (last " + str.tostring(bRN) + ") · long-run " + str.tostring(math.round(bWR)) + "% ↑ · med +" + str.tostring(bMed, "0.00") + "% · n=" + str.tostring(bN) : "gathering n=" + str.tostring(bN)
+    "Bull fade (below 2σ)\nRead at fire: " + statsLine + "\n→ " + bullVerdict
+
+buildTipBear() =>
+    string statsLine = eN >= minSamplesInput ? "recent " + str.tostring(math.round(eRWR)) + "% ↑ (last " + str.tostring(eRN) + ") · long-run " + str.tostring(math.round(eWR)) + "% ↑ · med +" + str.tostring(eMed, "0.00") + "% · n=" + str.tostring(eN) : "gathering n=" + str.tostring(eN)
+    "Bear fade (above 2σ)\nRead at fire: " + statsLine + "\n→ " + bearVerdict
+
+if bullSig and probOnInput
+    float capStrength = bullStrength[confirmInput]
+    string dotSz = getDotSize(capStrength)
+    float dotTr = getDotTransp(capStrength)
+    string tipBase = buildTipBull()
+    label lbl = label.new(bar_index, dotLaneBull, bullGlyph, style = label.style_none, color = color.new(chart.bg_color, 100), textcolor = color.new(COLOR_BULL, dotTr), size = dotSz, tooltip = tipBase + "\nOutcome after " + str.tostring(horizonInput) + "b: pending…")
+    array.push(bullDotLabels, lbl)
+    array.push(bullDotBars, bar_index)
+    array.push(bullDotBase, tipBase)
+    if array.size(bullDotLabels) > 400
+        label.delete(array.shift(bullDotLabels))
+        array.shift(bullDotBars)
+        array.shift(bullDotBase)
+
+if bearSig and probOnInput
+    float capStrengthB = bearStrength[confirmInput]
+    string dotSzB = getDotSize(capStrengthB)
+    float dotTrB = getDotTransp(capStrengthB)
+    string tipBaseB = buildTipBear()
+    label lblB = label.new(bar_index, dotLaneBear, bearGlyph, style = label.style_none, color = color.new(chart.bg_color, 100), textcolor = color.new(COLOR_BEAR, dotTrB), size = dotSzB, tooltip = tipBaseB + "\nOutcome after " + str.tostring(horizonInput) + "b: pending…")
+    array.push(bearDotLabels, lblB)
+    array.push(bearDotBars, bar_index)
+    array.push(bearDotBase, tipBaseB)
+    if array.size(bearDotLabels) > 400
+        label.delete(array.shift(bearDotLabels))
+        array.shift(bearDotBars)
+        array.shift(bearDotBase)
+
+if barstate.isconfirmed and probOnInput
+    int nBull = array.size(bullDotBars)
+    if nBull > 0
+        int targetBar = bar_index - horizonInput
+        for k = 0 to nBull - 1
+            if array.get(bullDotBars, k) == targetBar
+                float outcome = (close - close[horizonInput]) / close[horizonInput] * 100.0
+                string outStr = outcome >= 0 ? "+" + str.tostring(outcome, "0.00") + "%" : str.tostring(outcome, "0.00") + "%"
+                label.set_tooltip(array.get(bullDotLabels, k), array.get(bullDotBase, k) + "\nOutcome after " + str.tostring(horizonInput) + "b: " + outStr + " (in signal direction)")
+    int nBear = array.size(bearDotBars)
+    if nBear > 0
+        int targetBarB = bar_index - horizonInput
+        for k = 0 to nBear - 1
+            if array.get(bearDotBars, k) == targetBarB
+                float outcomeB = -(close - close[horizonInput]) / close[horizonInput] * 100.0
+                string outStrB = outcomeB >= 0 ? "+" + str.tostring(outcomeB, "0.00") + "%" : str.tostring(outcomeB, "0.00") + "%"
+                label.set_tooltip(array.get(bearDotLabels, k), array.get(bearDotBase, k) + "\nOutcome after " + str.tostring(horizonInput) + "b: " + outStrB + " (in signal direction)")
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Plotting
+//---------------------------------------------------------------------------------------------------------------------{
+
+pGlowA = plot(vwapVal, "GlowA", color = glowInput ? color.new(cMain, 65) : na, linewidth = 7, display = display.none, editable = false)
+pGlowB = plot(vwapVal, "GlowB", color = glowInput ? color.new(cMain, 80) : na, linewidth = 12, display = display.none, editable = false)
+pGlowC = plot(vwapVal, "GlowC", color = glowInput ? color.new(cMain, 90) : na, linewidth = 18, display = display.none, editable = false)
+
+pVwap = plot(vwapVal, "AVWAP", color = cMain, linewidth = 2)
+
+pB1Up = plot(band1Up, "Band +1σ", color = color.new(COLOR_BEAR, 50), linewidth = 1)
+pB1Dn = plot(band1Dn, "Band −1σ", color = color.new(COLOR_BULL, 50), linewidth = 1)
+pB2Up = plot(band2Up, "Band +2σ", color = color.new(COLOR_BEAR, 35), linewidth = 2)
+pB2Dn = plot(band2Dn, "Band −2σ", color = color.new(COLOR_BULL, 35), linewidth = 2)
+
+pClose = plot(close, "Close ref", color = na, editable = false)
+fill(pVwap, pClose, top_value = math.max(vwapVal, close), bottom_value = math.min(vwapVal, close), top_color = color.new(cMain, 18), bottom_color = color.new(cMain, 90))
+
+fill(pB1Up, pB2Up, top_value = band2Up, bottom_value = band1Up, top_color = glowInput ? color.new(COLOR_BEAR, 90) : na, bottom_color = glowInput ? color.new(COLOR_BEAR, 96) : na)
+fill(pB1Dn, pB2Dn, top_value = band1Dn, bottom_value = band2Dn, top_color = glowInput ? color.new(COLOR_BULL, 96) : na, bottom_color = glowInput ? color.new(COLOR_BULL, 90) : na)
+
+plot(htfOnInput ? htfVwap : na, "HTF AVWAP", color = color.new(chart.fg_color, 60), linewidth = 1, style = plot.style_line)
+
+plot(bullSig ? dotLaneBull : na, "Bull signal history", color = color.new(COLOR_BULL, 40), style = plot.style_circles, linewidth = 2)
+plot(bearSig ? dotLaneBear : na, "Bear signal history", color = color.new(COLOR_BEAR, 40), style = plot.style_circles, linewidth = 2)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Probability Cone
+//---------------------------------------------------------------------------------------------------------------------{
+
+var box coneBullBox = na
+var box coneBullMedBox = na
+var label coneBullLbl = na
+var box coneBearBox = na
+var box coneBearMedBox = na
+var label coneBearLbl = na
+
+var int lastBullBar = na
+var float lastBullBase = na
+var int lastBearBar = na
+var float lastBullMedRet = na
+var float lastBullP16 = na
+var float lastBullP84 = na
+var float lastBearBase = na
+var float lastBearMedRet = na
+var float lastBearP16 = na
+var float lastBearP84 = na
+
+if bullSig and probOnInput
+    lastBullBar := bar_index
+    lastBullBase := vwapVal
+    lastBullMedRet := bMed
+    lastBullP16 := bP16
+    lastBullP84 := bP84
+
+if bearSig and probOnInput
+    lastBearBar := bar_index
+    lastBearBase := vwapVal
+    lastBearMedRet := eMed
+    lastBearP16 := eP16
+    lastBearP84 := eP84
+
+float refHi50 = ta.highest(close, 50)
+float refHi20 = ta.highest(close, 20)
+float refLo50 = ta.lowest(close, 50)
+recentRange = refHi50 - refLo50
+rangeScale = recentRange > 0 ? recentRange / 100.0 : close * 0.01
+
+if barstate.islast and probOnInput and coneOnInput
+    box.delete(coneBullBox)
+    box.delete(coneBullMedBox)
+    label.delete(coneBullLbl)
+    box.delete(coneBearBox)
+    box.delete(coneBearMedBox)
+    label.delete(coneBearLbl)
+    if not na(lastBullBar) and not na(lastBullBase) and bN >= minSamplesInput
+        int coneRight = lastBullBar + horizonInput
+        float coneTop = lastBullBase + lastBullP84 * rangeScale
+        float coneBott = lastBullBase + lastBullP16 * rangeScale
+        float coneMed = lastBullBase + lastBullMedRet * rangeScale
+        coneBullBox := box.new(lastBullBar, coneTop, coneRight, coneBott, border_color = color.new(COLOR_BULL, 50), bgcolor = color.new(COLOR_BULL, 82))
+        coneBullMedBox := box.new(lastBullBar, coneMed + rangeScale * 0.05, coneRight, coneMed - rangeScale * 0.05, border_color = color.new(COLOR_BULL, 20), bgcolor = color.new(COLOR_BULL, 20))
+        coneBullLbl := label.new(coneRight, coneTop, "med " + (lastBullMedRet >= 0 ? "+" : "") + str.tostring(lastBullMedRet, "0.00") + "%", style = label.style_label_left, color = color.new(chart.bg_color, 100), textcolor = COLOR_BULL, size = size.small)
+    if not na(lastBearBar) and not na(lastBearBase) and eN >= minSamplesInput
+        int coneRightB = lastBearBar + horizonInput
+        float coneTopB = lastBearBase + eP84 * rangeScale
+        float coneBotB = lastBearBase + eP16 * rangeScale
+        float coneMedB = lastBearBase + lastBearMedRet * rangeScale
+        coneBearBox := box.new(lastBearBar, coneTopB, coneRightB, coneBotB, border_color = color.new(COLOR_BEAR, 50), bgcolor = color.new(COLOR_BEAR, 82))
+        coneBearMedBox := box.new(lastBearBar, coneMedB + rangeScale * 0.05, coneRightB, coneMedB - rangeScale * 0.05, border_color = color.new(COLOR_BEAR, 20), bgcolor = color.new(COLOR_BEAR, 20))
+        coneBearLbl := label.new(coneRightB, coneTopB, "med " + (lastBearMedRet >= 0 ? "+" : "") + str.tostring(lastBearMedRet, "0.00") + "%", style = label.style_label_left, color = color.new(chart.bg_color, 100), textcolor = COLOR_BEAR, size = size.small)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Distribution Panel
+//---------------------------------------------------------------------------------------------------------------------{
+
+var array<box> distBoxes = array.new<box>()
+var polyline gaussLine = na
+var label distZeroLbl = na
+var label distMedLbl = na
+var label distLiveLbl = na
+var label distGathLbl = na
+var label distZeroLineLbl = na
+var line distZeroLine = na
+var line distMedLine = na
+var line distLiveLine = na
+
+if barstate.islast and probOnInput and distOnInput
+    if array.size(distBoxes) > 0
+        for bi = 0 to array.size(distBoxes) - 1
+            box.delete(array.get(distBoxes, bi))
+    array.clear(distBoxes)
+    polyline.delete(gaussLine)
+    label.delete(distZeroLbl)
+    label.delete(distMedLbl)
+    label.delete(distLiveLbl)
+    label.delete(distGathLbl)
+    label.delete(distZeroLineLbl)
+    line.delete(distZeroLine)
+    line.delete(distMedLine)
+    line.delete(distLiveLine)
+    bool showBull = not na(lastBullBar) and (na(lastBearBar) or lastBullBar >= lastBearBar)
+    array<float> activeArr = showBull ? probArrBull : probArrBear
+    string dirTag = showBull ? "bull" : "bear"
+    int pN = array.size(activeArr)
+    if pN < minSamplesInput
+        distGathLbl := label.new(bar_index + DIST_X_START + KDE_BINS / 2, refHi20, dirTag + " · gathering — n=" + str.tostring(pN), style = label.style_label_center, color = color.new(chart.bg_color, 35), textcolor = chart.fg_color, size = size.small)
+    else
+        float pMed = showBull ? bMed : eMed
+        float pP16 = showBull ? bP16 : eP16
+        float pP84 = showBull ? bP84 : eP84
+        float pAvg = array.avg(activeArr)
+        float pStdev = nz(array.stdev(activeArr), math.abs(pP84 - pP16) / 2.0)
+        float halfBand = math.max(0.01, math.abs(pP84 - pP16) / 2.0)
+        float domainLow = pMed - 2.5 * halfBand
+        float domainHigh = pMed + 2.5 * halfBand
+        float domainWidth = domainHigh - domainLow
+        float panelHeight = PANEL_FRAC * (refHi50 - refLo50)
+        float panelBase = refHi50 + panelHeight * 0.1
+        float panelTop = panelBase + panelHeight
+        int panelXStart = bar_index + DIST_X_START
+        float bw = math.max(1.06 * nz(pStdev, halfBand) * math.pow(pN, -0.2), domainWidth / KDE_BINS)
+        array<float> kdeVals = array.new<float>(KDE_BINS, 0.0)
+        float kdeMax = 0.001
+        for bin = 0 to KDE_BINS - 1
+            float xCentre = domainLow + (bin + 0.5) * domainWidth / KDE_BINS
+            float dens = 0.0
+            for si = 0 to pN - 1
+                float samp = array.get(activeArr, si)
+                float zval = (xCentre - samp) / bw
+                dens += math.exp(-0.5 * zval * zval)
+            dens /= pN
+            array.set(kdeVals, bin, dens)
+            if dens > kdeMax
+                kdeMax := dens
+        for bin = 0 to KDE_BINS - 1
+            float normDens = array.get(kdeVals, bin) / kdeMax
+            if normDens > 0.02
+                int bx = panelXStart + bin
+                float xFrac = (bin + 0.5) / KDE_BINS
+                color sliceC = heatCol(xFrac, 0)
+                float h = normDens * panelHeight
+                float bTop = panelBase + h
+                float seg1Bot = panelBase + h * 0.62
+                float seg2Bot = panelBase + h * 0.30
+                box b1 = box.new(bx, bTop, bx + 1, seg1Bot, border_color = na, bgcolor = color.new(sliceC, 28))
+                array.push(distBoxes, b1)
+                box b2 = box.new(bx, seg1Bot, bx + 1, seg2Bot, border_color = na, bgcolor = color.new(sliceC, 55))
+                array.push(distBoxes, b2)
+                box b3 = box.new(bx, seg2Bot, bx + 1, panelBase, border_color = na, bgcolor = color.new(sliceC, 80))
+                array.push(distBoxes, b3)
+        array<chart.point> gaussPts = array.new<chart.point>()
+        for gi = 0 to 24
+            float gx = domainLow + gi * domainWidth / 24.0
+            float gzval = (gx - pAvg) / math.max(pStdev, 0.001)
+            float gpdf = math.exp(-0.5 * gzval * gzval)
+            float gY = panelBase + gpdf * panelHeight
+            int gXbar = panelXStart + math.round(gi * KDE_BINS / 24.0)
+            array.push(gaussPts, chart.point.from_index(gXbar, gY))
+        gaussLine := polyline.new(gaussPts, curved = true, line_color = color.new(chart.fg_color, 45), line_width = 1)
+        float zeroFrac = domainWidth > 0 ? (0.0 - domainLow) / domainWidth : 0.5
+        int zeroX = panelXStart + math.round(zeroFrac * KDE_BINS)
+        distZeroLine := line.new(zeroX, panelBase, zeroX, panelBase + panelHeight * 0.5, color = color.new(color.gray, 40), style = line.style_dotted, width = 1)
+        distZeroLineLbl := label.new(zeroX, panelBase, "0", style = label.style_label_upper_right, color = color.new(chart.bg_color, 100), textcolor = color.new(color.gray, 40), size = size.tiny)
+        float medFrac = domainWidth > 0 ? (pMed - domainLow) / domainWidth : 0.5
+        int medX = panelXStart + math.round(medFrac * KDE_BINS)
+        distMedLine := line.new(medX, panelBase, medX, panelBase + panelHeight * 0.9, color = color.new(COLOR_BULL, 20), style = line.style_dashed, width = 1)
+        string medStr = pMed >= 0 ? "+" + str.tostring(pMed, "0.00") + "%" : str.tostring(pMed, "0.00") + "%"
+        distMedLbl := label.new(medX, panelTop, dirTag + " · med " + medStr, style = label.style_label_center, color = color.new(chart.bg_color, 35), textcolor = COLOR_BULL, size = size.small)
+        if not na(lastBullBar) or not na(lastBearBar)
+            int activeSigBar = showBull ? lastBullBar : lastBearBar
+            float activeSigBase = showBull ? lastBullBase : lastBearBase
+            bool inHorizon = not na(activeSigBar) and (bar_index - activeSigBar) <= horizonInput
+            if inHorizon and not na(activeSigBase) and activeSigBase > 0
+                float liveRet = (close - activeSigBase) / activeSigBase * 100.0
+                float liveFrac = domainWidth > 0 ? (liveRet - domainLow) / domainWidth : 0.5
+                int liveX = panelXStart + math.round(math.max(0.0, math.min(1.0, liveFrac)) * KDE_BINS)
+                distLiveLine := line.new(liveX, panelBase, liveX, panelBase + panelHeight * 0.70, color = color.new(chart.fg_color, 20), style = line.style_solid, width = 1)
+                string liveStr = liveRet >= 0 ? "+" + str.tostring(liveRet, "0.00") + "%" : str.tostring(liveRet, "0.00") + "%"
+                distLiveLbl := label.new(liveX, panelBase + panelHeight * 0.72, "live " + liveStr, style = label.style_label_center, color = color.new(chart.bg_color, 35), textcolor = chart.fg_color, size = size.tiny)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Mini-Readout
+//---------------------------------------------------------------------------------------------------------------------{
+
+var array<label> readoutLabels = array.new<label>()
+
+if barstate.islast and probOnInput and readoutOnInput
+    if array.size(readoutLabels) > 0
+        for ri = 0 to array.size(readoutLabels) - 1
+            label.delete(array.get(readoutLabels, ri))
+    array.clear(readoutLabels)
+    float recentRange2 = refHi50 - refLo50
+    float rowStep = recentRange2 * 0.105
+    float readoutBase = refLo50 - rowStep * 2.0
+    int readoutX = bar_index + DIST_X_START + KDE_BINS / 2
+    color bgCol = color.new(chart.bg_color, 15)
+    string dirTxt = isBullish ? "above VWAP" : "below VWAP"
+    string row0txt = "AVWAP · " + str.tostring(vwapVal, "0.00") + " · " + dirTxt + " · " + zoneStr
+    string band2UpStr = not na(band2Up) ? str.tostring(band2Up, "0.00") : "n/a"
+    string band2DnStr = not na(band2Dn) ? str.tostring(band2Dn, "0.00") : "n/a"
+    string row1txt = "+2σ " + band2UpStr + "  −2σ " + band2DnStr
+    string row2txt = ""
+    if bN < minSamplesInput
+        row2txt := "Bull fade (" + str.tostring(horizonInput) + "b n=" + str.tostring(bN) + "):  gathering — n=" + str.tostring(bN)
+    else
+        row2txt := "Bull fade (" + str.tostring(horizonInput) + "b n=" + str.tostring(bN) + "):  " + str.tostring(math.round(bWR)) + "% ↑  med " + (bMed >= 0 ? "+" : "") + str.tostring(bMed, "0.00") + "%  1σ " + str.tostring(bP16, "0.00") + "…" + str.tostring(bP84, "0.00") + "%"
+    string row3txt = ""
+    if eN < minSamplesInput
+        row3txt := "Bear fade (" + str.tostring(horizonInput) + "b n=" + str.tostring(eN) + "):  gathering — n=" + str.tostring(eN)
+    else
+        row3txt := "Bear fade (" + str.tostring(horizonInput) + "b n=" + str.tostring(eN) + "):  " + str.tostring(math.round(eWR)) + "% ↑  med " + (eMed >= 0 ? "+" : "") + str.tostring(eMed, "0.00") + "%  1σ " + str.tostring(eP16, "0.00") + "…" + str.tostring(eP84, "0.00") + "%"
+    bool lastWasBull = not na(lastBullBar) and (na(lastBearBar) or lastBullBar >= lastBearBar)
+    string readVerdict = lastWasBull ? bullVerdict : bearVerdict
+    string readDir = lastWasBull ? "Bull fade" : "Bear fade"
+    int barsAgo = lastWasBull ? (not na(lastBullBar) ? bar_index - lastBullBar : 0) : (not na(lastBearBar) ? bar_index - lastBearBar : 0)
+    color readColor = bullBacked and bearBacked ? color.new(COLOR_BULL, 0) : lastWasBull ? color.new(COLOR_BULL, 0) : color.new(COLOR_BEAR, 0)
+    string row4txt = bullBacked and bearBacked ? "Read: magnet regime — BOTH fades backed by recent form (bull " + str.tostring(math.round(bRWR)) + "% ↑ · bear " + str.tostring(math.round(eRWR)) + "% ↑)" : "Read: " + readDir + " " + str.tostring(barsAgo) + "b ago — " + readVerdict
+    string row4bTxt = "Edge last seen — bull " + bullEdgeStr + " · bear " + bearEdgeStr
+    float roGap = recentRange2 * 0.16
+    label rA = label.new(readoutX, readoutBase, row0txt + "\n" + row1txt, style = label.style_label_center, color = bgCol, textcolor = color.new(chart.fg_color, 5), size = size.normal)
+    array.push(readoutLabels, rA)
+    label rB = label.new(readoutX, readoutBase - roGap, row2txt, style = label.style_label_center, color = bgCol, textcolor = color.new(COLOR_BULL, 5), size = size.normal)
+    array.push(readoutLabels, rB)
+    label rC = label.new(readoutX, readoutBase - roGap * 1.8, row3txt, style = label.style_label_center, color = bgCol, textcolor = color.new(COLOR_BEAR, 5), size = size.normal)
+    array.push(readoutLabels, rC)
+    label rD = label.new(readoutX, readoutBase - roGap * 3.1, row4txt + "\n" + row4bTxt + "\nEssentials · what happened after past band touches on this chart, not a prediction", style = label.style_label_center, color = bgCol, textcolor = readColor, size = size.small)
+    array.push(readoutLabels, rD)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Alerts
+//---------------------------------------------------------------------------------------------------------------------{
+
+alertcondition(bullSig, title = "AVWAP: Bull fade signal (below −2σ)", message = "AVWAP Magnetized: close below lower 2σ band — bullish fade setup. Description of past signals, not a prediction.")
+alertcondition(bearSig, title = "AVWAP: Bear fade signal (above +2σ)", message = "AVWAP Magnetized: close above upper 2σ band — bearish fade setup. Description of past signals, not a prediction.")
+
+bullReentry = not na(band2Dn) and close >= band2Dn and close[1] < band2Dn[1] and barstate.isconfirmed
+bearReentry = not na(band2Up) and close <= band2Up and close[1] > band2Up[1] and barstate.isconfirmed
+alertcondition(bullReentry, title = "AVWAP: Price re-enters above −2σ", message = "AVWAP Magnetized: price crossed back above lower 2σ band — potential mean reversion in progress. Description of past signals, not a prediction.")
+alertcondition(bearReentry, title = "AVWAP: Price re-enters below +2σ", message = "AVWAP Magnetized: price crossed back below upper 2σ band — potential mean reversion in progress. Description of past signals, not a prediction.")
+
+bullInner = not na(band1Dn) and close < band1Dn and close[1] >= band1Dn[1] and barstate.isconfirmed
+bearInner = not na(band1Up) and close > band1Up and close[1] <= band1Up[1] and barstate.isconfirmed
+alertcondition(bullInner, title = "AVWAP: Close below −1σ band", message = "AVWAP Magnetized: close crossed below the −1σ band. Description of past signals, not a prediction.")
+alertcondition(bearInner, title = "AVWAP: Close above +1σ band", message = "AVWAP Magnetized: close crossed above the +1σ band. Description of past signals, not a prediction.")
+
+vwapCrossUp = not na(vwapVal) and close > vwapVal and close[1] <= vwapVal[1] and barstate.isconfirmed
+vwapCrossDown = not na(vwapVal) and close < vwapVal and close[1] >= vwapVal[1] and barstate.isconfirmed
+alertcondition(vwapCrossUp, title = "AVWAP: Price crossed above VWAP", message = "AVWAP Magnetized: price crossed above the anchored VWAP — bullish bias. Description of past signals, not a prediction.")
+alertcondition(vwapCrossDown, title = "AVWAP: Price crossed below VWAP", message = "AVWAP Magnetized: price crossed below the anchored VWAP — bearish bias. Description of past signals, not a prediction.")
+
+alertcondition(bullSig and bullBacked, title = "AVWAP: Bull fade (history-backed)", message = "AVWAP Magnetized: bull fade signal AND recent history on this chart backed follow-through. Description of past signals, not a prediction.")
+alertcondition(bearSig and bearBacked, title = "AVWAP: Bear fade (history-backed)", message = "AVWAP Magnetized: bear fade signal AND recent history on this chart backed follow-through. Description of past signals, not a prediction.")
+alertcondition(bullSig and bullBacked and bullStrength[confirmInput] >= 0.9, title = "AVWAP: Strong bull fade (history-backed)", message = "AVWAP Magnetized: strong bull fade signal (tier 3 depth) AND recent history backed follow-through. Description of past signals, not a prediction.")
+alertcondition(bearSig and bearBacked and bearStrength[confirmInput] >= 0.9, title = "AVWAP: Strong bear fade (history-backed)", message = "AVWAP Magnetized: strong bear fade signal (tier 3 depth) AND recent history backed follow-through. Description of past signals, not a prediction.")
+
+alertcondition(isAnchor, title = "AVWAP: Anchor Reset", message = "AVWAP Magnetized: The VWAP anchor has reset.")
+
+//---------------------------------------------------------------------------------------------------------------------}

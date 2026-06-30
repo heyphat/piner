@@ -1,0 +1,124 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © algo_aakash
+// Original code by @algo_aakash on TradingView.com
+// Refactored, visually updated, and alert-optimized by LuxAlgo Quant Agent
+
+//@version=6
+indicator(
+     title            = "Smart Money Stop Hunt Detector [algo_aakash]",
+     shorttitle       = "SHD [algo_aakash]",
+     overlay          = true,
+     max_boxes_count  = 100,
+     max_labels_count = 100)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Settings
+//---------------------------------------------------------------------------------------------------------------------{
+
+GRP1 = "Detection Settings"
+swingLen      = input.int(10, "Liquidity Swing Length", minval = 3, group = GRP1)
+atrLen        = input.int(14, "ATR Length", group = GRP1)
+atrMultiplier = input.float(0.8, "Minimum Displacement ATR", step = 0.1, group = GRP1)
+
+GRP2 = "Volume Filter"
+useVolume     = input.bool(true, "Use Volume Confirmation", group = GRP2)
+volLength     = input.int(20, "Volume MA Length", group = GRP2)
+volMultiplier = input.float(1.2, "Volume Threshold", step = 0.1, group = GRP2)
+
+GRP3 = "Zone Settings"
+showZones     = input.bool(true, "Show Liquidity Rejection Zones", group = GRP3)
+zoneBars      = input.int(40, "Zone Extension Bars", minval = 5, maxval = 300, group = GRP3)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Constants
+//---------------------------------------------------------------------------------------------------------------------{
+
+COLOR_BULL    = #089981
+COLOR_BEAR    = #f23645
+COLOR_BULL_BG = color.new(COLOR_BULL, 88)
+COLOR_BEAR_BG = color.new(COLOR_BEAR, 88)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Calculations
+//---------------------------------------------------------------------------------------------------------------------{
+
+atrValue = ta.atr(atrLen)
+volumeMA = ta.sma(volume, volLength)
+
+volPass = not useVolume or volume > volumeMA * volMultiplier
+
+highestLiquidity = ta.highest(high[1], swingLen)
+lowestLiquidity  = ta.lowest(low[1], swingLen)
+
+buySideSweep  = high > highestLiquidity and close < highestLiquidity and (high - close) > atrValue * atrMultiplier and volPass
+sellSideSweep = low < lowestLiquidity and close > lowestLiquidity and (close - low) > atrValue * atrMultiplier and volPass
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Visuals
+//---------------------------------------------------------------------------------------------------------------------{
+
+plotshape(
+     sellSideSweep,
+     title     = "Bullish Stop Hunt",
+     style     = shape.triangleup,
+     location  = location.belowbar,
+     size      = size.small,
+     color     = COLOR_BULL,
+     text      = "SH",
+     textcolor = chart.fg_color)
+
+plotshape(
+     buySideSweep,
+     title     = "Bearish Stop Hunt",
+     style     = shape.triangledown,
+     location  = location.abovebar,
+     size      = size.small,
+     color     = COLOR_BEAR,
+     text      = "SH",
+     textcolor = chart.fg_color)
+
+var box bullZone = na
+var box bearZone = na
+
+if showZones and sellSideSweep
+    bullZone := box.new(
+         left         = bar_index,
+         top          = close,
+         right        = bar_index + zoneBars,
+         bottom       = low,
+         bgcolor      = COLOR_BULL_BG,
+         border_color = COLOR_BULL)
+
+if showZones and buySideSweep
+    bearZone := box.new(
+         left         = bar_index,
+         top          = high,
+         right        = bar_index + zoneBars,
+         bottom       = close,
+         bgcolor      = COLOR_BEAR_BG,
+         border_color = COLOR_BEAR)
+
+if not na(bullZone) and close < box.get_bottom(bullZone)
+    box.delete(bullZone)
+    bullZone := na
+
+if not na(bearZone) and close > box.get_top(bearZone)
+    box.delete(bearZone)
+    bearZone := na
+
+barcolor(sellSideSweep ? COLOR_BULL : buySideSweep ? COLOR_BEAR : na)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Alerts
+//---------------------------------------------------------------------------------------------------------------------{
+
+alertcondition(sellSideSweep, "Bullish Stop Hunt", "Bullish Stop Hunt detected on {{ticker}} {{interval}}")
+alertcondition(buySideSweep, "Bearish Stop Hunt", "Bearish Stop Hunt detected on {{ticker}} {{interval}}")
+alertcondition(sellSideSweep or buySideSweep, "Any Stop Hunt", "Stop Hunt detected on {{ticker}} {{interval}}")
+
+if sellSideSweep
+    alert("Bullish Stop Hunt detected on " + syminfo.ticker, alert.freq_once_per_bar_close)
+else if buySideSweep
+    alert("Bearish Stop Hunt detected on " + syminfo.ticker, alert.freq_once_per_bar_close)
+
+//---------------------------------------------------------------------------------------------------------------------}

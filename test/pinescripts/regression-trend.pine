@@ -1,0 +1,265 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © AlgoAlpha
+// Original code by @AlgoAlpha on TradingView.com
+// Refactored, visually updated, and alert-optimized by LuxAlgo Quant Agent
+
+//@version=6
+indicator("Regression Trend Reversal Signals & Forecasts [AlgoAlpha]", "AlgoAlpha - Regression Trend Reversal", overlay = true, behind_chart = false, max_labels_count = 500, max_lines_count = 100)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Inputs
+//---------------------------------------------------------------------------------------------------------------------{
+
+gMain = "Method & Window"
+gSmth = "Smoothing (LOESS / Nadaraya-Watson)"
+gPoly = "Polynomial"
+gKlm  = "Kalman Filter"
+gFc   = "Forecast"
+gApp  = "Appearance"
+
+src        = input.source(close, "Source", group = gMain, tooltip = "The price the line is fitted to. 'close' is normal; try hl2 or ohlc4 for a slightly smoother starting point.")
+methodSel  = input.string("Linear", "Method", group = gMain, options = ["Linear", "Theil-Sen", "Local Linear (LOESS)", "Kalman", "Polynomial", "Nadaraya-Watson"], tooltip = "Which engine draws the line. Linear / Theil-Sen = straight trend (Theil-Sen shrugs off spikes). LOESS / Nadaraya-Watson = smooth curve that hugs price. Kalman = adaptive real-time line. Polynomial = curved trend.")
+length     = input.int(50, "Window Length", minval = 3, group = gMain, active = methodSel != "Kalman", tooltip = "How many bars the line looks back over. Higher = smoother and slower to turn; lower = tighter to price and more reactive. Kalman is recursive and ignores this.")
+
+smoothness = input.float(30.0, "Smoothness", minval = 1.0, maxval = 100.0, step = 1.0, group = gSmth, active = methodSel == "Local Linear (LOESS)" or methodSel == "Nadaraya-Watson", tooltip = "Width of the averaging window around the current bar. Higher = smoother, rounder line that ignores small wiggles; lower = line follows price more closely and reacts faster.")
+
+degree     = input.int(2, "Degree", minval = 1, maxval = 3, group = gPoly, active = methodSel == "Polynomial", tooltip = "Curve complexity. 1 = straight line, 2 = one bend (U / ∩ shape), 3 = S-curve. Higher captures more shape but can swing wildly at the right-hand edge.")
+
+kProcess   = input.float(0.01, "Process Noise", minval = 0.0, step = 0.001, group = gKlm, active = methodSel == "Kalman", tooltip = "How freely the line may change direction. Higher = snappier, follows price faster; lower = smoother with more lag.")
+kMeasure   = input.float(1.0, "Measurement Noise", minval = 0.0001, step = 0.1, group = gKlm, active = methodSel == "Kalman", tooltip = "How much each new price is distrusted. Higher = ignores noise, very smooth; lower = reacts to almost every move.")
+
+showFc       = input.bool(true, "Show Forecast", group = gFc, tooltip = "Extend the selected regression into the future using its current direction (slope).")
+forecastBars = input.int(40, "Forecast Bars", minval = 1, maxval = 500, group = gFc, active = showFc, tooltip = "How many bars to project forward. Longer = further but less reliable.")
+fcStyleSel   = input.string("Solid", "Style", options = ["Solid", "Dashed", "Dotted"], group = gFc, active = showFc, tooltip = "Line style of the forecast projection (the line and its bands).")
+fcWidth      = input.int(2, "Width", minval = 1, group = gFc, active = showFc, tooltip = "Thickness of the forecast projection line.")
+showFcLbl    = input.bool(true, "Label projected value", group = gFc, active = showFc, tooltip = "Print the projected price in a label at the end of the forecast line.")
+
+showReg   = input.bool(true, "Show Regression Line", group = gApp, tooltip = "Show or hide the main regression line.")
+showBands = input.bool(true, "Show Bands", group = gApp, tooltip = "Channel built from how far price strays from the regression line. Width = standard deviation of (price − regression), so it adapts to whichever method is selected: a tight-tracking fit gives narrow bands, a smooth/laggy fit gives wide ones.")
+colGreen  = input.color(#089981, "Bullish Colour", group = gApp, tooltip = "Color used when the regression is rising — the line, its forward projection, and the band fill.")
+colRed    = input.color(#f23645, "Bearish Colour", group = gApp, tooltip = "Color used when the regression is falling — the line, its forward projection, and the band fill.")
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Constants & Variables
+//---------------------------------------------------------------------------------------------------------------------{
+
+BAND_LEN   = 50
+BAND_MULT  = 2.0
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Functions
+//---------------------------------------------------------------------------------------------------------------------{
+
+f_linreg(s, len) =>
+    float sumX  = 0.0
+    float sumY  = 0.0
+    float sumXY = 0.0
+    float sumX2 = 0.0
+    for i = 0 to len - 1
+        float x = len - 1 - i
+        float y = s[i]
+        sumX  += x
+        sumY  += y
+        sumXY += x * y
+        sumX2 += x * x
+    float denom     = len * sumX2 - sumX * sumX
+    float slope     = denom != 0.0 ? (len * sumXY - sumX * sumY) / denom : 0.0
+    float intercept = (sumY - slope * sumX) / len
+    [slope * (len - 1) + intercept, slope]
+
+f_theilsen(s, len) =>
+    array<float> slopes = array.new_float()
+    for i = 0 to len - 2
+        for j = i + 1 to len - 1
+            float dx = j - i
+            float dy = s[i] - s[j]
+            if dx != 0
+                array.push(slopes, dy / dx)
+    float slope = array.size(slopes) > 0 ? array.median(slopes) : 0.0
+    array<float> inter = array.new_float()
+    for i = 0 to len - 1
+        float x = len - 1 - i
+        array.push(inter, s[i] - slope * x)
+    float intercept = array.median(inter)
+    [slope * (len - 1) + intercept, slope]
+
+f_locallinear(s, len, bw) =>
+    float Sw   = 0.0
+    float Swx  = 0.0
+    float Swy  = 0.0
+    float Swxx = 0.0
+    float Swxy = 0.0
+    for i = 0 to len - 1
+        float x = len - 1 - i
+        float y = s[i]
+        float w = math.exp(-0.5 * (i / bw) * (i / bw))
+        Sw   += w
+        Swx  += w * x
+        Swy  += w * y
+        Swxx += w * x * x
+        Swxy += w * x * y
+    float denom     = Sw * Swxx - Swx * Swx
+    float slope     = denom != 0.0 ? (Sw * Swxy - Swx * Swy) / denom : 0.0
+    float intercept = (Swy - slope * Swx) / Sw
+    [slope * (len - 1) + intercept, slope]
+
+f_kalman(s, q, r) =>
+    var float l   = na
+    var float b   = 0.0
+    var float P00 = 1.0
+    var float P01 = 0.0
+    var float P11 = 1.0
+    if na(l)
+        l := s
+    else
+        float lPred = l + b
+        float bPred = b
+        float p00 = P00 + 2.0 * P01 + P11 + q
+        float p01 = P01 + P11
+        float p11 = P11 + q
+        float yk = s - lPred
+        float S  = p00 + r
+        float K0 = p00 / S
+        float K1 = p01 / S
+        l   := lPred + K0 * yk
+        b   := bPred + K1 * yk
+        P00 := (1.0 - K0) * p00
+        P01 := (1.0 - K0) * p01
+        P11 := p11 - K1 * p01
+    [l, b]
+
+f_poly(s, len, deg) =>
+    float reg = na
+    float slp = na
+    if len > deg
+        matrix<float> A  = matrix.new<float>(deg + 1, deg + 1, 0.0)
+        matrix<float> Bv = matrix.new<float>(deg + 1, 1,       0.0)
+        for i = 0 to len - 1
+            float t = (2.0 * (len - 1 - i)) / (len - 1) - 1.0
+            float y = s[i]
+            for rr = 0 to deg
+                for cc = 0 to deg
+                    int e = rr + cc
+                    float p = e == 0 ? 1.0 : math.pow(t, e)
+                    matrix.set(A, rr, cc, matrix.get(A, rr, cc) + p)
+                float pr = rr == 0 ? 1.0 : math.pow(t, rr)
+                matrix.set(Bv, rr, 0, matrix.get(Bv, rr, 0) + pr * y)
+        matrix<float> Ainv   = matrix.inv(A)
+        matrix<float> coeffs = matrix.mult(Ainv, Bv)
+        float v  = 0.0
+        float dv = 0.0
+        for rr = 0 to deg
+            float c = matrix.get(coeffs, rr, 0)
+            v  += c
+            dv += rr * c
+        reg := v
+        slp := dv * 2.0 / (len - 1)
+    [reg, slp]
+
+f_nadaraya(s, len, bw) =>
+    float num = 0.0
+    float den = 0.0
+    for i = 0 to len - 1
+        float w = math.exp(-0.5 * (i / bw) * (i / bw))
+        num += w * s[i]
+        den += w
+    [den != 0.0 ? num / den : s, 0.0]
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Main Logic
+//---------------------------------------------------------------------------------------------------------------------{
+
+sm = smoothness / 100.0
+bw = math.max(0.5, sm * length)
+
+[reg, slp] = switch methodSel
+    "Linear"               => f_linreg(src, length)
+    "Theil-Sen"            => f_theilsen(src, length)
+    "Local Linear (LOESS)" => f_locallinear(src, length, bw)
+    "Kalman"               => f_kalman(src, kProcess, kMeasure)
+    "Polynomial"           => f_poly(src, length, degree)
+    "Nadaraya-Watson"      => f_nadaraya(src, length, bw)
+    => [float(na), float(na)]
+
+dirCol   = reg > reg[3] ? colGreen : colRed
+bandDev  = ta.stdev(src - reg, BAND_LEN)
+upper    = ta.wma(reg + BAND_MULT * bandDev, 7)
+lower    = ta.wma(reg - BAND_MULT * bandDev, 7)
+upperMid = reg + 0.5 * BAND_MULT * bandDev
+lowerMid = reg - 0.5 * BAND_MULT * bandDev
+
+m  = plot(showReg ? reg : na, "Regression", dirCol, 3)
+u  = plot(showBands ? upper : na, "Upper Band", color.new(colRed, 40))
+um = plot(showBands ? upperMid : na, "Upper Mid", color.new(colRed, 60), display = display.none)
+lm = plot(showBands ? lowerMid : na, "Lower Mid", color.new(colGreen, 60), display = display.none)
+l  = plot(showBands ? lower : na, "Lower Band", color.new(colGreen, 40))
+
+fill(um, u, upper, upperMid, color.new(colRed, 70), color.new(colRed, 90))
+fill(um, m, upperMid, reg, color.new(colRed, 90), color.new(colRed, 100))
+fill(lm, l, lowerMid, lower, color.new(colGreen, 90), color.new(colGreen, 70))
+fill(lm, m, reg, lowerMid, color.new(colGreen, 100), color.new(colGreen, 90))
+
+candleBase  = close >= reg ? color.from_gradient(close, reg, upper, chart.fg_color, colGreen) : color.from_gradient(close, lower, reg, colRed, chart.fg_color)
+candleCol   = color.new(candleBase, color.t(candleBase) + (close < open ? 20 : 0))
+plotcandle(open, high, low, close, "Candles", candleCol, wickcolor = candleCol, bordercolor = candleCol)
+
+topSig = close > upper and close < open and close[1] > open[1] and close[1] > upper[1]
+botSig = close < lower and close > open and close[1] < open[1] and close[1] < lower[1]
+plotchar(topSig, "Bearish Reversal", "◆", location.abovebar, colRed, size = size.tiny)
+plotchar(botSig, "Bullish Reversal", "◆", location.belowbar, colGreen, size = size.tiny)
+
+regUp  = reg > reg[3]
+flipUp = regUp and not regUp[1]
+flipDn = not regUp and regUp[1]
+plotshape(flipUp ? lower : na, "Bullish Signal", shape.labelup,   location.absolute, colGreen, size = size.small, text = "▲", textcolor = chart.fg_color)
+plotshape(flipDn ? upper : na, "Bearish Signal", shape.labeldown, location.absolute, colRed,   size = size.small, text = "▼", textcolor = chart.fg_color)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Forecast
+//---------------------------------------------------------------------------------------------------------------------{
+
+fcStyle = fcStyleSel == "Solid" ? line.style_solid : fcStyleSel == "Dashed" ? line.style_dashed : line.style_dotted
+fcDir   = slp >= 0 ? colGreen : colRed
+
+var line     fcLine = na
+var line     fcU    = na
+var line     fcL    = na
+var linefill fcFU   = na
+var linefill fcFL   = na
+var label    fcLbl  = na
+
+if barstate.islast
+    line.delete(fcLine)
+    line.delete(fcU)
+    line.delete(fcL)
+    label.delete(fcLbl)
+    if showFc and not na(reg) and not na(slp)
+        x2   = bar_index + forecastBars
+        yEnd = reg + slp * forecastBars
+        fcLine := line.new(bar_index, reg, x2, yEnd, color = fcDir, width = fcWidth, style = fcStyle)
+        if showBands and not na(bandDev)
+            dev = BAND_MULT * bandDev
+            fcU := line.new(bar_index, upper, x2, yEnd + dev, color = color.new(colRed, 40),   style = fcStyle)
+            fcL := line.new(bar_index, lower, x2, yEnd - dev, color = color.new(colGreen, 40), style = fcStyle)
+            fcFU := linefill.new(fcU, fcLine, color.new(colRed, 90))
+            fcFL := linefill.new(fcLine, fcL, color.new(colGreen, 90))
+        if showFcLbl
+            fcLbl := label.new(x2, yEnd, str.tostring(yEnd, format.mintick),
+                     style = label.style_label_left, color = color.new(fcDir, 80),
+                     textcolor = chart.fg_color, size = size.small)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Alerts
+//---------------------------------------------------------------------------------------------------------------------{
+
+crossUpper = ta.crossover(close, upper)
+crossLower = ta.crossunder(close, lower)
+
+alertcondition(flipUp, "Regression Turned Up", "The regression line has turned up.")
+alertcondition(flipDn, "Regression Turned Down", "The regression line has turned down.")
+alertcondition(botSig, "Bullish Reversal", "A bullish reversal signal has occurred.")
+alertcondition(topSig, "Bearish Reversal", "A bearish reversal signal has occurred.")
+alertcondition(crossUpper, "Price Crossed Above Upper Band", "The close price crossed above the upper band.")
+alertcondition(crossLower, "Price Crossed Below Lower Band", "The close price crossed below the lower band.")
+
+//---------------------------------------------------------------------------------------------------------------------}

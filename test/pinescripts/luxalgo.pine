@@ -1,0 +1,568 @@
+// This work is licensed under a Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0) https://creativecommons.org/licenses/by-nc-sa/4.0/
+// © LuxAlgo (Combined: Fair Value Gap + Liquidity Swings + Previous Highs & Lows)
+
+//@version=5
+indicator("FVG + Liquidity Swings + Previous H/L [Combined]"
+  , overlay = true
+  , max_lines_count = 500
+  , max_labels_count = 500
+  , max_boxes_count = 500)
+
+//==============================================================================
+// FAIR VALUE GAP - Settings
+//==============================================================================
+fvg_enabled = input.bool(true, 'Enable FVG', group = 'Fair Value Gap')
+fvg_thresholdPer = input.float(0, "Threshold %", minval = 0, maxval = 100, step = .1, inline = 'fvg_threshold', group = 'Fair Value Gap')
+fvg_auto = input(false, "Auto", inline = 'fvg_threshold', group = 'Fair Value Gap')
+
+fvg_showLast = input.int(0, 'Unmitigated Levels', minval = 0, group = 'Fair Value Gap')
+fvg_mitigationLevels = input.bool(false, 'Mitigation Levels', group = 'Fair Value Gap')
+
+fvg_tf = input.timeframe('', "Timeframe", group = 'Fair Value Gap')
+
+//FVG Style
+fvg_extend = input.int(20, 'Extend', minval = 0, inline = 'fvg_extend', group = 'FVG Style')
+fvg_dynamic = input(false, 'Dynamic', inline = 'fvg_extend', group = 'FVG Style')
+
+fvg_bullCss = input.color(color.new(#089981, 70), "Bullish FVG", group = 'FVG Style')
+fvg_bearCss = input.color(color.new(#f23645, 70), "Bearish FVG", group = 'FVG Style')
+
+//FVG Dashboard
+fvg_showDash  = input(false, 'Show Dashboard', group = 'FVG Dashboard')
+fvg_dashLoc  = input.string('Top Right', 'Location', options = ['Top Right', 'Bottom Right', 'Bottom Left'], group = 'FVG Dashboard')
+fvg_textSize = input.string('Small', 'Size', options = ['Tiny', 'Small', 'Normal'], group = 'FVG Dashboard')
+
+//==============================================================================
+// LIQUIDITY SWINGS - Settings
+//==============================================================================
+liq_enabled = input.bool(true, 'Enable Liquidity Swings', group = 'Liquidity Swings')
+liq_length = input(14, 'Pivot Lookback', group = 'Liquidity Swings')
+
+liq_area = input.string('Wick Extremity', 'Swing Area', options = ['Wick Extremity', 'Full Range'], group = 'Liquidity Swings')
+
+liq_intraPrecision = input(false, 'Intrabar Precision', inline = 'liq_intrabar', group = 'Liquidity Swings')
+liq_intrabarTf = input.timeframe('1', '', inline = 'liq_intrabar', group = 'Liquidity Swings')
+
+liq_filterOptions = input.string('Count', 'Filter Areas By', options = ['Count', 'Volume'], inline = 'liq_filter', group = 'Liquidity Swings')
+liq_filterValue   = input.float(0, '', inline = 'liq_filter', group = 'Liquidity Swings')
+
+//Liquidity Swings Style
+liq_showTop      = input(true, 'Swing High', inline = 'liq_top', group = 'Liquidity Style')
+liq_topCss       = input(color.red, '', inline = 'liq_top', group = 'Liquidity Style')
+liq_topAreaCss   = input(color.new(color.red, 50), 'Area', inline = 'liq_top', group = 'Liquidity Style')
+
+liq_showBtm      = input(true, 'Swing Low', inline = 'liq_btm', group = 'Liquidity Style')
+liq_btmCss       = input(color.teal, '', inline = 'liq_btm', group = 'Liquidity Style')
+liq_btmAreaCss   = input(color.new(color.teal, 50), 'Area', inline = 'liq_btm', group = 'Liquidity Style')
+
+liq_labelSize = input.string('Tiny', 'Labels Size', options = ['Tiny', 'Small', 'Normal'], group = 'Liquidity Style')
+
+//==============================================================================
+// PREVIOUS HIGHS & LOWS - Settings
+//==============================================================================
+phl_enabled    = input.bool(true, 'Enable Previous H/L', group = 'Previous Highs & Lows')
+phl_showLast   = input.int(4, 'Show Last', minval = 1, group = 'Previous Highs & Lows')
+phl_freq       = input.string('Day', 'Frequency', options = ['Hour', 'Day', 'Week', 'Month', 'Year'], group = 'Previous Highs & Lows')
+phl_areasWidth = input.int(20, 'Areas Width', minval = 0, maxval = 100, group = 'Previous Highs & Lows')
+phl_filter     = input(false, 'Filter Based On Position', tooltip = "Filter out previous highs below the current closing price, and previous low's above it.", group = 'Previous Highs & Lows')
+
+//Previous H/L Style
+phl_showPrevh  = input(true, 'Previous Highs', inline = 'phl_inline1', group = 'Previous H/L Style')
+phl_prevhColor = input(#f23645, '', inline = 'phl_inline1', group = 'Previous H/L Style')
+
+phl_showPrevl  = input(true, 'Previous Lows', inline = 'phl_inline2', group = 'Previous H/L Style')
+phl_prevlColor = input(#089981, '', inline = 'phl_inline2', group = 'Previous H/L Style')
+
+phl_minTransp  = input.float(80, 'Minimum Gradient Transparency', group = 'Previous H/L Style')
+
+phl_showAreas  = input(true, 'Show Areas', inline = 'phl_inline3', group = 'Previous H/L Style')
+phl_topCss     = input(color.new(#f23645, 80), '', inline = 'phl_inline3', group = 'Previous H/L Style')
+phl_btmCss     = input(color.new(#089981, 80), '', inline = 'phl_inline3', group = 'Previous H/L Style')
+
+//==============================================================================
+// FAIR VALUE GAP - UDT's
+//==============================================================================
+type fvg
+    float max
+    float min
+    bool  isbull
+    int   t = time
+
+//==============================================================================
+// SHARED - Variables
+//==============================================================================
+n = bar_index
+
+//==============================================================================
+// FAIR VALUE GAP - Methods/Functions
+//==============================================================================
+method tosolid(color id)=> color.rgb(color.r(id),color.g(id),color.b(id))
+
+fvg_detect()=>
+    var new_fvg = fvg.new(na, na, na, na)
+    threshold = fvg_auto ? ta.cum((high - low) / low) / bar_index : fvg_thresholdPer / 100
+
+    bull_fvg = low > high[2] and close[1] > high[2] and (low - high[2]) / high[2] > threshold
+    bear_fvg = high < low[2] and close[1] < low[2] and (low[2] - high) / high > threshold
+
+    if bull_fvg
+        new_fvg := fvg.new(low, high[2], true)
+    else if bear_fvg
+        new_fvg := fvg.new(low[2], high, false)
+
+    [bull_fvg, bear_fvg, new_fvg]
+
+//==============================================================================
+// LIQUIDITY SWINGS - Functions
+//==============================================================================
+liq_get_data()=> [high, low, volume]
+
+[liq_h, liq_l, liq_v] = request.security_lower_tf(syminfo.tickerid, liq_intrabarTf, liq_get_data())
+
+liq_get_counts(condition, top, btm)=>
+    var count = 0
+    var vol = 0.
+
+    if condition
+        count := 0
+        vol := 0.
+    else
+        if liq_intraPrecision
+            if n > liq_length
+                if array.size(liq_v[liq_length]) > 0
+                    for [index, element] in liq_v[liq_length]
+                        vol += array.get(liq_l[liq_length], index) < top and array.get(liq_h[liq_length], index) > btm ? element : 0
+        else
+            vol += low[liq_length] < top and high[liq_length] > btm ? volume[liq_length] : 0
+
+        count += low[liq_length] < top and high[liq_length] > btm ? 1 : 0
+
+    [count, vol]
+
+liq_set_label(count, vol, x, y, css, lbl_style)=>
+    var label lbl = na
+    var label_size = switch liq_labelSize
+        'Tiny' => size.tiny
+        'Small' => size.small
+        'Normal' => size.normal
+
+    target = switch liq_filterOptions
+        'Count'  => count
+        'Volume' => vol
+
+    if ta.crossover(target, liq_filterValue)
+        lbl := label.new(x, y, str.tostring(vol, format.volume)
+          , style = lbl_style
+          , size = label_size
+          , color = #00000000
+          , textcolor = css)
+
+    if target > liq_filterValue
+        label.set_text(lbl, str.tostring(vol, format.volume))
+
+liq_set_level(condition, crossed, value, count, vol, css)=>
+    var line lvl = na
+
+    target = switch liq_filterOptions
+        'Count'  => count
+        'Volume' => vol
+
+    if condition
+        if target[1] < liq_filterValue[1]
+            line.delete(lvl[1])
+        else if not crossed[1]
+            line.set_x2(lvl, n - liq_length)
+
+        lvl := line.new(n - liq_length, value, n, value
+          , color = na)
+
+    if not crossed[1]
+        line.set_x2(lvl, n+3)
+
+    if crossed and not crossed[1]
+        line.set_x2(lvl, n)
+        line.set_style(lvl, line.style_dashed)
+
+    if target > liq_filterValue
+        line.set_color(lvl, css)
+
+liq_set_zone(condition, x, top, btm, count, vol, css)=>
+    var box bx = na
+
+    target = switch liq_filterOptions
+        'Count'  => count
+        'Volume' => vol
+
+    if ta.crossover(target, liq_filterValue)
+        bx := box.new(x, top, x + count, btm
+          , border_color = na
+          , bgcolor = css)
+
+    if target > liq_filterValue
+        box.set_right(bx, x + count)
+
+//==============================================================================
+// PREVIOUS HIGHS & LOWS - Functions
+//==============================================================================
+phl_output()=>
+    prev_h = array.new<float>(0)
+    prev_l = array.new<float>(0)
+    prev_t = array.new<int>(0)
+
+    for i = 0 to phl_showLast
+        prev_h.push(high[i])
+        prev_l.push(low[i])
+        prev_t.push(time[i])
+
+    [prev_h, prev_l, prev_t]
+
+phl_line_label(x1, y, index, col)=>
+    css = color.from_gradient(index, 0, phl_showLast, col, color.new(col, phl_minTransp))
+
+    ln = line.new(x1, y, time, y, xloc.bar_time, color = css
+      , style = index == 0 ? line.style_dashed : line.style_solid)
+
+    lbl = label.new(bar_index, y, str.tostring(index), color = color(na)
+      , style = label.style_label_left, size = size.tiny, textcolor = col
+      , tooltip = str.format_time(x1, "yyyy-MM-dd HH:mm", syminfo.timezone))
+
+    [ln, lbl]
+
+//==============================================================================
+// FAIR VALUE GAP - Detection/Display
+//==============================================================================
+var float fvg_max_bull = na, var float fvg_min_bull = na, var fvg_bull_count = 0, var fvg_bull_mitigated = 0
+var float fvg_max_bear = na, var float fvg_min_bear = na, var fvg_bear_count = 0, var fvg_bear_mitigated = 0
+var fvg_t = 0
+
+var fvg_records = array.new<fvg>(0)
+var fvg_areas = array.new<box>(0)
+
+[fvg_bull, fvg_bear, fvg_new] = request.security(syminfo.tickerid, fvg_tf, fvg_detect())
+
+//Bull FVG's
+if fvg_enabled and fvg_bull and fvg_new.t != fvg_t
+    if fvg_dynamic
+        fvg_max_bull := fvg_new.max
+        fvg_min_bull := fvg_new.min
+
+    //Populate FVG array
+    if not fvg_dynamic
+        fvg_areas.unshift(box.new(n-2, fvg_new.max, n+fvg_extend, fvg_new.min, na, bgcolor = fvg_bullCss, text = 'FVG', text_color = color.new(#089981, 0), text_size = size.small, text_halign = text.align_right, text_valign = text.align_bottom))
+    fvg_records.unshift(fvg_new)
+
+    fvg_bull_count += 1
+    fvg_t := fvg_new.t
+else if fvg_dynamic
+    fvg_max_bull := math.max(math.min(close, fvg_max_bull), fvg_min_bull)
+
+//Bear FVG's
+if fvg_enabled and fvg_bear and fvg_new.t != fvg_t
+    if fvg_dynamic
+        fvg_max_bear := fvg_new.max
+        fvg_min_bear := fvg_new.min
+
+    //Populate FVG array
+    if not fvg_dynamic
+        fvg_areas.unshift(box.new(n-2, fvg_new.max, n+fvg_extend, fvg_new.min, na, bgcolor = fvg_bearCss, text = 'FVG', text_color = color.new(#f23645, 0), text_size = size.small, text_halign = text.align_right, text_valign = text.align_bottom))
+    fvg_records.unshift(fvg_new)
+
+    fvg_bear_count += 1
+    fvg_t := fvg_new.t
+else if fvg_dynamic
+    fvg_min_bear := math.min(math.max(close, fvg_min_bear), fvg_max_bear)
+
+//==============================================================================
+// FAIR VALUE GAP - Mitigation
+//==============================================================================
+if fvg_enabled and fvg_records.size() > 0
+    for i = fvg_records.size()-1 to 0
+        get = fvg_records.get(i)
+
+        if get.isbull
+            if time != get.t and low < get.max
+                //Display line if mitigated
+                if fvg_mitigationLevels
+                    line.new(get.t
+                      , get.min
+                      , time
+                      , get.min
+                      , xloc.bar_time
+                      , color = fvg_bullCss
+                      , style = line.style_dashed)
+
+                //Delete box
+                if not fvg_dynamic
+                    area = fvg_areas.remove(i)
+                    area.delete()
+
+                fvg_records.remove(i)
+                fvg_bull_mitigated += 1
+        else if time != get.t and high > get.min
+            //Display line if mitigated
+            if fvg_mitigationLevels
+                line.new(get.t
+                  , get.max
+                  , time
+                  , get.max
+                  , xloc.bar_time
+                  , color = fvg_bearCss
+                  , style = line.style_dashed)
+
+            //Delete box
+            if not fvg_dynamic
+                area = fvg_areas.remove(i)
+                area.delete()
+
+            fvg_records.remove(i)
+            fvg_bear_mitigated += 1
+
+//Unmitigated lines
+var fvg_unmitigated = array.new<line>(0)
+
+//Remove umitigated lines
+if fvg_enabled and barstate.islast and fvg_showLast > 0 and fvg_records.size() > 0
+    if fvg_unmitigated.size() > 0
+        for element in fvg_unmitigated
+            element.delete()
+        fvg_unmitigated.clear()
+
+    for i = 0 to math.min(fvg_showLast-1, fvg_records.size()-1)
+        get = fvg_records.get(i)
+
+        fvg_unmitigated.push(line.new(get.t
+          , get.isbull ? get.min : get.max
+          , time
+          , get.isbull ? get.min : get.max
+          , xloc.bar_time
+          , color = get.isbull ? fvg_bullCss : fvg_bearCss))
+
+//==============================================================================
+// LIQUIDITY SWINGS - Global Variables
+//==============================================================================
+//Pivot high
+var float liq_ph_top = na
+var float liq_ph_btm = na
+var bool  liq_ph_crossed = na
+var       liq_ph_x1 = 0
+var box   liq_ph_bx = box.new(na,na,na,na
+  , bgcolor = color.new(liq_topAreaCss, 80)
+  , border_color = na)
+
+//Pivot low
+var float liq_pl_top = na
+var float liq_pl_btm = na
+var bool  liq_pl_crossed = na
+var       liq_pl_x1 = 0
+var box   liq_pl_bx = box.new(na,na,na,na
+  , bgcolor = color.new(liq_btmAreaCss, 80)
+  , border_color = na)
+
+//==============================================================================
+// LIQUIDITY SWINGS - Display Pivot High Levels/Blocks
+//==============================================================================
+liq_ph = ta.pivothigh(liq_length, liq_length)
+
+//Get ph counts
+[liq_ph_count, liq_ph_vol] = liq_get_counts(liq_ph, liq_ph_top, liq_ph_btm)
+
+//Set ph area and level
+if liq_enabled and liq_ph and liq_showTop
+    liq_ph_top := high[liq_length]
+    liq_ph_btm := switch liq_area
+        'Wick Extremity' => math.max(close[liq_length], open[liq_length])
+        'Full Range' => low[liq_length]
+
+    liq_ph_x1 := n - liq_length
+    liq_ph_crossed := false
+
+    box.set_lefttop(liq_ph_bx, liq_ph_x1, liq_ph_top)
+    box.set_rightbottom(liq_ph_bx, liq_ph_x1, liq_ph_btm)
+else
+    liq_ph_crossed := close > liq_ph_top ? true : liq_ph_crossed
+
+    if liq_ph_crossed
+        box.set_right(liq_ph_bx, liq_ph_x1)
+    else
+        box.set_right(liq_ph_bx, n+3)
+
+if liq_enabled and liq_showTop
+    //Set ph zone
+    liq_set_zone(liq_ph, liq_ph_x1, liq_ph_top, liq_ph_btm, liq_ph_count, liq_ph_vol, liq_topAreaCss)
+
+    //Set ph level
+    liq_set_level(liq_ph, liq_ph_crossed, liq_ph_top, liq_ph_count, liq_ph_vol, liq_topCss)
+
+    //Set ph label
+    liq_set_label(liq_ph_count, liq_ph_vol, liq_ph_x1, liq_ph_top, liq_topCss, label.style_label_down)
+
+//==============================================================================
+// LIQUIDITY SWINGS - Display Pivot Low Levels/Blocks
+//==============================================================================
+liq_pl = ta.pivotlow(liq_length, liq_length)
+
+//Get pl counts
+[liq_pl_count, liq_pl_vol] = liq_get_counts(liq_pl, liq_pl_top, liq_pl_btm)
+
+//Set pl area and level
+if liq_enabled and liq_pl and liq_showBtm
+    liq_pl_top := switch liq_area
+        'Wick Extremity' => math.min(close[liq_length], open[liq_length])
+        'Full Range' => high[liq_length]
+    liq_pl_btm := low[liq_length]
+
+    liq_pl_x1 := n - liq_length
+    liq_pl_crossed := false
+
+    box.set_lefttop(liq_pl_bx, liq_pl_x1, liq_pl_top)
+    box.set_rightbottom(liq_pl_bx, liq_pl_x1, liq_pl_btm)
+else
+    liq_pl_crossed := close < liq_pl_btm ? true : liq_pl_crossed
+
+    if liq_pl_crossed
+        box.set_right(liq_pl_bx, liq_pl_x1)
+    else
+        box.set_right(liq_pl_bx, n+3)
+
+if liq_enabled and liq_showBtm
+    //Set pl zone
+    liq_set_zone(liq_pl, liq_pl_x1, liq_pl_top, liq_pl_btm, liq_pl_count, liq_pl_vol, liq_btmAreaCss)
+
+    //Set pl level
+    liq_set_level(liq_pl, liq_pl_crossed, liq_pl_btm, liq_pl_count, liq_pl_vol, liq_btmCss)
+
+    //Set pl labels
+    liq_set_label(liq_pl_count, liq_pl_vol, liq_pl_x1, liq_pl_btm, liq_btmCss, label.style_label_up)
+
+//==============================================================================
+// PREVIOUS HIGHS & LOWS - Global Variables
+//==============================================================================
+var phl_tf = switch phl_freq
+    'Hour'  => '60'
+    'Day'   => 'D'
+    'Week'  => 'W'
+    'Month' => 'M'
+    'Year'  => '12M'
+
+var box phl_area_top = box.new(na, na, na, na, na, xloc = xloc.bar_time)
+var box phl_area_btm = box.new(na, na, na, na, na, xloc = xloc.bar_time)
+
+var phl_lines  = array.new<line>(0)
+var phl_labels = array.new<label>(0)
+
+//==============================================================================
+// PREVIOUS HIGHS & LOWS - Detection/Display
+//==============================================================================
+[phl_prev_h, phl_prev_l, phl_prev_t] = request.security(syminfo.tickerid, phl_tf, phl_output(), calc_bars_count = phl_showLast + 1)
+
+if barstate.islast
+    //Remove previously tracked PHL lines/labels (do not touch FVG/liquidity drawings)
+    if phl_lines.size() > 0
+        for element in phl_lines
+            element.delete()
+        phl_lines.clear()
+    if phl_labels.size() > 0
+        for element in phl_labels
+            element.delete()
+        phl_labels.clear()
+
+    if phl_enabled
+        for [index, element] in phl_prev_t
+            get_h = phl_prev_h.get(index)
+            get_l = phl_prev_l.get(index)
+
+            //Show previous highs
+            if phl_showPrevh
+                if (phl_filter and close <= get_h) or not phl_filter
+                    [hln, hlbl] = phl_line_label(element, get_h, index, phl_prevhColor)
+                    phl_lines.push(hln)
+                    phl_labels.push(hlbl)
+
+            //Show previous lows
+            if phl_showPrevl
+                if (phl_filter and close >= get_l) or not phl_filter
+                    [lln, llbl] = phl_line_label(element, get_l, index, phl_prevlColor)
+                    phl_lines.push(lln)
+                    phl_labels.push(llbl)
+
+            //Vertical lines
+            vln = line.new(element, get_h, element, get_l, xloc.bar_time, color = color.gray, extend = extend.both
+              , style = index == 0 ? line.style_dashed : line.style_solid)
+            phl_lines.push(vln)
+
+        //Display areas
+        if phl_showAreas
+            //Top area
+            if phl_prev_h.size() > 0
+                p80 = phl_prev_h.percentile_linear_interpolation(100 - phl_areasWidth)
+                phl_area_top.set_bgcolor(phl_topCss)
+                phl_area_top.set_top_left_point(chart.point.from_time(phl_prev_t.last(), phl_prev_h.max()))
+                phl_area_top.set_bottom_right_point(chart.point.from_time(time, p80))
+
+            //Bottom area
+            if phl_prev_l.size() > 0
+                p20 = phl_prev_l.percentile_linear_interpolation(phl_areasWidth)
+                phl_area_btm.set_bgcolor(phl_btmCss)
+                phl_area_btm.set_top_left_point(chart.point.from_time(phl_prev_t.last(), p20))
+                phl_area_btm.set_bottom_right_point(chart.point.from_time(time, phl_prev_l.min()))
+        else
+            phl_area_top.set_bgcolor(na)
+            phl_area_btm.set_bgcolor(na)
+    else
+        phl_area_top.set_bgcolor(na)
+        phl_area_btm.set_bgcolor(na)
+
+//==============================================================================
+// FAIR VALUE GAP - Dashboard
+//==============================================================================
+var fvg_table_position = fvg_dashLoc == 'Bottom Left' ? position.bottom_left
+  : fvg_dashLoc == 'Top Right' ? position.top_right
+  : position.bottom_right
+
+var fvg_table_size = fvg_textSize == 'Tiny' ? size.tiny
+  : fvg_textSize == 'Small' ? size.small
+  : size.normal
+
+var fvg_tb = table.new(fvg_table_position, 3, 3
+  , bgcolor = #1e222d
+  , border_color = #373a46
+  , border_width = 1
+  , frame_color = #373a46
+  , frame_width = 1)
+
+if fvg_enabled and fvg_showDash
+    if barstate.isfirst
+        fvg_tb.cell(1, 0, 'Bullish', text_color = fvg_bullCss.tosolid(), text_size = fvg_table_size)
+        fvg_tb.cell(2, 0, 'Bearish', text_color = fvg_bearCss.tosolid(), text_size = fvg_table_size)
+
+        fvg_tb.cell(0, 1, 'Count', text_size = fvg_table_size, text_color = color.white)
+        fvg_tb.cell(0, 2, 'Mitigated', text_size = fvg_table_size, text_color = color.white)
+
+    if barstate.islast
+        fvg_tb.cell(1, 1, str.tostring(fvg_bull_count), text_color = fvg_bullCss.tosolid(), text_size = fvg_table_size)
+        fvg_tb.cell(2, 1, str.tostring(fvg_bear_count), text_color = fvg_bearCss.tosolid(), text_size = fvg_table_size)
+
+        fvg_tb.cell(1, 2, str.tostring(fvg_bull_mitigated / fvg_bull_count * 100, format.percent), text_color = fvg_bullCss.tosolid(), text_size = fvg_table_size)
+        fvg_tb.cell(2, 2, str.tostring(fvg_bear_mitigated / fvg_bear_count * 100, format.percent), text_color = fvg_bearCss.tosolid(), text_size = fvg_table_size)
+
+//==============================================================================
+// FAIR VALUE GAP - Plots (Dynamic Mode)
+//==============================================================================
+fvg_max_bull_plot = plot(fvg_max_bull, color = na)
+fvg_min_bull_plot = plot(fvg_min_bull, color = na)
+fill(fvg_max_bull_plot, fvg_min_bull_plot, color = fvg_bullCss)
+
+fvg_max_bear_plot = plot(fvg_max_bear, color = na)
+fvg_min_bear_plot = plot(fvg_min_bear, color = na)
+fill(fvg_max_bear_plot, fvg_min_bear_plot, color = fvg_bearCss)
+
+//==============================================================================
+// ALERTS
+//==============================================================================
+// FVG Alerts
+alertcondition(fvg_bull_count > fvg_bull_count[1], 'Bullish FVG', 'Bullish FVG detected')
+alertcondition(fvg_bear_count > fvg_bear_count[1], 'Bearish FVG', 'Bearish FVG detected')
+alertcondition(fvg_bull_mitigated > fvg_bull_mitigated[1], 'Bullish FVG Mitigation', 'Bullish FVG mitigated')
+alertcondition(fvg_bear_mitigated > fvg_bear_mitigated[1], 'Bearish FVG Mitigation', 'Bearish FVG mitigated')
+
+//==============================================================================

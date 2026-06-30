@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+
+# Bun's text lockfile (bun.lock) is committed; ignore the legacy binary one.
+bun.lockb
+
+# stray build artifacts must never live in src/
+src/*.cjs
+src/*.cjs.map
+src/*.js
+.claude/
+
+# local npm auth — never commit tokens
+.npmrc

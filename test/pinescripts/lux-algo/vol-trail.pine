@@ -1,0 +1,197 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © BOSWaves
+// Original code by @BOSWaves on TradingView.com
+// Refactored, visually updated, and alert-optimized by LuxAlgo Quant Agent
+
+//@version=6
+indicator("Volatility Trail [BOSWaves]", overlay = true, max_lines_count = 500, max_labels_count = 500)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Constants & Inputs
+//---------------------------------------------------------------------------------------------------------------------{
+const string GRP_CORE  = "Trail Engine"
+const string GRP_CLOUD = "Cloud & Candles"
+const string GRP_SIG   = "Signals"
+
+int    hullLen    = input.int(72, "Hull Length", minval = 5, group = GRP_CORE, tooltip = "Hull MA smoothing length. Lower = faster response.")
+int    atrLen     = input.int(9, "ATR Length", minval = 1, group = GRP_CORE, tooltip = "ATR lookback for trail distance.")
+float  atrFactor  = input.float(1.7, "ATR Factor", step = 0.1, minval = 0.5, group = GRP_CORE, tooltip = "Multiplier for trail distance. Higher = more room before flip.")
+string srcInput   = input.string("Close", "Source", options = ["Close", "HL2", "HLC3", "OHLC4"], group = GRP_CORE)
+int    trailSmth  = input.int(4, "Trail Smoothing", minval = 1, maxval = 10, group = GRP_CORE, tooltip = "EMA smoothing on the displayed trail. Signals fire from the raw trail.")
+
+bool   showCloud  = input.bool(true, "Show Gradient Cloud", group = GRP_CLOUD, tooltip = "Layered gradient that radiates from the trail toward price.")
+bool   showCandle = input.bool(true, "Color Candles", group = GRP_CLOUD)
+string candleMode = input.string("Distance", "Candle Color Mode", options = ["Distance", "Acceleration", "Both"], group = GRP_CLOUD, tooltip = "Distance: brightness by how far price is from the trail.\nAcceleration: brightness by how fast the trail is advancing.\nBoth: combines distance and acceleration.")
+int    accelLen   = input.int(2, "Acceleration Lookback",group = GRP_CLOUD)
+
+bool   showSig    = input.bool(true, "Show Buy/Sell", group = GRP_SIG)
+bool   showRetest = input.bool(true, "Retest Diamonds", group = GRP_SIG, tooltip = "Marks when price dips back toward the trail after trending away.")
+int    rtCooldown = input.int(10, "Retest Cooldown", minval = 1, maxval = 50, group = GRP_SIG)
+int    sigBuffer  = input.int(5, "Signal Buffer", minval = 1, maxval = 20, group = GRP_SIG, tooltip = "Bars after a flip before retests can fire.")
+
+color  bullCol    = input.color(#089981, "Bullish", inline = "c", group = GRP_CLOUD)
+color  bearCol    = input.color(#f23645, "Bearish", inline = "c", group = GRP_CLOUD)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Source Calculation
+//---------------------------------------------------------------------------------------------------------------------{
+float srcVal = switch srcInput
+    "HL2"   => hl2
+    "HLC3"  => hlc3
+    "OHLC4" => ohlc4
+    => close
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Hull + ATR Trail
+//---------------------------------------------------------------------------------------------------------------------{
+float hull = ta.hma(srcVal, hullLen)
+float atr  = ta.atr(atrLen)
+
+float upperBand = hull + atr * atrFactor
+float lowerBand = hull - atr * atrFactor
+
+var float trail = na
+var bool  trend = true
+
+float prevTrail = nz(trail)
+
+if na(trail)
+    trail := close > hull ? lowerBand : upperBand
+
+if trend
+    trail := math.max(lowerBand, prevTrail)
+    if close < trail
+        trend := false
+        trail := upperBand
+else
+    trail := math.min(upperBand, prevTrail)
+    if close > trail
+        trend := true
+        trail := lowerBand
+
+float trailVis = ta.ema(trail, trailSmth)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Flip Detection
+//---------------------------------------------------------------------------------------------------------------------{
+bool flipUp  = trend and not trend[1]
+bool flipDn  = not trend and trend[1]
+bool anyFlip = flipUp or flipDn
+
+var int flipBar    = 0
+var int lastBullRt = na
+var int lastBearRt = na
+
+if anyFlip
+    flipBar := bar_index
+
+color trendCol = trend ? bullCol : bearCol
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Gradient Layers
+//---------------------------------------------------------------------------------------------------------------------{
+float gap   = close - trailVis
+float band1 = trailVis + gap * 0.2
+float band2 = trailVis + gap * 0.4
+float band3 = trailVis + gap * 0.65
+float band4 = trailVis + gap * 0.85
+
+float b1s = ta.ema(band1, trailSmth)
+float b2s = ta.ema(band2, trailSmth)
+float b3s = ta.ema(band3, trailSmth)
+float b4s = ta.ema(band4, trailSmth)
+
+plotTrail = plot(trailVis, "Trail", trendCol, linewidth = 2)
+
+plotB1 = plot(showCloud ? b1s : na, "Band 1", color = color.new(trendCol, 100), display = display.all, editable = false)
+plotB2 = plot(showCloud ? b2s : na, "Band 2", color = color.new(trendCol, 100), display = display.all, editable = false)
+plotB3 = plot(showCloud ? b3s : na, "Band 3", color = color.new(trendCol, 100), display = display.all, editable = false)
+plotB4 = plot(showCloud ? b4s : na, "Band 4", color = color.new(trendCol, 100), display = display.all, editable = false)
+
+fill(plotTrail, plotB1, trailVis, b1s, trend ? color.new(bullCol, 20) : color.new(bearCol, 75), trend ? color.new(bullCol, 75) : color.new(bearCol, 20))
+fill(plotB1, plotB2, b1s, b2s, trend ? color.new(bullCol, 50) : color.new(bearCol, 85), trend ? color.new(bullCol, 85) : color.new(bearCol, 50))
+fill(plotB2, plotB3, b2s, b3s, trend ? color.new(bullCol, 75) : color.new(bearCol, 92), trend ? color.new(bullCol, 92) : color.new(bearCol, 75))
+fill(plotB3, plotB4, b3s, b4s, trend ? color.new(bullCol, 88) : color.new(bearCol, 95), trend ? color.new(bullCol, 95) : color.new(bearCol, 88))
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Candle Scoring & Rendering
+//---------------------------------------------------------------------------------------------------------------------{
+float distToTrail = math.abs(close - trailVis)
+float distScore   = nz(atr) > 0 ? math.min(distToTrail / (atr * 3), 1.0) : 0.0
+
+float trailSpeed  = math.abs(trailVis - nz(trailVis[accelLen])) / accelLen
+float speedNorm   = nz(atr) > 0 ? math.min(trailSpeed / (atr * 0.2), 1.0) : 0.0
+
+float rawScore = switch candleMode
+    "Distance"     => distScore
+    "Acceleration" => speedNorm
+    "Both"         => math.max(distScore, speedNorm)
+    => distScore
+
+float exScore = math.pow(rawScore, 2.5)
+
+color dimCol  = color.new(chart.fg_color, 80)
+
+color bodyCol = showCandle ? color.from_gradient(exScore, 0, 1, dimCol, trendCol) : na
+color wickCol = showCandle ? color.from_gradient(exScore, 0, 1, color.new(dimCol, 30), trendCol) : na
+color bordCol = showCandle ? color.from_gradient(exScore, 0, 1, color.new(dimCol, 20), trendCol) : na
+
+plotcandle(open, high, low, close, "Candles",
+     wickcolor   = wickCol,
+     color       = bodyCol,
+     bordercolor = bordCol,
+     display     = showCandle ? display.all : display.none)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Retest Diamonds & Signals
+//---------------------------------------------------------------------------------------------------------------------{
+bool farEnough = bar_index - flipBar >= sigBuffer
+
+float retestZone = atr * atrFactor * 0.3
+bool  bullRt     = showRetest and trend and (low - trailVis) < retestZone and (low - trailVis) > 0 and farEnough
+bool  bearRt     = showRetest and not trend and (trailVis - high) < retestZone and (trailVis - high) > 0 and farEnough
+
+bool bullRtOk = bullRt and (na(lastBullRt) or bar_index - lastBullRt >= rtCooldown)
+bool bearRtOk = bearRt and (na(lastBearRt) or bar_index - lastBearRt >= rtCooldown)
+
+if bullRtOk
+    lastBullRt := bar_index
+if bearRtOk
+    lastBearRt := bar_index
+
+plotchar(bullRtOk, "Bull Retest", "◆", location.belowbar, bullCol, size = size.tiny)
+plotchar(bearRtOk, "Bear Retest", "◆", location.abovebar, bearCol, size = size.tiny)
+
+if showSig and flipUp
+    label.new(bar_index, low - atr * 1.2, "▲",
+         style = label.style_label_up,
+         size = size.normal,
+         color = bullCol,
+         textcolor = chart.fg_color)
+
+if showSig and flipDn
+    label.new(bar_index, high + atr * 1.2, "▼",
+         style = label.style_label_down,
+         size = size.normal,
+         color = bearCol,
+         textcolor = chart.fg_color)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Alerts
+//---------------------------------------------------------------------------------------------------------------------{
+alertcondition(flipUp, "Trail Long", "Volatility Trail flipped bullish on {{ticker}}")
+alertcondition(flipDn, "Trail Short", "Volatility Trail flipped bearish on {{ticker}}")
+alertcondition(bullRtOk, "Bull Retest", "Bullish trail retest on {{ticker}}")
+alertcondition(bearRtOk, "Bear Retest", "Bearish trail retest on {{ticker}}")
+alertcondition(anyFlip, "Any Trail Flip", "Volatility Trail changed direction on {{ticker}}")
+
+if flipUp
+    alert("Volatility Trail flipped bullish on " + syminfo.ticker, alert.freq_once_per_bar_close)
+else if flipDn
+    alert("Volatility Trail flipped bearish on " + syminfo.ticker, alert.freq_once_per_bar_close)
+else if bullRtOk
+    alert("Bullish trail retest on " + syminfo.ticker, alert.freq_once_per_bar_close)
+else if bearRtOk
+    alert("Bearish trail retest on " + syminfo.ticker, alert.freq_once_per_bar_close)
+
+//---------------------------------------------------------------------------------------------------------------------}

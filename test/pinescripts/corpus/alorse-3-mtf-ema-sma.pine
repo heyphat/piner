@@ -1,0 +1,27 @@
+//
+//@author Alorse
+//@version=5
+indicator(title='3 Multi Timeframe EMA/SMA', shorttitle='3 MTF EMA/SMA', overlay=true)
+
+// SMA or EMA
+mtf_type = input.string(title='MultiTimeframe MA Type', defval='EMA', options=['EMA', 'SMA'], group='MTF MA Type')
+
+//Get MA Values
+resA = input.timeframe(title='Timeframe', defval='15', group='Moving Average 1')
+maA = input.int(title='MA Periods', minval=1, defval=50, group='Moving Average 1')
+resB = input.timeframe(title='Timeframe', defval='60', group='Moving Average 2')
+maB = input.int(title='MA Periods', minval=1, defval=50, group='Moving Average 2')
+resC = input.timeframe(title='Timeframe', defval='240', group='Moving Average 3')
+maC = input.int(title='MA Periods', minval=1, defval=50, group='Moving Average 3')
+
+//Set resolutions
+
+//get data
+dataA = request.security(syminfo.tickerid, resA, mtf_type == 'EMA' ? ta.ema(close, maA) : ta.sma(close, maA))
+dataB = request.security(syminfo.tickerid, resB, mtf_type == 'EMA' ? ta.ema(close, maB) : ta.sma(close, maB))
+dataC = request.security(syminfo.tickerid, resC, mtf_type == 'EMA' ? ta.ema(close, maC) : ta.sma(close, maC))
+
+//Plotting
+plot(dataA, color=color.new(color.purple, 0), linewidth=1)
+plot(dataB, color=color.new(color.white, 0), linewidth=1)
+plot(dataC, color=color.green, linewidth=1, color=na)

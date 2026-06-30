@@ -1,0 +1,204 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © CartelConsole
+// Original code by @CartelConsole on TradingView.com
+// Refactored, visually updated, and alert-optimized by LuxAlgo Quant Agent
+
+//@version=6
+indicator("HTF Candle Footprint [Cartel Console]", overlay = true, max_boxes_count = 500, max_polylines_count = 100, max_lines_count = 500, max_bars_back = 5000, max_labels_count = 500)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Types
+//---------------------------------------------------------------------------------------------------------------------{
+
+type Profile 
+    array<line> lines 
+    array<box> boxes
+    array<label> labels
+
+//---------------------------------------------------------------------------------------------------------------------}
+// User Inputs
+//---------------------------------------------------------------------------------------------------------------------{
+
+string tfInput          = input.timeframe("1W", "TimeFrame", ["60", "240", "1D", "1W", "1M"], tooltip = "1H, 4H, Daily, Weekly, Monthly")
+int    offsetInput      = input.int(15, "Profile Offset")
+int    minPeriodInput   = input.int(10, "Min Period Profile")
+bool   showDashInput    = input.bool(true, "Show Dashboard")
+
+color  bullishColorInput = input.color(#089981, "Bullish Color", inline = "candle")
+color  bearishColorInput = input.color(#f23645, "Bearish Color", inline = "candle")
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Variables & Setup
+//---------------------------------------------------------------------------------------------------------------------{
+
+var int startBar = na
+var int prevStartBar = na
+var float htfOpen = na
+var float prevHtfOpen = na
+
+var ProfileDraws = array.new<Profile>()
+var table dash = table.new(position.top_right, 2, 2, bgcolor = color.rgb(54, 58, 69, 58), border_color = color.gray, border_width = 1)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Core Calculations
+//---------------------------------------------------------------------------------------------------------------------{
+
+if timeframe.change(tfInput)
+    prevStartBar := startBar
+    prevHtfOpen  := htfOpen
+    startBar     := bar_index
+    htfOpen      := open
+
+int period = 0
+float opX = na
+float clX = close
+
+if bar_index - startBar < minPeriodInput and not na(prevStartBar)
+    period := bar_index - prevStartBar
+    opX    := prevHtfOpen
+else
+    period := bar_index - startBar
+    opX    := htfOpen
+
+float atrVal = ta.atr(200) * 0.3
+bool isBullish = clX > opX
+bool isBearish = clX < opX
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Visuals
+//---------------------------------------------------------------------------------------------------------------------{
+
+color textColor = chart.fg_color
+
+if showDashInput and barstate.islast
+    table.cell(dash, 0, 0, "HTF Bias", text_color = textColor)
+    string biasText = isBullish ? "BULLISH" : "BEARISH"
+    color  biasColor = isBullish ? bullishColorInput : bearishColorInput
+    table.cell(dash, 1, 0, biasText, text_color = biasColor)
+
+if barstate.islast and not na(opX)
+    array<float> hlArr = array.new<float>()
+    if period > 0
+        for i = 0 to period
+            hlArr.push(high[i])
+            hlArr.push(low[i])
+
+    float maxH = hlArr.size() > 0 ? hlArr.max() : high
+    float minL = hlArr.size() > 0 ? hlArr.min() : low
+
+    if ProfileDraws.size() > 0
+        for p in ProfileDraws
+            for l in p.lines
+                l.delete()
+            for b in p.boxes
+                b.delete()
+            for l in p.labels
+                l.delete()
+        ProfileDraws.clear()
+
+    float height = (maxH - minL)
+    int   size   = math.max(1, math.ceil(height / math.max(atrVal, syminfo.mintick)))
+    float step   = height / size
+    
+    array<float> binsVol   = array.new<float>(size, 0.)
+    array<float> binsDelta = array.new<float>(size, 0.)
+    float maxVol = 0.0
+    int   pocIndex = 0
+        
+    if period > 0
+        for k = 0 to period
+            float closeK = close[k]
+            float openK  = open[k]
+            float volK   = volume[k]
+            float deltaK = closeK > openK ? volK : closeK < openK ? -volK : 0.0
+            
+            for i = 0 to size - 1
+                float loww = minL + step * i 
+                float mid  = loww + step / 2 
+                if math.abs(closeK - mid) <= step        
+                    binsVol.set(i, binsVol.get(i) + volK)
+                    binsDelta.set(i, binsDelta.get(i) + deltaK)
+                    if binsVol.get(i) > maxVol
+                        maxVol := binsVol.get(i)
+                        pocIndex := i
+
+    array<line>  linesArr  = array.new<line>()
+    array<box>   boxesArr  = array.new<box>()
+    array<label> labelsArr = array.new<label>()
+
+    color barColor = isBullish ? bullishColorInput : bearishColorInput
+    int   indxBar  = bar_index + offsetInput + 5
+    
+    float bodyTop = math.max(opX, clX)
+    float bodyBot = math.min(opX, clX)
+
+    // Wick Glow & Wick
+    linesArr.push(line.new(indxBar + 3, maxH, indxBar + 3, minL, color = color.new(barColor, 90), width = 8))
+    linesArr.push(line.new(indxBar + 3, maxH, indxBar + 3, minL, color = color.new(barColor, 75), width = 5))
+    linesArr.push(line.new(indxBar + 3, maxH, indxBar + 3, minL, color = barColor, width = 2))
+
+    // Body Glow & Body
+    boxesArr.push(box.new(indxBar + 1, bodyTop, indxBar + 6, bodyBot, border_color = color(na), bgcolor = color.new(barColor, 90)))
+    boxesArr.push(box.new(indxBar + 2, bodyTop, indxBar + 5, bodyBot, border_color = color(na), bgcolor = color.new(barColor, 75)))
+    boxesArr.push(box.new(indxBar + 3, bodyTop, indxBar + 4, bodyBot, border_color = color(na), bgcolor = barColor))
+
+    float maxDelta = 0.0
+    for i = 0 to size - 1
+        float dVal = math.abs(binsDelta.get(i))
+        if dVal > maxDelta
+            maxDelta := dVal
+
+    // Volume Profile extending left & Delta Boxes in body
+    for i = 0 to size - 1
+        float bot  = minL + step * i
+        float top  = bot + step 
+        float mid  = bot + step / 2
+        float vVal = binsVol.get(i)
+        float dVal = binsDelta.get(i)
+        
+        if maxVol > 0
+            int volLength = math.round((vVal / maxVol) * 15)
+            if volLength > 0
+                color gradCol = color.from_gradient(mid, minL, maxH, bearishColorInput, bullishColorInput)
+                box volBox = box.new(indxBar - 3 - volLength, top, indxBar - 3, bot, border_color = color.new(gradCol, 50), bgcolor = color.new(gradCol, 80))
+                boxesArr.push(volBox)
+        
+        // Draw delta data if within candle body
+        if mid >= bodyBot and mid <= bodyTop
+            float deltaRatio = maxDelta > 0 ? math.abs(dVal) / maxDelta : 0
+            color bgCol = dVal > 0 ? color.new(bullishColorInput, 100 - math.round(deltaRatio * 60)) : dVal < 0 ? color.new(bearishColorInput, 100 - math.round(deltaRatio * 60)) : color.new(#5b9cf6, 3)
+            
+            box deltaBox = box.new(indxBar - 3, top, indxBar + 3, bot, border_color = color.new(#5b9cf6, 50), border_width = 1, bgcolor = bgCol)
+            boxesArr.push(deltaBox)
+            
+            label deltaLabel = label.new(indxBar, mid, str.tostring(math.round(dVal)), textcolor = textColor, style = label.style_label_center, color = color(na), size = size.tiny)
+            labelsArr.push(deltaLabel)
+
+    // High Line and Label
+    linesArr.push(line.new(indxBar - 20, maxH, indxBar + 5, maxH, color = bullishColorInput, style = line.style_dashed))
+    labelsArr.push(label.new(indxBar + 5, maxH, "High: " + str.tostring(maxH, format.mintick), style = label.style_label_down, color = color(na), textcolor = bullishColorInput, size = size.small))
+
+    // Low Line and Label
+    linesArr.push(line.new(indxBar - 20, minL, indxBar + 5, minL, color = bearishColorInput, style = line.style_dashed))
+    labelsArr.push(label.new(indxBar + 5, minL, "Low: " + str.tostring(minL, format.mintick), style = label.style_label_up, color = color(na), textcolor = bearishColorInput, size = size.small))
+
+    // POC Line
+    float pocY = minL + step * pocIndex + (step / 2)
+    linesArr.push(line.new(indxBar - 18, pocY, indxBar + 3, pocY, color = color.new(#5b9cf6, 0), style = line.style_dashed))
+
+    ProfileDraws.push(Profile.new(linesArr, boxesArr, labelsArr))
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Alerts
+//---------------------------------------------------------------------------------------------------------------------{
+
+bool biasTurnedBullish = isBullish and not isBullish[1]
+bool biasTurnedBearish = isBearish and not isBearish[1]
+
+if biasTurnedBullish
+    alert("HTF Bias Turned Bullish", alert.freq_once_per_bar_close)
+
+if biasTurnedBearish
+    alert("HTF Bias Turned Bearish", alert.freq_once_per_bar_close)
+
+//---------------------------------------------------------------------------------------------------------------------}

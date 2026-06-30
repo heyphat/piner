@@ -1,0 +1,250 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TigerX - Fair Value Gap Indicator
+
+//@version=5
+indicator("Fair Value Gap (FVG)", overlay=true, max_boxes_count=500)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INPUTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+showBullishFVG      = input.bool(true, "Show Bullish FVG", group="Detection")
+showBearishFVG      = input.bool(true, "Show Bearish FVG", group="Detection")
+filterByATR         = input.bool(true, "Filter by ATR", group="Detection")
+atrMultiplier       = input.float(0.5, "Min ATR Multiplier", minval=0.0, step=0.1, group="Detection", tooltip="Minimum gap size as ATR multiple. Higher = fewer FVGs. Try 0.3-1.0")
+maxBoxes            = input.int(50, "Max Boxes to Show", minval=1, maxval=500, group="Detection")
+
+bullishColor        = input.color(color.new(#00ff00, 80), "Bullish FVG Color", group="Appearance")
+bearishColor        = input.color(color.new(#ff0000, 80), "Bearish FVG Color", group="Appearance")
+boxWidth            = input.int(5, "Box Width (candles)", minval=1, maxval=100, group="Appearance", tooltip="Number of candles the FVG box spans")
+showMidline         = input.bool(false, "Show Midline", group="Appearance")
+midlineStyle        = input.string("Dotted", "Midline Style", options=["Solid", "Dotted", "Dashed"], group="Appearance")
+
+deleteMitigated     = input.bool(true, "Delete Mitigated FVG", group="Mitigation")
+mitigationType      = input.string("Wick", "Mitigation Type", options=["Wick", "Close"], group="Mitigation")
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CALCULATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+atr = ta.atr(14)
+
+// Get midline style
+getMidlineStyle() =>
+    switch midlineStyle
+        "Solid" => line.style_solid
+        "Dotted" => line.style_dotted
+        "Dashed" => line.style_dashed
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FVG DETECTION
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Bullish FVG: Gap between candle 1's high and candle 3's low
+// Candle 1 = bar_index[2], Candle 2 = bar_index[1], Candle 3 = bar_index (current)
+bullishFVGCondition = low > high[2]
+bullishTop = low
+bullishBottom = high[2]
+bullishGapSize = bullishTop - bullishBottom
+
+// Bearish FVG: Gap between candle 1's low and candle 3's high  
+// Candle 1 = bar_index[2], Candle 2 = bar_index[1], Candle 3 = bar_index (current)
+bearishFVGCondition = high < low[2]
+bearishTop = low[2]
+bearishBottom = high
+bearishGapSize = bearishTop - bearishBottom
+
+// Apply ATR filter if enabled
+bullishValid = bullishFVGCondition and (not filterByATR or bullishGapSize > atr * atrMultiplier)
+bearishValid = bearishFVGCondition and (not filterByATR or bearishGapSize > atr * atrMultiplier)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FVG STORAGE
+// ─────────────────────────────────────────────────────────────────────────────
+
+var box[] bullBoxes = array.new_box()
+var line[] bullMidlines = array.new_line()
+var float[] bullTops = array.new_float()
+var float[] bullBottoms = array.new_float()
+var int[] bullBars = array.new_int()
+
+var box[] bearBoxes = array.new_box()
+var line[] bearMidlines = array.new_line()
+var float[] bearTops = array.new_float()
+var float[] bearBottoms = array.new_float()
+var int[] bearBars = array.new_int()
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CREATE FVG BOXES
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Create Bullish FVG
+if bullishValid and showBullishFVG
+    // Create box
+    newBox = box.new(
+         left=bar_index - 2,
+         top=bullishTop,
+         right=bar_index - 2 + boxWidth,
+         bottom=bullishBottom,
+         bgcolor=bullishColor,
+         border_color=color.new(color.green, 100),
+         border_width=1
+         )
+    
+    array.push(bullBoxes, newBox)
+    array.push(bullTops, bullishTop)
+    array.push(bullBottoms, bullishBottom)
+    array.push(bullBars, bar_index)
+    
+    // Create midline if enabled
+    if showMidline
+        midPrice = (bullishTop + bullishBottom) / 2
+        newLine = line.new(
+             x1=bar_index - 2,
+             y1=midPrice,
+             x2=bar_index - 2 + boxWidth,
+             y2=midPrice,
+             color=color.new(color.green, 50),
+             style=getMidlineStyle()
+             )
+        array.push(bullMidlines, newLine)
+    else
+        array.push(bullMidlines, line(na))
+    
+    // Limit number of boxes
+    if array.size(bullBoxes) > maxBoxes
+        box.delete(array.shift(bullBoxes))
+        line.delete(array.shift(bullMidlines))
+        array.shift(bullTops)
+        array.shift(bullBottoms)
+        array.shift(bullBars)
+
+// Create Bearish FVG
+if bearishValid and showBearishFVG
+    // Create box
+    newBox = box.new(
+         left=bar_index - 2,
+         top=bearishTop,
+         right=bar_index - 2 + boxWidth,
+         bottom=bearishBottom,
+         bgcolor=bearishColor,
+         border_color=color.new(color.red, 100),
+         border_width=1
+         )
+    
+    array.push(bearBoxes, newBox)
+    array.push(bearTops, bearishTop)
+    array.push(bearBottoms, bearishBottom)
+    array.push(bearBars, bar_index)
+    
+    // Create midline if enabled
+    if showMidline
+        midPrice = (bearishTop + bearishBottom) / 2
+        newLine = line.new(
+             x1=bar_index - 2,
+             y1=midPrice,
+             x2=bar_index - 2 + boxWidth,
+             y2=midPrice,
+             color=color.new(color.red, 50),
+             style=getMidlineStyle()
+             )
+        array.push(bearMidlines, newLine)
+    else
+        array.push(bearMidlines, line(na))
+    
+    // Limit number of boxes
+    if array.size(bearBoxes) > maxBoxes
+        box.delete(array.shift(bearBoxes))
+        line.delete(array.shift(bearMidlines))
+        array.shift(bearTops)
+        array.shift(bearBottoms)
+        array.shift(bearBars)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MITIGATION CHECK
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Check Bullish FVG mitigation (price comes down to fill the gap)
+if deleteMitigated and array.size(bullBoxes) > 0
+    for i = array.size(bullBoxes) - 1 to 0
+        fvgTop = array.get(bullTops, i)
+        fvgBottom = array.get(bullBottoms, i)
+        fvgBar = array.get(bullBars, i)
+        
+        // Skip mitigation check on the bar when FVG was created
+        if bar_index <= fvgBar
+            continue
+        
+        bool isMitigated = false
+        
+        if mitigationType == "Close"
+            // Full mitigation: price closes inside or below the FVG
+            isMitigated := close <= fvgTop
+        else
+            // Wick mitigation: price wick enters the FVG zone
+            isMitigated := low <= fvgTop
+        
+        if isMitigated
+            box.delete(array.get(bullBoxes, i))
+            line.delete(array.get(bullMidlines, i))
+            array.remove(bullBoxes, i)
+            array.remove(bullMidlines, i)
+            array.remove(bullTops, i)
+            array.remove(bullBottoms, i)
+            array.remove(bullBars, i)
+
+// Check Bearish FVG mitigation (price comes up to fill the gap)
+if deleteMitigated and array.size(bearBoxes) > 0
+    for i = array.size(bearBoxes) - 1 to 0
+        fvgTop = array.get(bearTops, i)
+        fvgBottom = array.get(bearBottoms, i)
+        fvgBar = array.get(bearBars, i)
+        
+        // Skip mitigation check on the bar when FVG was created
+        if bar_index <= fvgBar
+            continue
+        
+        bool isMitigated = false
+        
+        if mitigationType == "Close"
+            // Full mitigation: price closes inside or above the FVG
+            isMitigated := close >= fvgBottom
+        else
+            // Wick mitigation: price wick enters the FVG zone
+            isMitigated := high >= fvgBottom
+        
+        if isMitigated
+            box.delete(array.get(bearBoxes, i))
+            line.delete(array.get(bearMidlines, i))
+            array.remove(bearBoxes, i)
+            array.remove(bearMidlines, i)
+            array.remove(bearTops, i)
+            array.remove(bearBottoms, i)
+            array.remove(bearBars, i)
+
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ALERTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+alertcondition(bullishValid, title="Bullish FVG", message="Bullish Fair Value Gap detected!")
+alertcondition(bearishValid, title="Bearish FVG", message="Bearish Fair Value Gap detected!")
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INFO TABLE
+// ─────────────────────────────────────────────────────────────────────────────
+
+showTable = input.bool(true, "Show Info Table", group="Table")
+
+if showTable and barstate.islast
+    var table infoTable = table.new(position.top_right, 2, 3, bgcolor=color.new(color.gray, 85))
+    
+    table.cell(infoTable, 0, 0, "FVG Type", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 0, "Count", text_color=color.white, text_size=size.small)
+    
+    table.cell(infoTable, 0, 1, "🟢 Bullish", text_color=color.green, text_size=size.small)
+    table.cell(infoTable, 1, 1, str.tostring(array.size(bullBoxes)), text_color=color.green, text_size=size.small)
+    
+    table.cell(infoTable, 0, 2, "🔴 Bearish", text_color=color.red, text_size=size.small)
+    table.cell(infoTable, 1, 2, str.tostring(array.size(bearBoxes)), text_color=color.red, text_size=size.small)

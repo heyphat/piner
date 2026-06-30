@@ -1,0 +1,25 @@
+name: Feature request / missing built-in
+description: Request a Pine v6 built-in, language feature, or API that Piner doesn't support yet
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What's missing?
+      description: The built-in, namespace, or language feature (e.g. `ta.vwap`, `matrix.*`, UDT inheritance).
+    validations:
+      required: true
+  - type: textarea
+    id: docs
+    attributes:
+      label: Pine v6 reference
+      description: Link to the public TradingView manual entry describing the expected behaviour.
+    validations:
+      required: false
+  - type: textarea
+    id: usecase
+    attributes:
+      label: Use case
+      description: A short example of the script you're trying to run.
+    validations:
+      required: false

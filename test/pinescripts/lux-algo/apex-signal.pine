@@ -1,0 +1,266 @@
+//@version=6
+// Original code by @sammyjuniordr on TradingView.com
+// Refactored, visually updated, and alert-optimized by LuxAlgo Quant Agent
+
+indicator("Apex Signals & Overlays + Quant Rating", "APEX S&O", overlay = true, max_boxes_count = 500, max_labels_count = 500, max_lines_count = 500)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Inputs
+//---------------------------------------------------------------------------------------------------------------------{
+
+string GA = "① Signal Engine"
+float sens        = input.float(4.0, "Signal Sensitivity (ATR mult)", minval = 0.5, maxval = 10.0, step = 0.1, group = GA, tooltip = "Higher = fewer, stronger trend signals")
+int   atrLen      = input.int(10, "ATR Length", minval = 1, group = GA)
+bool  useConf     = input.bool(true, "Confirmation signals (BUY / SELL)", group = GA)
+bool  useContra   = input.bool(true, "Contrarian reversals (▲ / ▼)", group = GA)
+bool  confirmOnly = input.bool(false, "Repaint-safe: confirmed bar only", group = GA, tooltip = "Only print signals after the bar closes — no live-bar flicker")
+
+string GT = "② Trend Overlay"
+bool  showCloud   = input.bool(true, "Trend cloud + bar tint", group = GT)
+int   fastLen     = input.int(21, "Fast EMA", minval = 1, group = GT)
+int   slowLen     = input.int(55, "Slow EMA", minval = 1, group = GT)
+bool  showTrail   = input.bool(true, "Smart trailing stop", group = GT)
+
+string GTGT = "③ Targets (TP / SL)"
+bool  showTargets = input.bool(true, "Project TP / SL on signals", group = GTGT)
+float slAtrMult   = input.float(1.5, "Stop distance (ATR mult)", minval = 0.1, step = 0.1, group = GTGT)
+float tp1R        = input.float(1.0, "TP1 (R multiple)", minval = 0.1, step = 0.1, group = GTGT)
+float tp2R        = input.float(2.0, "TP2 (R multiple)", minval = 0.1, step = 0.1, group = GTGT)
+
+string GS = "④ Support / Resistance"
+bool  showSR      = input.bool(true, "Dynamic S/R zones", group = GS)
+int   pivLen      = input.int(15, "Pivot lookback", minval = 2, group = GS)
+int   maxZones    = input.int(4, "Max zones per side", minval = 1, maxval = 10, group = GS)
+
+string GQ = "⑤ Quant Rating"
+bool  showPanel   = input.bool(true, "Show quant rating panel", group = GQ)
+string panelPos   = input.string("Top Right", "Panel position", options = ["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group = GQ)
+int   rsiLen      = input.int(14, "RSI length", minval = 1, group = GQ)
+int   rocLen      = input.int(20, "Momentum (ROC) length", minval = 1, group = GQ)
+string htfTf      = input.timeframe("D", "HTF bias timeframe", group = GQ, tooltip = "Higher timeframe used for the 'HTF Bias' row")
+
+string GC = "⑥ Colors"
+color bullColor   = input.color(#089981, "Bull", group = GC)
+color bearColor   = input.color(#f23645, "Bear", group = GC)
+color neuColor    = input.color(#5b9cf6, "Neutral", group = GC)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Functions
+//---------------------------------------------------------------------------------------------------------------------{
+
+clampValue(float x) =>
+    math.max(-1.0, math.min(1.0, x))
+
+getHtfBias() =>
+    float e1 = ta.ema(close, fastLen)
+    float e2 = ta.ema(close, slowLen)
+    float r  = ta.rsi(close, rsiLen)
+    float ts = (close > e2 ? 0.5 : -0.5) + (e1 > e2 ? 0.5 : -0.5)
+    float ms = math.max(-1.0, math.min(1.0, (r - 50) / 30))
+    math.max(-1.0, math.min(1.0, (ts + ms) / 2))
+
+getGradeText(float s) =>
+    s >= 0.5 ? "STRONG BUY" : s >= 0.2 ? "BUY" : s > -0.2 ? "HOLD" : s > -0.5 ? "SELL" : "STRONG SELL"
+
+getGradeColor(float s) =>
+    s >= 0.5 ? #1b7a3d : s >= 0.2 ? #2e9e57 : s > -0.2 ? #5c6b73 : s > -0.5 ? #d14b4b : #a32525
+
+createRow(table pnl, int row, string lbl, float s, string txt) =>
+    table.cell(pnl, 0, row, lbl, text_color = chart.fg_color, text_size = size.small, bgcolor = color.new(#2b343a, 0), text_halign = text.align_left)
+    table.cell(pnl, 1, row, txt, text_color = chart.fg_color, text_size = size.small, bgcolor = getGradeColor(s), text_halign = text.align_center)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Core Data & Trend Calculations
+//---------------------------------------------------------------------------------------------------------------------{
+
+float atrValue = ta.atr(atrLen)
+float emaFast  = ta.ema(close, fastLen)
+float emaSlow  = ta.ema(close, slowLen)
+float rsiValue = ta.rsi(close, rsiLen)
+
+[stLine, stDir] = ta.supertrend(sens, atrLen)
+bool trendUp    = stDir < 0
+bool flipUp     = trendUp and not trendUp[1]
+bool flipDn     = not trendUp and trendUp[1]
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Signals & Reversals
+//---------------------------------------------------------------------------------------------------------------------{
+
+bool isConf    = not confirmOnly or barstate.isconfirmed
+bool buySig    = useConf and flipUp and isConf
+bool sellSig   = useConf and flipDn and isConf
+
+float ll5 = ta.lowest(low, 5)
+float hh5 = ta.highest(high, 5)
+
+bool contraUp  = useContra and rsiValue < 30 and low <= ll5 and close > open and isConf
+bool contraDn  = useContra and rsiValue > 70 and high >= hh5 and close < open and isConf
+
+plotshape(buySig,   "Buy",           shape.labelup,      location.belowbar, bullColor, text = "BUY",  textcolor = chart.fg_color, size = size.small)
+plotshape(sellSig,  "Sell",          shape.labeldown,    location.abovebar, bearColor, text = "SELL", textcolor = chart.fg_color, size = size.small)
+plotshape(contraUp, "Bull reversal", shape.triangleup,   location.belowbar, color.new(bullColor, 20), size = size.tiny)
+plotshape(contraDn, "Bear reversal", shape.triangledown, location.abovebar, color.new(bearColor, 20), size = size.tiny)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Trend Overlay
+//---------------------------------------------------------------------------------------------------------------------{
+
+float fastPlotData = showCloud ? emaFast : na
+float slowPlotData = showCloud ? emaSlow : na
+
+plotFast = plot(fastPlotData, "Fast EMA", color = color.new(trendUp ? bullColor : bearColor, 35), linewidth = 1)
+plotSlow = plot(slowPlotData, "Slow EMA", color = color.new(neuColor, 55), linewidth = 1)
+fill(plotFast, plotSlow, color = trendUp ? color.new(bullColor, 88) : color.new(bearColor, 88), title = "Trend Cloud")
+
+plot(showTrail ? stLine : na, "Smart Trail", color = trendUp ? bullColor : bearColor, linewidth = 2, style = plot.style_linebr)
+barcolor(showCloud ? color.new(trendUp ? bullColor : bearColor, 55) : na)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// TP / SL Projections
+//---------------------------------------------------------------------------------------------------------------------{
+
+var line  slLine  = na
+var line  tp1Line = na
+var line  tp2Line = na
+var label slLabel = na
+var label tp1Label = na
+var label tp2Label = na
+
+if showTargets and (buySig or sellSig)
+    line.delete(slLine)
+    line.delete(tp1Line)
+    line.delete(tp2Line)
+    label.delete(slLabel)
+    label.delete(tp1Label)
+    label.delete(tp2Label)
+    
+    float entryPrice = close
+    float dirMult    = buySig ? 1.0 : -1.0
+    float slDist     = atrValue * slAtrMult
+    float slPrice    = entryPrice - dirMult * slDist
+    float tp1Price   = entryPrice + dirMult * slDist * tp1R
+    float tp2Price   = entryPrice + dirMult * slDist * tp2R
+    int   rightBar   = bar_index + 24
+    
+    slLine  := line.new(bar_index, slPrice, rightBar, slPrice, color = color.new(bearColor, 0), style = line.style_dashed, width = 1)
+    tp1Line := line.new(bar_index, tp1Price, rightBar, tp1Price, color = color.new(bullColor, 0), style = line.style_dotted, width = 1)
+    tp2Line := line.new(bar_index, tp2Price, rightBar, tp2Price, color = color.new(bullColor, 0), style = line.style_solid, width = 1)
+    
+    slLabel  := label.new(rightBar, slPrice,  "SL "  + str.tostring(slPrice, format.mintick),  style = label.style_label_left, color = color.new(bearColor, 82), textcolor = bearColor, size = size.small)
+    tp1Label := label.new(rightBar, tp1Price, "TP1 " + str.tostring(tp1Price, format.mintick), style = label.style_label_left, color = color.new(bullColor, 82), textcolor = bullColor, size = size.small)
+    tp2Label := label.new(rightBar, tp2Price, "TP2 " + str.tostring(tp2Price, format.mintick), style = label.style_label_left, color = color.new(bullColor, 82), textcolor = bullColor, size = size.small)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Support / Resistance Zones
+//---------------------------------------------------------------------------------------------------------------------{
+
+var box[] resBoxes = array.new<box>()
+var box[] supBoxes = array.new<box>()
+
+float pivHigh = ta.pivothigh(pivLen, pivLen)
+float pivLow  = ta.pivotlow(pivLen, pivLen)
+float zoneH   = atrValue * 0.5
+
+if showSR and not na(pivHigh)
+    box newResBox = box.new(bar_index - pivLen, pivHigh + zoneH * 0.5, bar_index, pivHigh - zoneH * 0.5, border_color = color.new(bearColor, 40), bgcolor = color.new(bearColor, 84))
+    array.push(resBoxes, newResBox)
+    if array.size(resBoxes) > maxZones
+        box.delete(array.shift(resBoxes))
+
+if showSR and not na(pivLow)
+    box newSupBox = box.new(bar_index - pivLen, pivLow + zoneH * 0.5, bar_index, pivLow - zoneH * 0.5, border_color = color.new(bullColor, 40), bgcolor = color.new(bullColor, 84))
+    array.push(supBoxes, newSupBox)
+    if array.size(supBoxes) > maxZones
+        box.delete(array.shift(supBoxes))
+
+if barstate.islast
+    for resBox in resBoxes
+        box.set_right(resBox, bar_index + 12)
+    for supBox in supBoxes
+        box.set_right(supBox, bar_index + 12)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Quant Factors Analysis
+//---------------------------------------------------------------------------------------------------------------------{
+
+float trendScore = clampValue((close > emaSlow ? 0.5 : -0.5) + (emaFast > emaSlow ? 0.5 : -0.5))
+float momScore   = clampValue((rsiValue - 50) / 30)
+
+[macdL, macdS, macdH] = ta.macd(close, 12, 26, 9)
+float macdScore = atrValue > 0 ? clampValue((macdL - macdS) / (atrValue * 0.5)) : 0.0
+
+float rocValue = ta.roc(close, rocLen)
+float rocScore = clampValue(rocValue / 5)
+
+float basisVal = ta.sma(close, 20)
+float devVal   = ta.stdev(close, 20)
+float pctB     = devVal > 0 ? (close - (basisVal - 2 * devVal)) / (4 * devVal) : 0.5
+float bandScore = clampValue((pctB - 0.5) * 2)
+
+float volAbs   = math.abs(nz(volume))
+float volAvg   = ta.sma(volAbs, 20)
+bool  hasVol   = volAvg > 0
+float volScore = hasVol ? clampValue(((close > open ? 1 : -1) * nz(volume)) / (volAvg * 1.5)) : 0.0
+
+float scoreSum  = trendScore + momScore + macdScore + rocScore + bandScore + (hasVol ? volScore : 0.0)
+float scoreCnt  = 5 + (hasVol ? 1 : 0)
+float composite = scoreSum / scoreCnt
+float rating5   = math.max(1.0, math.min(5.0, 3 + composite * 2))
+
+float htfScore  = request.security(syminfo.tickerid, htfTf, getHtfBias()[1], lookahead = barmerge.lookahead_off)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Quant Panel
+//---------------------------------------------------------------------------------------------------------------------{
+
+string actualPos = panelPos == "Top Right" ? position.top_right : panelPos == "Top Left" ? position.top_left : panelPos == "Bottom Right" ? position.bottom_right : position.bottom_left
+var table infoPanel = table.new(actualPos, 2, 10, border_width = 1, frame_width = 1, frame_color = color.new(color.gray, 30))
+
+if showPanel and barstate.islast
+    table.cell(infoPanel, 0, 0, "APEX QUANT", text_color = chart.fg_color, text_size = size.normal, bgcolor = color.new(#1b2429, 0), text_halign = text.align_left)
+    table.cell(infoPanel, 1, 0, str.tostring(rating5, "#.0") + "/5", text_color = chart.fg_color, text_size = size.normal, bgcolor = getGradeColor(composite), text_halign = text.align_center)
+    
+    createRow(infoPanel, 1, "VERDICT", composite, getGradeText(composite))
+    createRow(infoPanel, 2, "HTF Bias (" + htfTf + ")", htfScore, getGradeText(htfScore))
+    createRow(infoPanel, 3, "Trend", trendScore, getGradeText(trendScore))
+    createRow(infoPanel, 4, "Momentum RSI", momScore, getGradeText(momScore))
+    createRow(infoPanel, 5, "MACD", macdScore, getGradeText(macdScore))
+    createRow(infoPanel, 6, "ROC", rocScore, getGradeText(rocScore))
+    createRow(infoPanel, 7, "Bands %B", bandScore, getGradeText(bandScore))
+    
+    table.cell(infoPanel, 0, 8, "Volume", text_color = chart.fg_color, text_size = size.small, bgcolor = color.new(#2b343a, 0), text_halign = text.align_left)
+    table.cell(infoPanel, 1, 8, hasVol ? getGradeText(volScore) : "n/a", text_color = chart.fg_color, text_size = size.small, bgcolor = hasVol ? getGradeColor(volScore) : color.new(color.gray, 0), text_halign = text.align_center)
+    
+    table.cell(infoPanel, 0, 9, syminfo.ticker, text_color = color.new(chart.fg_color, 25), text_size = size.small, bgcolor = color.new(#1b2429, 0), text_halign = text.align_left)
+    table.cell(infoPanel, 1, 9, timeframe.period, text_color = color.new(chart.fg_color, 25), text_size = size.small, bgcolor = color.new(#1b2429, 0), text_halign = text.align_center)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Alerts
+//---------------------------------------------------------------------------------------------------------------------{
+
+alertcondition(buySig,   "APEX Buy",  "APEX BUY {{ticker}} {{interval}}")
+alertcondition(sellSig,  "APEX Sell", "APEX SELL {{ticker}} {{interval}}")
+alertcondition(contraUp, "APEX Bull Reversal", "APEX bullish reversal {{ticker}}")
+alertcondition(contraDn, "APEX Bear Reversal", "APEX bearish reversal {{ticker}}")
+
+bool trendCloudFlipBull = showCloud and emaFast > emaSlow and emaFast[1] <= emaSlow[1]
+bool trendCloudFlipBear = showCloud and emaFast < emaSlow and emaFast[1] >= emaSlow[1]
+
+alertcondition(trendCloudFlipBull, "APEX Trend Cloud Bullish Flip", "APEX Trend Cloud flipped Bullish for {{ticker}}")
+alertcondition(trendCloudFlipBear, "APEX Trend Cloud Bearish Flip", "APEX Trend Cloud flipped Bearish for {{ticker}}")
+
+if buySig
+    alert("APEX BUY "  + syminfo.ticker + " " + timeframe.period, alert.freq_once_per_bar_close)
+if sellSig
+    alert("APEX SELL " + syminfo.ticker + " " + timeframe.period, alert.freq_once_per_bar_close)
+if contraUp
+    alert("APEX Bullish Reversal " + syminfo.ticker + " " + timeframe.period, alert.freq_once_per_bar_close)
+if contraDn
+    alert("APEX Bearish Reversal " + syminfo.ticker + " " + timeframe.period, alert.freq_once_per_bar_close)
+if trendCloudFlipBull
+    alert("APEX Trend Cloud Flipped Bullish " + syminfo.ticker, alert.freq_once_per_bar_close)
+if trendCloudFlipBear
+    alert("APEX Trend Cloud Flipped Bearish " + syminfo.ticker, alert.freq_once_per_bar_close)
+
+//---------------------------------------------------------------------------------------------------------------------}

@@ -1,0 +1,417 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © AlgoAlpha
+
+// Original code by @AlgoAlpha on TradingView.com
+// Refactored, visually updated, and alert-optimized by LuxAlgo Quant Agent
+
+//@version=6
+indicator("Support and Resistance Retest Breakout Signals [AlgoAlpha]", "AlgoAlpha - SR Retest Breakout", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500, max_bars_back = 5000)
+import TradingView/ta/12
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Inputs
+//---------------------------------------------------------------------------------------------------------------------{
+
+zoneGroup = "S/R Zone Settings"
+timeHorizon = input.int(7, "Time Horizon", minval = 1, group = zoneGroup, tooltip = "Controls how many bars are used to confirm swing points. Higher values create fewer, broader zones. Lower values create more responsive zones.")
+volatilityLookback = input.int(40, "volatility Lookback", minval = 1, group = zoneGroup, tooltip = "Number of bars used to measure normal price variation for matching nearby swing highs or lows.")
+zoneTolerance = input.float(1.0, "Zone Match Tolerance", minval = 0.01, step = 0.05, group = zoneGroup, tooltip = "Controls how close two same-side swing points must be to form a zone. Higher values allow wider matches.")
+swingMemory = input.int(500, "Swing Memory", minval = 10, maxval = 500, group = zoneGroup, tooltip = "Maximum number of internal swing points stored for zone detection.")
+
+volumeGroup = "Volume Balance"
+allowSeconds = input.bool(false, "Allow Seconds", group = volumeGroup, tooltip = "Allows the script to request seconds-based lower timeframes when the calculated granularity requires them. Disable this for accounts or symbols where seconds data may cause runtime errors. When disabled, requests are clamped to one minute or the current seconds chart timeframe.")
+intragran = input.int(10, "Bar Granularity", minval = 1, maxval = 100, group = volumeGroup, tooltip = "Controls the lower-timeframe sampling depth for buy/sell balance. The script requests approximately the chart timeframe divided by this value. Higher values request smaller intrabars for more detail, but may increase runtime load and can require seconds data on very low chart timeframes. Lower values are lighter but less granular.")
+DELTA_LOOKBACK_LIMIT = 1000
+
+managementGroup = "Zone Management"
+preventOverlap = input.bool(true, "Avoid Overlapping Zones", group = managementGroup, tooltip = "When enabled, new zones are skipped if they overlap an existing zone in both price and time.")
+expiryBars = input.int(500, "Zone Expiration", minval = 1, group = managementGroup, tooltip = "Number of bars after which unfinished zones are removed from the chart.")
+maxZones = input.int(150, "Maximum Active Zones", minval = 1, maxval = 160, group = managementGroup, tooltip = "Maximum number of zones kept on the chart. Each zone uses multiple boxes, so this limit is capped to stay within TradingView object limits.")
+maxSignalLabels = input.int(250, "Signal Label Limit", minval = 1, maxval = 500, group = managementGroup, tooltip = "Maximum number of retest signal labels kept on the chart.")
+
+appearanceGroup = "Appearance"
+deltaBarTransparency = input.int(60, "Balance Bar Transparency", minval = 0, maxval = 100, group = appearanceGroup, tooltip = "Transparency of the internal buy/sell volume balance bars.")
+zoneFillTransparency = input.int(85, "Zone Fill Transparency", minval = 0, maxval = 100, group = appearanceGroup, tooltip = "Transparency of the main support/resistance zone fill.")
+showDeltaBars = input.bool(true, "Show Buy/Sell Balance", group = appearanceGroup, tooltip = "Shows green and red volume balance bars inside each support/resistance zone.")
+showMidline = input.bool(true, "Show Center Line", group = appearanceGroup, tooltip = "Shows a dotted center line inside each zone. This is visual only and is not used for signal logic.")
+showRetestSignals = input.bool(true, "Show Retest Signals", group = appearanceGroup, tooltip = "Shows bullish and bearish labels after price cleanly breaks through a zone and retests it.")
+colorGreen = input.color(#089981, "Colors", inline = "colors", group = appearanceGroup)
+colorRed = input.color(#f23645, "", inline = "colors", group = appearanceGroup, tooltip = "Bullish and bearish colors used for retest labels and volume balance bars.")
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Types
+//---------------------------------------------------------------------------------------------------------------------{
+
+type PivotPoint
+    int idx
+    float price
+    float o
+    float h
+    float l
+    float c
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Volume Data
+//---------------------------------------------------------------------------------------------------------------------{
+
+chartTfSeconds = timeframe.in_seconds()
+targetTfSeconds = math.max(1, int(chartTfSeconds * 1.0 / intragran))
+useChartTf = not allowSeconds and timeframe.isseconds
+tfSeconds = useChartTf ? chartTfSeconds : allowSeconds ? targetTfSeconds : math.max(60, targetTfSeconds)
+ltf = useChartTf ? timeframe.period : timeframe.from_seconds(tfSeconds)
+
+[upv, downv, deltav] = ta.requestUpAndDownVolume(ltf)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Functions and Methods
+//---------------------------------------------------------------------------------------------------------------------{
+
+edgeDistance(bool isResistance, float edge, float val) =>
+    isResistance ? edge - val : val - edge
+
+includeDistance(float currentMax, bool isResistance, float edge, float val, float zoneTolerance) =>
+    float d = edgeDistance(isResistance, edge, val)
+    d >= 0.0 and d <= zoneTolerance ? math.max(currentMax, d) : currentMax
+
+zoneThickness(PivotPoint p1, PivotPoint p2, bool isResistance, float zoneTolerance) =>
+    float edge = isResistance ? math.max(p1.h, p2.h) : math.min(p1.l, p2.l)
+    float maxDist = 0.0
+    maxDist := includeDistance(maxDist, isResistance, edge, p1.o, zoneTolerance)
+    maxDist := includeDistance(maxDist, isResistance, edge, p1.h, zoneTolerance)
+    maxDist := includeDistance(maxDist, isResistance, edge, p1.l, zoneTolerance)
+    maxDist := includeDistance(maxDist, isResistance, edge, p1.c, zoneTolerance)
+    maxDist := includeDistance(maxDist, isResistance, edge, p2.o, zoneTolerance)
+    maxDist := includeDistance(maxDist, isResistance, edge, p2.h, zoneTolerance)
+    maxDist := includeDistance(maxDist, isResistance, edge, p2.l, zoneTolerance)
+    maxDist := includeDistance(maxDist, isResistance, edge, p2.c, zoneTolerance)
+    math.max(maxDist, syminfo.mintick)
+
+zoneBounds(PivotPoint p1, PivotPoint p2, bool isResistance, float zoneTolerance) =>
+    float edge = isResistance ? math.max(p1.h, p2.h) : math.min(p1.l, p2.l)
+    float thickness = zoneThickness(p1, p2, isResistance, zoneTolerance)
+    float top = isResistance ? edge : edge + thickness
+    float bottom = isResistance ? edge - thickness : edge
+    [math.max(top, bottom), math.min(top, bottom)]
+
+rectsOverlap(int aLeft, int aRight, float aTop, float aBottom, int bLeft, int bRight, float bTop, float bBottom) =>
+    bool timeOverlap = aLeft <= bRight and aRight >= bLeft
+    bool priceOverlap = aBottom <= bTop and aTop >= bBottom
+    timeOverlap and priceOverlap
+
+formationVolume(int x1, int x2, int maxBars) =>
+    int leftX = math.min(x1, x2)
+    int rightX = math.max(x1, x2)
+    int fromBack = math.max(bar_index - rightX, 0)
+    int toBack = math.min(bar_index - leftX, maxBars)
+    float upSum = 0.0
+    float downSum = 0.0
+    if toBack >= fromBack
+        for k = fromBack to toBack
+            upSum += nz(upv[k])
+            downSum += math.abs(nz(downv[k]))
+    [math.max(upSum, 0.0000001), math.max(downSum, 0.0000001)]
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Main Variables
+//---------------------------------------------------------------------------------------------------------------------{
+
+ph = ta.pivothigh(high, timeHorizon, timeHorizon)
+pl = ta.pivotlow(low, timeHorizon, timeHorizon)
+tolerance = ta.stdev(close, volatilityLookback) * zoneTolerance
+
+var int lastType = 0
+var PivotPoint[] pivh = array.new<PivotPoint>()
+var PivotPoint[] pivl = array.new<PivotPoint>()
+var PivotPoint[] zzHighs = array.new<PivotPoint>()
+var PivotPoint[] zzLows = array.new<PivotPoint>()
+
+var box[] zoneBoxes = array.new_box()
+var box[] zoneBullVolBoxes = array.new_box()
+var box[] zoneBearVolBoxes = array.new_box()
+var line[] zoneMids = array.new_line()
+var float[] zoneTops = array.new_float()
+var float[] zoneBottoms = array.new_float()
+var float[] zoneUpVolData = array.new_float()
+var float[] zoneDownVolData = array.new_float()
+var int[] zoneStarts = array.new_int()
+var int[] zoneCreatedBars = array.new_int()
+var int[] zoneStates = array.new_int()
+var int[] zoneBreakBars = array.new_int()
+var label[] signalLabels = array.new_label()
+
+bool newResistanceZone = false
+bool newSupportZone = false
+bool bullishRetestSignal = false
+bool bearishRetestSignal = false
+bool bullishBreakoutSignal = false
+bool bearishBreakoutSignal = false
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Zone Operations
+//---------------------------------------------------------------------------------------------------------------------{
+
+overlapsExisting(int leftX, int rightX, float zoneTop, float zoneBottom) =>
+    bool overlaps = false
+    if preventOverlap and zoneBoxes.size() > 0
+        for j = 0 to zoneBoxes.size() - 1
+            box existingBox = zoneBoxes.get(j)
+            int existingLeft = box.get_left(existingBox)
+            int existingRight = box.get_right(existingBox)
+            float existingTop = box.get_top(existingBox)
+            float existingBottom = box.get_bottom(existingBox)
+            if rectsOverlap(leftX, rightX, zoneTop, zoneBottom, existingLeft, existingRight, existingTop, existingBottom)
+                overlaps := true
+                break
+    overlaps
+
+updateDeltaBoxes(int i) =>
+    if zoneBoxes.size() > i and zoneBullVolBoxes.size() > i and zoneBearVolBoxes.size() > i and zoneUpVolData.size() > i and zoneDownVolData.size() > i
+        box zBox = zoneBoxes.get(i)
+        box bullBox = zoneBullVolBoxes.get(i)
+        box bearBox = zoneBearVolBoxes.get(i)
+        int leftX = box.get_left(zBox)
+        int rightX = math.max(box.get_right(zBox), leftX + 1)
+        float top = box.get_top(zBox)
+        float bottom = box.get_bottom(zBox)
+        float midY = math.avg(top, bottom)
+        int midX = int(math.avg(leftX, rightX))
+        int span = math.max(midX - leftX, 1)
+        float upVol = math.max(zoneUpVolData.get(i), 0.0000001)
+        float downVol = math.max(zoneDownVolData.get(i), 0.0000001)
+        float ratio = upVol / downVol
+        box.set_left(bearBox, leftX)
+        box.set_top(bearBox, top)
+        box.set_bottom(bearBox, midY)
+        box.set_bgcolor(bearBox, showDeltaBars ? color.new(colorRed, deltaBarTransparency) : color.new(colorRed, 100))
+        box.set_border_color(bearBox, color.new(colorRed, 100))
+        box.set_left(bullBox, leftX)
+        box.set_top(bullBox, midY)
+        box.set_bottom(bullBox, bottom)
+        box.set_bgcolor(bullBox, showDeltaBars ? color.new(colorGreen, deltaBarTransparency) : color.new(colorGreen, 100))
+        box.set_border_color(bullBox, color.new(colorGreen, 100))
+        if ratio > 1
+            box.set_right(bullBox, midX)
+            box.set_right(bearBox, int(leftX + span / ratio))
+        else
+            box.set_right(bullBox, int(leftX + span * ratio))
+            box.set_right(bearBox, midX)
+
+deleteZone(int i) =>
+    zoneBoxes.remove(i).delete()
+    zoneBullVolBoxes.remove(i).delete()
+    zoneBearVolBoxes.remove(i).delete()
+    zoneMids.remove(i).delete()
+    zoneTops.remove(i)
+    zoneBottoms.remove(i)
+    zoneUpVolData.remove(i)
+    zoneDownVolData.remove(i)
+    zoneStarts.remove(i)
+    zoneCreatedBars.remove(i)
+    zoneStates.remove(i)
+    zoneBreakBars.remove(i)
+
+newZone(int leftX, int rightX, float zoneTop, float zoneBottom, float upVol, float downVol) =>
+    bool created = false
+    if zoneTop > zoneBottom and not overlapsExisting(leftX, rightX, zoneTop, zoneBottom)
+        float mid = math.avg(zoneTop, zoneBottom)
+        box zBox = box.new(left = leftX, top = zoneTop, right = rightX, bottom = zoneBottom, xloc = xloc.bar_index, border_color = color.new(chart.fg_color, 100), border_width = 0, border_style = line.style_solid, bgcolor = color.new(chart.fg_color, zoneFillTransparency))
+        box bearVolBox = box.new(left = leftX, top = zoneTop, right = rightX, bottom = mid, xloc = xloc.bar_index, border_color = color.new(colorRed, 100), bgcolor = showDeltaBars ? color.new(colorRed, deltaBarTransparency) : color.new(colorRed, 100))
+        box bullVolBox = box.new(left = leftX, top = mid, right = rightX, bottom = zoneBottom, xloc = xloc.bar_index, border_color = color.new(colorGreen, 100), bgcolor = showDeltaBars ? color.new(colorGreen, deltaBarTransparency) : color.new(colorGreen, 100))
+        line zMid = line.new(x1 = leftX, y1 = mid, x2 = rightX, y2 = mid, xloc = xloc.bar_index, color = showMidline ? color.new(chart.fg_color, 0) : color.new(chart.fg_color, 100), style = line.style_dotted, width = 1)
+        zoneBoxes.unshift(zBox)
+        zoneBullVolBoxes.unshift(bullVolBox)
+        zoneBearVolBoxes.unshift(bearVolBox)
+        zoneMids.unshift(zMid)
+        zoneTops.unshift(zoneTop)
+        zoneBottoms.unshift(zoneBottom)
+        zoneUpVolData.unshift(upVol)
+        zoneDownVolData.unshift(downVol)
+        zoneStarts.unshift(leftX)
+        zoneCreatedBars.unshift(bar_index)
+        zoneStates.unshift(0)
+        zoneBreakBars.unshift(na)
+        updateDeltaBoxes(0)
+        created := true
+    created
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Core Logic
+//---------------------------------------------------------------------------------------------------------------------{
+
+// Pivot updates
+if not na(ph)
+    PivotPoint hp = PivotPoint.new(bar_index - timeHorizon, ph, open[timeHorizon], high[timeHorizon], low[timeHorizon], close[timeHorizon])
+    if lastType != 1 or pivh.size() == 0
+        pivh.unshift(hp)
+    else
+        PivotPoint activeHigh = pivh.first()
+        if ph > activeHigh.price
+            pivh.unshift(hp)
+    lastType := 1
+
+if not na(pl)
+    PivotPoint lp = PivotPoint.new(bar_index - timeHorizon, pl, open[timeHorizon], high[timeHorizon], low[timeHorizon], close[timeHorizon])
+    if lastType != -1 or pivl.size() == 0
+        pivl.unshift(lp)
+    else
+        PivotPoint activeLow = pivl.first()
+        if pl < activeLow.price
+            pivl.unshift(lp)
+    lastType := -1
+
+// Zone creation
+if lastType != lastType[1] and pivh.size() > 0 and pivl.size() > 0
+    if lastType == 1
+        PivotPoint confirmedLow = pivl.first()
+        zzLows.unshift(confirmedLow)
+        if zzLows.size() >= 2 and not na(tolerance)
+            PivotPoint low2 = zzLows.get(0)
+            PivotPoint low1 = zzLows.get(1)
+            bool lowsWithinTolerance = math.abs(low2.price - low1.price) <= tolerance
+            if lowsWithinTolerance
+                [zoneTop, zoneBottom] = zoneBounds(low1, low2, false, tolerance)
+                int leftX = math.min(low1.idx, low2.idx)
+                int rightX = bar_index + 1
+                [upVol, downVol] = formationVolume(low1.idx, low2.idx, DELTA_LOOKBACK_LIMIT)
+                if newZone(leftX, rightX, zoneTop, zoneBottom, upVol, downVol)
+                    newSupportZone := true
+
+    if lastType == -1
+        PivotPoint confirmedHigh = pivh.first()
+        zzHighs.unshift(confirmedHigh)
+        if zzHighs.size() >= 2 and not na(tolerance)
+            PivotPoint high2 = zzHighs.get(0)
+            PivotPoint high1 = zzHighs.get(1)
+            bool highsWithinTolerance = math.abs(high2.price - high1.price) <= tolerance
+            if highsWithinTolerance
+                [zoneTop, zoneBottom] = zoneBounds(high1, high2, true, tolerance)
+                int leftX = math.min(high1.idx, high2.idx)
+                int rightX = bar_index + 1
+                [upVol, downVol] = formationVolume(high1.idx, high2.idx, DELTA_LOOKBACK_LIMIT)
+                if newZone(leftX, rightX, zoneTop, zoneBottom, upVol, downVol)
+                    newResistanceZone := true
+
+// Pivot memory
+while pivh.size() > swingMemory
+    pivh.pop()
+
+while pivl.size() > swingMemory
+    pivl.pop()
+
+while zzHighs.size() > swingMemory
+    zzHighs.pop()
+
+while zzLows.size() > swingMemory
+    zzLows.pop()
+
+// Zone limit
+while zoneBoxes.size() > maxZones
+    deleteZone(zoneBoxes.size() - 1)
+
+// Zone management
+if zoneBoxes.size() > 0
+    for i = zoneBoxes.size() - 1 to 0
+        if i < zoneBoxes.size()
+            box zBox = zoneBoxes.get(i)
+            line zMid = zoneMids.get(i)
+            float zTop = zoneTops.get(i)
+            float zBottom = zoneBottoms.get(i)
+            int zStart = zoneStarts.get(i)
+            int zState = zoneStates.get(i)
+            int zBreakBar = zoneBreakBars.get(i)
+            int age = bar_index - zStart
+            bool expired = age > expiryBars
+
+            if expired
+                deleteZone(i)
+            else
+                box.set_bgcolor(zBox, color.new(chart.fg_color, zoneFillTransparency))
+                box.set_border_color(zBox, color.new(chart.fg_color, 100))
+                line.set_color(zMid, showMidline ? color.new(chart.fg_color, 0) : color.new(chart.fg_color, 100))
+                bool zoneFrozen = math.abs(zState) == 3
+                bool wholeBelow = high < zBottom
+                bool wholeAbove = low > zTop
+                bool closeAbove = close > zTop
+                bool closeBelow = close < zBottom
+                bool touchedZone = high >= zBottom and low <= zTop
+
+                if not zoneFrozen
+                    box.set_right(zBox, bar_index + 1)
+                    line.set_x2(zMid, bar_index + 1)
+
+                    if zState == 0
+                        if wholeBelow
+                            zState := -1
+                            zBreakBar := na
+                        else if wholeAbove
+                            zState := 1
+                            zBreakBar := na
+
+                    else if zState == -1
+                        if closeAbove
+                            zState := 2
+                            zBreakBar := bar_index
+                            bullishBreakoutSignal := true
+                        else if wholeAbove
+                            zState := 1
+                            zBreakBar := na
+
+                    else if zState == 1
+                        if closeBelow
+                            zState := -2
+                            zBreakBar := bar_index
+                            bearishBreakoutSignal := true
+                        else if wholeBelow
+                            zState := -1
+                            zBreakBar := na
+
+                    else if zState == 2
+                        bool bullishRetest = not na(zBreakBar) and bar_index > zBreakBar and touchedZone and close >= zBottom
+                        if bullishRetest
+                            bullishRetestSignal := true
+                            zState := 3
+                            box.set_right(zBox, bar_index)
+                            line.set_x2(zMid, bar_index)
+                            if showRetestSignals
+                                label sig = label.new(x = bar_index, y = zBottom, text = "▲", xloc = xloc.bar_index, yloc = yloc.price, color = color.new(colorGreen, 65), style = label.style_label_up, textcolor = chart.fg_color, size = size.small)
+                                signalLabels.unshift(sig)
+                        else if closeBelow
+                            zState := wholeBelow ? -1 : 0
+                            zBreakBar := na
+
+                    else if zState == -2
+                        bool bearishRetest = not na(zBreakBar) and bar_index > zBreakBar and touchedZone and close <= zTop
+                        if bearishRetest
+                            bearishRetestSignal := true
+                            zState := -3
+                            box.set_right(zBox, bar_index)
+                            line.set_x2(zMid, bar_index)
+                            if showRetestSignals
+                                label sig = label.new(x = bar_index, y = zTop, text = "▼", xloc = xloc.bar_index, yloc = yloc.price, color = color.new(colorRed, 65), style = label.style_label_down, textcolor = chart.fg_color, size = size.small)
+                                signalLabels.unshift(sig)
+                        else if closeAbove
+                            zState := wholeAbove ? 1 : 0
+                            zBreakBar := na
+
+                    zoneStates.set(i, zState)
+                    zoneBreakBars.set(i, zBreakBar)
+
+                updateDeltaBoxes(i)
+
+// Label memory
+while signalLabels.size() > maxSignalLabels
+    label oldSig = signalLabels.pop()
+    label.delete(oldSig)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Alerts
+//---------------------------------------------------------------------------------------------------------------------{
+
+alertcondition(newResistanceZone, "New Resistance Zone", "A new resistance zone was detected from two matching swing highs.")
+alertcondition(newSupportZone, "New Support Zone", "A new support zone was detected from two matching swing lows.")
+alertcondition(bullishBreakoutSignal, "Bullish Zone Breakout", "Price broke above a zone.")
+alertcondition(bearishBreakoutSignal, "Bearish Zone Breakout", "Price broke below a zone.")
+alertcondition(bullishRetestSignal, "Bullish Zone Retest", "Price was fully below the zone, broke above it, and retested into the zone.")
+alertcondition(bearishRetestSignal, "Bearish Zone Retest", "Price was fully above the zone, broke below it, and retested into the zone.")
+
+//---------------------------------------------------------------------------------------------------------------------}

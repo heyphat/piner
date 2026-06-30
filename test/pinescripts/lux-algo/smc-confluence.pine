@@ -1,0 +1,100 @@
+//@version=6
+// Original code by @Mr_Basit_Forex on TradingView.com
+// Refactored, visually updated, and alert-optimized by LuxAlgo Quant Agent
+indicator("SMC Confluence + EMA 9/15 + Fib 0.5", overlay=true, max_labels_count=500)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Inputs
+//---------------------------------------------------------------------------------------------------------------------{
+length  = input.int(5, title="Swing Period", minval=2)
+emaFast = input.int(9, title="Fast EMA")
+emaSlow = input.int(15, title="Slow EMA")
+showFib = input.bool(true, title="Show 0.5 Equilibrium")
+
+//---------------------------------------------------------------------------------------------------------------------}
+// EMA Calculations
+//---------------------------------------------------------------------------------------------------------------------{
+e9  = ta.ema(close, emaFast)
+e15 = ta.ema(close, emaSlow)
+plot(e9,  color=color.new(#5b9cf6, 0), title="EMA Fast")
+plot(e15, color=color.new(chart.fg_color, 50), title="EMA Slow")
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Market Structure (CHoCH)
+//---------------------------------------------------------------------------------------------------------------------{
+sh = ta.pivothigh(high, length, length)
+sl = ta.pivotlow(low, length, length)
+
+var float lastSh = na
+var float lastSl = na
+var int   trend  = 0 
+
+if not na(sh)
+    lastSh := high[length]
+if not na(sl)
+    lastSl := low[length]
+
+// CHoCH Logic
+bool bullishChoch = (not na(lastSh)) and (close > lastSh) and (trend <= 0)
+bool bearishChoch = (not na(lastSl)) and (close < lastSl) and (trend >= 0)
+
+if bullishChoch
+    trend := 1
+if bearishChoch
+    trend := -1
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Liquidity Sweep
+//---------------------------------------------------------------------------------------------------------------------{
+hh = ta.highest(high[1], 20)
+ll = ta.lowest(low[1], 20)
+liqBuy  = (low < ll) and (close > ll)
+liqSell = (high > hh) and (close < hh)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Fibonacci 0.5 (Equilibrium)
+//---------------------------------------------------------------------------------------------------------------------{
+eq = (not na(lastSh) and not na(lastSl)) ? (lastSh + lastSl) / 2 : na
+var line fibL = na
+if showFib and not na(eq)
+    line.delete(fibL)
+    fibL := line.new(bar_index - 20, eq, bar_index + 5, eq, color=color.new(chart.fg_color, 50), style=line.style_dotted)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// FVG Logic
+//---------------------------------------------------------------------------------------------------------------------{
+fvgB = (low[0] > high[2]) and (close[1] > high[2])
+fvgS = (high[0] < low[2]) and (close[1] < low[2])
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Final Confirmed Entry
+//---------------------------------------------------------------------------------------------------------------------{
+// Rules: Trend is Bullish + Price < 0.5 + EMA Fast > Slow + (Sweep or FVG)
+emaBull = e9 > e15
+emaBear = e9 < e15
+
+buyC  = (trend == 1)  and (close < eq) and emaBull and (liqBuy or fvgB)
+sellC = (trend == -1) and (close > eq) and emaBear and (liqSell or fvgS)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Plots
+//---------------------------------------------------------------------------------------------------------------------{
+plotshape(bullishChoch, "CHoCH Up",   shape.labelup,   location.belowbar, color.new(#089981, 0),   0, "CHoCH", textcolor=color.white)
+plotshape(bearishChoch, "CHoCH Down", shape.labeldown, location.abovebar, color.new(#f23645, 0), 0, "CHoCH", textcolor=color.white)
+
+plotshape(buyC,  "BUY",  shape.triangleup,   location.belowbar, color.new(#089981, 0), 0, "CONFIRMED BUY", size=size.small)
+plotshape(sellC, "SELL", shape.triangledown, location.abovebar, color.new(#f23645, 0),   0, "CONFIRMED SELL", size=size.small)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// Alerts
+//---------------------------------------------------------------------------------------------------------------------{
+if buyC
+    alert("Confirmed Buy Signal", alert.freq_once_per_bar_close)
+if sellC
+    alert("Confirmed Sell Signal", alert.freq_once_per_bar_close)
+if bullishChoch
+    alert("Bullish CHoCH", alert.freq_once_per_bar_close)
+if bearishChoch
+    alert("Bearish CHoCH", alert.freq_once_per_bar_close)
+
+//---------------------------------------------------------------------------------------------------------------------}

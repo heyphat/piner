@@ -1,0 +1,52 @@
+name: Bug report
+description: A Pine v6 script behaves differently in Piner than documented by TradingView
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for the report! A minimal reproducing snippet makes fixes far faster.
+  - type: textarea
+    id: pine-source
+    attributes:
+      label: Minimal Pine v6 source
+      description: The smallest script that reproduces the problem.
+      render: pine
+      placeholder: |
+        //@version=6
+        indicator("repro")
+        plot(ta.sma(close, 5))
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What TradingView / the Pine v6 manual produces (link the docs if you can).
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour in Piner
+      description: What Piner produced — plot values, an error, a crash, etc.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Piner version
+      placeholder: 0.1.8
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend
+      description: Which backend(s) show the issue?
+      options:
+        - both (js + interp)
+        - js only
+        - interp only
+        - not sure
+    validations:
+      required: true
