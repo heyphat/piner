@@ -4,10 +4,10 @@
  * Feature: library-import-export (Phase 1: filesystem loader).
  */
 import { describe, it, expect, afterAll } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { loadLibraryDir, loadLibraryManifest } from '../src/node.js';
+import { loadLibraryDir, loadLibraryManifest, fsLibrarySource } from '../src/node.js';
 import { compile, Engine, ArrayFeed, CompileError, type Bar } from '../src/index.js';
 
 // ── build a temp library tree: <root>/<pub>/<lib>/<version>.pine ──
@@ -39,7 +39,7 @@ const bars: Bar[] = Array.from({ length: 40 }, (_, i) => {
   const c = 100 + Math.sin(i / 5) * 10 + i * 0.3;
   return { time: i * 60000, open: c - 1, high: c + 2, low: c - 2, close: c, volume: 1000 + i };
 });
-const eqNaN = (a: number, b: number) => (Number.isNaN(a) && Number.isNaN(b)) || Math.abs(a - b) < 1e-9;
+const eqNaN = (a: number, b: number) => (Number.isNaN(a) && Number.isNaN(b)) || a === b;
 
 async function bothAgree(consumer: string, libraries = loadLibraryDir(root)) {
   const c = compile(consumer, { libraries });
@@ -55,6 +55,42 @@ async function bothAgree(consumer: string, libraries = loadLibraryDir(root)) {
   }
   return js;
 }
+
+describe('filesystem library loader — hardening (audit fixes)', () => {
+  it('fsLibrarySource matches identities case-sensitively', () => {
+    const src = fsLibrarySource(root);
+    expect(src({ publisher: 'acme', lib: 'util', version: '1', canonical: 'acme/util/1' })).toBeDefined();
+    // On a case-insensitive filesystem (macOS/Windows) `existsSync` would match `acme/`;
+    // the loader must still reject a mis-cased identity (consistent with loadLibraryDir).
+    expect(src({ publisher: 'ACME', lib: 'util', version: '1', canonical: 'ACME/util/1' })).toBeUndefined();
+    expect(src({ publisher: 'acme', lib: 'Util', version: '1', canonical: 'acme/Util/1' })).toBeUndefined();
+  });
+
+  it('loaders do not follow a symlink that escapes the library root', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'piner-outside-'));
+    writeFileSync(join(outside, '1.pine'), '//@version=6\nlibrary("Evil")\nexport f() => 0\n');
+    const escRoot = mkdtempSync(join(tmpdir(), 'piner-esc-'));
+    mkdirSync(join(escRoot, 'pub'), { recursive: true });
+    try {
+      symlinkSync(outside, join(escRoot, 'pub', 'evil'), 'dir'); // pub/evil -> outside tree
+    } catch {
+      rmSync(outside, { recursive: true, force: true });
+      rmSync(escRoot, { recursive: true, force: true });
+      return; // symlinks unavailable on this platform — skip
+    }
+    expect(loadLibraryDir(escRoot).map((e) => e.key)).toEqual([]);
+    expect(fsLibrarySource(escRoot)({ publisher: 'pub', lib: 'evil', version: '1', canonical: 'pub/evil/1' })).toBeUndefined();
+    rmSync(outside, { recursive: true, force: true });
+    rmSync(escRoot, { recursive: true, force: true });
+  });
+
+  it('loadLibraryManifest rejects a source path that escapes the manifest directory', () => {
+    const mroot = mkdtempSync(join(tmpdir(), 'piner-man-'));
+    writeFileSync(join(mroot, 'manifest.json'), JSON.stringify({ 'a/b/1': '../../../../etc/hosts' }));
+    expect(() => loadLibraryManifest(join(mroot, 'manifest.json'))).toThrow(/escapes/);
+    rmSync(mroot, { recursive: true, force: true });
+  });
+});
 
 describe('filesystem library loader (@heyphat/piner/node)', () => {
   it('loadLibraryDir scans <pub>/<lib>/<version>.pine into a registry, ignoring noise', () => {

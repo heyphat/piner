@@ -16,7 +16,7 @@ const bars: Bar[] = Array.from({ length: 40 }, (_, i) => {
   const c = 100 + Math.sin(i / 5) * 10 + i * 0.3;
   return { time: i * 60000, open: c - 1, high: c + 2, low: c - 2, close: c, volume: 1000 + i };
 });
-const eqNaN = (a: number, b: number) => (Number.isNaN(a) && Number.isNaN(b)) || Math.abs(a - b) < 1e-9;
+const eqNaN = (a: number, b: number) => (Number.isNaN(a) && Number.isNaN(b)) || a === b;
 
 async function bothAgree(compiled: Awaited<ReturnType<typeof compileAsync>>) {
   const js = new Engine(compiled, new ArrayFeed(bars), { backend: 'js' });

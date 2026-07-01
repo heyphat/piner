@@ -27,7 +27,7 @@ function makeBars(n: number): Bar[] {
 }
 const bars = makeBars(120);
 const eqNaN = (a: unknown, b: unknown) =>
-  (typeof a === 'number' && typeof b === 'number' && ((Number.isNaN(a) && Number.isNaN(b)) || Math.abs(a - b) < 1e-9)) || a === b;
+  (typeof a === 'number' && typeof b === 'number' && Number.isNaN(a) && Number.isNaN(b)) || a === b;
 
 async function crossCheck(c: CompiledScript): Promise<Engine> {
   const js = new Engine(c, new ArrayFeed(bars), { backend: 'js' });

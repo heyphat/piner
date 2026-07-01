@@ -436,7 +436,7 @@ class Parser {
     this.expect(TokenKind.Op, '/');
     const lib = this.expect(TokenKind.Ident).value;
     this.expect(TokenKind.Op, '/');
-    const version = Number(this.expect(TokenKind.Int).value);
+    const version = this.expect(TokenKind.Int).value;
     let alias: string | undefined;
     if (this.eat(TokenKind.Keyword, 'as')) alias = this.expect(TokenKind.Ident).value;
     return { kind: 'Import', user, lib, version, alias, loc };

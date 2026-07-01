@@ -18,7 +18,7 @@ onto the **fractal-chart** app. Companion to [`compiler-design.md`](./compiler-d
 > divergence traced to the v6 manual, where **piner matches the documented formula
 > in every case** (and is *more* correct than PineTS in several). Residual corpus
 > failures are deferred features (`matrix.eigenvalues/eigenvectors/pinv`, anchored
-> `ta.pivot_point_levels`, library `import`) or invalid/v2 doc
+> `ta.pivot_point_levels`) or invalid/v2 doc
 > fragments. For fractal-chart, piner is an architectural drop-in: Pine source → a
 > complete, serializable visual IR that fractal's source-agnostic renderer consumes.
 
@@ -112,22 +112,28 @@ For async or lazy sources (HTTP/CDN, large trees), `compileAsync(src, { resolveL
 fetches only the transitively-imported libraries via a caller-supplied provider (browser-safe;
 `fsLibrarySource` is a ready-made lazy filesystem provider) and then calls the pure `compile()`.
 
-piner is a **permissive superset**: it never rejects valid TradingView library code, but by design
-it accepts a few constructs TradingView rejects, because the inline-merge model makes imported code
-behave exactly like local code and piner uses a coarse (unqualified) type system:
+piner is a near-**permissive superset**: apart from the one deliberate restriction noted below, it
+does not reject valid TradingView library code, and by design it accepts a few constructs TradingView
+rejects, because the inline-merge model makes imported code behave exactly like local code and piner
+uses a coarse (unqualified) type system:
 
 | TradingView rule | piner | Why |
 |---|---|---|
 | Qualifier control — a `series` arg to a `simple`-inferred param is an error; `simple`/`series` keywords shape results | accepted / ignored | no qualifier-inference system; imported fns are inlined + monomorphized like local fns |
 | Exported fn may not call `input.*()` | accepted (input hoists to the consumer schema) | export purity not enforced beyond side-effecting global builtins + declarations |
+| Exported fn may not call `request.*()` unless `dynamic_requests=true` | accepted (piner does not model `dynamic_requests`) | same as above; `request.*` is treated like any other builtin call |
 | Exported fn may not use non-`const` globals (const globals are allowed) | accepted (const globals allowed too) | distinguishing const vs. non-const globals needs qualifier analysis |
 | Exported fn parameter types are mandatory | untyped params accepted | params are typeless in piner as in local UDFs |
 
-Intentional restriction (stricter than a naive reading): an import whose alias equals a builtin
-namespace (e.g. the default `ta` alias of `import TradingView/ta/12`) is a **CompileError** — piner
-does not implement TradingView's builtin-namespace *extension*. Overloaded exports (same
-method/function name distinguished only by receiver type or arity) collapse under name mangling,
-matching piner's pre-existing local-function limitation (imported ≡ local).
+Intentional restriction (the one place piner is *stricter* than TradingView): an import whose alias
+equals a builtin namespace (e.g. the default `ta` alias of `import TradingView/ta/12`) is a
+**CompileError** — piner does not implement TradingView's builtin-namespace *extension*. Give the
+import an explicit non-namespace alias (`import TradingView/ta/12 as tvta`) to use it.
+
+Exported **methods** with the same name are true overloads when distinguished by receiver type or
+arity (each resolves to its own definition). Two exported items that genuinely collide — a duplicate
+function/type/enum/constant name, or a method with an identical receiver type *and* arity — are a
+**CompileError** (Pine has no user-defined function overloading).
 
 ## 3. Built-in coverage
 
@@ -154,7 +160,7 @@ matching piner's pre-existing local-function limitation (imported ≡ local).
 | `runtime.*` & casts | ✅ | `runtime.error(msg)` halts the run; `max_bars_back()` (noop — full history kept); `line()/label()/box()/table()/linefill()/polyline()` type casts | — |
 | **`request.security()`** | ✅ v1 | same-symbol HTF resampling + sub-evaluation; `lookahead_off`/`on`; tuples; **same-TF is identity (no lag)**; cross-symbol degrades to na | realtime re-request |
 | `request.*` (fundamentals) | ⚠️ na-stub | dividends/earnings/splits/financial/economic/quandl/currency_rate/seed/footprint/security_lower_tf return na (no external feed) | real data feeds |
-| `TradingView/ta` library fns | ⚠️ partial | `ta.requestUpAndDownVolume(ltf)` provided as a builtin (resolves under the `ta` namespace); single-bar volume split by candle direction since there's no intrabar feed | true lower-TF split needs intrabar data |
+| `TradingView/ta` library fns | ⚠️ partial | `ta.requestUpAndDownVolume(ltf)` provided as a builtin — callable directly as `ta.requestUpAndDownVolume(...)` **without** any `import` (drop the `import TradingView/ta/12` line: its default alias `ta` shadows the builtin namespace and is a CompileError); single-bar volume split by candle direction since there's no intrabar feed | true lower-TF split needs intrabar data |
 | **`strategy.*`** | ✅ v1 | broker sim: entry/order/close/close_all/exit/cancel (market/limit/stop + **trailing** stops), next-bar-open fills, reverse + pyramiding, sizing/commission/slippage, PnL + trade list + equity curve + max drawdown/run-up, live read-backs, `when`-gating, **per-trade introspection** (`closedtrades`/`opentrades` `.profit`/`.entry_price`/…), **performance stats** (`netprofit_percent`/`openprofit_percent`/`grossprofit_percent`/`grossloss_percent`, `max_drawdown_percent`, `max_runup(_percent)`, `avg_trade(_percent)`, `avg_winning_trade(_percent)`, `avg_losing_trade(_percent)`, `max_contracts_held_all/long/short`, `position_entry_name`), **bare collection stats** (`closedtrades.first_index`, `opentrades.capital_held`), `default_entry_qty`, `convert_to_account`/`symbol` (single-currency identity) | OCA groups, `calc_on_every_tick`, `strategy.risk.*`, `margin_liquidation_price` (na — margin not modeled) |
 
 ### 3.1 Coverage audit (all 7 manual sections)
@@ -199,7 +205,7 @@ a genuine gap:
 | Bucket | ~count | Disposition |
 |---|---|---|
 | multiline string literals (`"""…"""`) | 0 | ✅ supported — the line-based lexer suspends layout across the delimiters (Pine v6 Apr-2026) |
-| library `import` / `export` | 2 | **genuine gap** — needs a library resolver + multi-module compilation |
+| library `import` / `export` | 0 | ✅ supported — registry-based resolver + inline-merge multi-module compilation (see §2) |
 | concatenated multi-script doc fences (`matrix.mult`/`matrix.new<type>` examples) | ~4 | corpus artifact (several `//@version=6` in one fence); filtered by the conformance `oneScript` guard |
 | v2/v3 fragments (`study($)`), indented-top-level & pseudo-code (`expr1`, multi-assign, polylines/donut snippets) | ~6 | not valid v6 / not runnable scripts |
 
@@ -336,7 +342,7 @@ builtins remain.
   found and fixed **16 real piner bugs** and confirmed **5 PineTS deviations** where
   piner matches the v6 manual (§4.1). Tail: ULP-level parity vs *TradingView itself*
   (PineTS is the current proxy); hot-path bars/sec benchmarks.
-- **Tails (genuine gaps):** library `import`/`export`,
+- **Tails (genuine gaps):**
   history on inline expressions, strategy OCA groups + `calc_on_every_tick`, live
   `syminfo` metadata, cross-symbol/realtime `request.security` + real `request.*`
   data feeds.

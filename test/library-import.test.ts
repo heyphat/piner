@@ -33,8 +33,7 @@ function makeBars(n: number, seed = 3): Bar[] {
 }
 
 const eqNaN = (a: unknown, b: unknown) =>
-  (typeof a === 'number' && typeof b === 'number'
-    && ((Number.isNaN(a) && Number.isNaN(b)) || Math.abs(a - b) < 1e-9)) || a === b;
+  (typeof a === 'number' && typeof b === 'number' && Number.isNaN(a) && Number.isNaN(b)) || a === b;
 
 /** Run both backends historically (+ optional realtime ticks); assert identical plot outputs. */
 async function crossCheck(c: CompiledScript, bars: Bar[], ticks: [Bar, boolean][] = []) {

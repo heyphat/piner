@@ -62,8 +62,16 @@ export { CompileError } from '../sema/analyze.js';
  * @param options  optional {@link CompileOptions}; supply `libraries` to resolve
  *                 `import` statements from an in-memory registry (no network/FS).
  *
- * Backward compatible: `compile(source)` on an import-free script takes the exact
- * existing pipeline path and produces byte-identical output (Req 2.4).
+ * Backward compatible for import-free scripts: `compile(source)` on a script with no
+ * `import` statements takes the exact existing pipeline path and produces byte-identical
+ * output (Req 2.4).
+ *
+ * BREAKING (since library import/export support): a script that CONTAINS `import`
+ * statements now resolves them. Every imported library must be present in `options.libraries`
+ * (or fetched via {@link compileAsync}'s provider); an unresolved import is a `CompileError`
+ * rather than being silently ignored as before. Likewise, a script with more than one
+ * top-level `indicator`/`strategy`/`library` declaration is now a `CompileError` (Req 1.5),
+ * matching TradingView; previously the extra declarations were ignored.
  */
 export function compile(source: string, options?: CompileOptions): CompiledScript {
   const lex = tokenize(source);

@@ -114,7 +114,7 @@ Stateful, slot-backed. All ✅ unless noted.
 | Stats | `correlation`@199 `median`@369 `mode`@939 `percentrank`@379 `percentile_nearest_rank`@861 `percentile_linear_interpolation`@878 |
 | Volume | `obv`@750 `accdist`@765 `iii`@775 `wvad`@784 `wad`@795 `nvi`@813 `pvi`@827 `pvt`@841 |
 | Pivots | `pivothigh`@590 `pivotlow`@600 `pivot_point_levels`@961 ⚠️ (anchored variants partial) |
-| Library (`TradingView/ta`) | `requestUpAndDownVolume`@673 ⚠️ (resolves under the `ta` namespace; single-bar volume split by candle direction — no intrabar feed) |
+| Library (`TradingView/ta`) | `requestUpAndDownVolume`@673 ⚠️ (a builtin — call `ta.requestUpAndDownVolume(...)` directly, with no `import TradingView/ta/12` line, whose default `ta` alias would shadow the builtin namespace; single-bar volume split by candle direction — no intrabar feed) |
 
 ---
 

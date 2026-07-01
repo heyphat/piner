@@ -23,7 +23,7 @@
  */
 import { tokenize } from '../lexer/lexer.js';
 import { parse } from '../parser/parser.js';
-import { identityOfImport, normalizeIdentity } from './library.js';
+import { identityOfImport, indexRegistry } from './library.js';
 import type { LibraryIdentity, LibraryRegistry } from './library.js';
 import type { ImportStmt } from '../parser/ast.js';
 
@@ -71,8 +71,10 @@ export async function resolveLibraryClosure(
   opts: ResolveClosureOptions = {},
 ): Promise<LibraryRegistry> {
   const max = opts.maxLibraries ?? 512;
-  const seed = new Map<string, string>();
-  for (const e of opts.seed ?? []) seed.set(normalizeIdentity(e.key).canonical, e.source);
+  // Validate the seed exactly as `compile()` does — indexRegistry throws on a malformed
+  // key or a duplicate canonical identity — so compileAsync does not silently mask (via
+  // last-wins) a duplicate that the synchronous compile() would reject.
+  const seed = indexRegistry(opts.seed ?? []);
 
   const collected = new Map<string, string>();
   const queue: LibraryIdentity[] = importIdentities(consumerSource);

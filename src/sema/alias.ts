@@ -50,6 +50,17 @@ export class AliasResolver {
     }
     for (const a of conflicting) aliases.delete(a);
 
+    // A top-level consumer declaration may not reuse an import-alias name: otherwise
+    // `alias.member` would resolve to the library while a bare `alias` reference is the
+    // local value — one name, two meanings. TradingView rejects this; so do we.
+    for (const s of program.body) {
+      for (const n of topLevelNames(s)) {
+        if (aliases.has(n)) {
+          diagnostics.push(err(`'${n}' is declared at the top level but is also an import alias — rename one of them`, s.loc));
+        }
+      }
+    }
+
     const rewriter = new RefRewriter({
       aliases,
       graph: this.graph.libraries,
@@ -63,4 +74,13 @@ export class AliasResolver {
 
 function err(message: string, loc?: Loc): Diagnostic {
   return { severity: 'error', message, line: loc?.line ?? 0, col: loc?.col ?? 0 };
+}
+
+/** The names a top-level statement binds into the consumer's module scope. */
+function topLevelNames(s: Program['body'][number]): string[] {
+  switch (s.kind) {
+    case 'VarDecl': case 'FuncDef': case 'TypeDef': return [s.name];
+    case 'TupleDecl': return s.names;
+    default: return [];
+  }
 }

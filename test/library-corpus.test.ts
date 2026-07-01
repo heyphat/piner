@@ -92,7 +92,7 @@ const bars: Bar[] = Array.from({ length: 120 }, (_, i) => {
 
 type Stage = 'pass' | 'parse' | 'sema' | 'runtime' | 'divergence';
 const eqNaN = (a: number, b: number) =>
-  (Number.isNaN(a) && Number.isNaN(b)) || a === b || (typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) < 1e-9);
+  (Number.isNaN(a) && Number.isNaN(b)) || a === b;
 
 async function classify(exercise: string): Promise<{ stage: Stage; detail: string }> {
   let compiled;

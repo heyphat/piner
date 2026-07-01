@@ -6,10 +6,15 @@ import fc from 'fast-check';
 import type { Bar } from '../../src/index.js';
 
 const LOWER = 'abcdefghijklmnopqrstuvwxyz'.split('');
+// Identity segments in the wild use mixed case, digits, and underscores
+// (`PineCoders/AllTimeHighLow/1`, `rayolf/rc_highest_lowest/1`). Exercise all of them,
+// but keep a fixed leading letter so a segment is never a keyword and never starts with
+// a digit (both would be invalid where a segment is parsed as an identifier).
+const IDENT_CHARS = [...LOWER, ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''), ...'0123456789'.split(''), '_'];
 
 /** A safe Pine identifier segment: starts with a fixed letter, never a keyword, no `/`. */
 export const seg: fc.Arbitrary<string> = fc
-  .array(fc.constantFrom(...LOWER), { minLength: 1, maxLength: 6 })
+  .array(fc.constantFrom(...IDENT_CHARS), { minLength: 1, maxLength: 8 })
   .map((a) => `l${a.join('')}`);
 
 /** A version integer (imports parse the version as an integer literal). */

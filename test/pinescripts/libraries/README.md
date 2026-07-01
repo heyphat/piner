@@ -9,13 +9,27 @@ small consumer that `import`s and exercises each library, runs it on **both back
 and the interpreter oracle), and asserts byte-for-byte agreement. It is a hard regression gate:
 every vendored library must compile, run, and agree across backends.
 
-## Why these are reusable
+## Licensing & why these are here
 
-Pine libraries published on TradingView are, per TradingView's
-[House Rules on Script Publishing](https://www.tradingview.com/support/solutions/43000590599),
-considered **public-domain code**: "permission is not required from their author if you call their
-functions or reuse their code in your open-source scripts." piner is open-source (AGPL-3.0), and
-these fixtures reuse the code for compatibility testing with attribution below.
+These files are **third-party**. They are not covered by piner's AGPL-3.0 license and remain under
+their original authors' terms; they are vendored only as a compatibility test corpus, with
+attribution below. We make no legal claim about them beyond fair use for interoperability testing,
+and will remove any file on the author's request.
+
+Basis, per source:
+
+- **`pinecoders-alltimehighlow.pine`, `tvdocs-point.pine`, `tvdocs-signal.pine`** — taken from the
+  official [TradingView Pine Script documentation](https://www.tradingview.com/pine-script-docs/concepts/libraries/)
+  (Libraries / UDT / Enum examples), reproduced as short documentation excerpts for testing.
+- **`rayolf-rc-highest-lowest.pine`** — mirrored from the author's public GitHub repo
+  ([rayolf/pinescript_libraries](https://github.com/rayolf/pinescript_libraries)), which carries **no
+  explicit license**. Included illustratively as a real-world compatibility fixture; if the author
+  objects, it will be removed.
+
+TradingView's [House Rules on Script Publishing](https://www.tradingview.com/support/solutions/43000590599)
+describe how publicly published scripts may be reused (open-source publications default to MPL-2.0,
+and publicly published *library* scripts are broadly reusable) — consult that page for the current,
+authoritative terms rather than relying on any paraphrase here.
 
 ## Provenance & attribution
 

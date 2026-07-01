@@ -23,7 +23,8 @@ import type { PineType } from './types.js';
 import { parse } from '../parser/parser.js';
 import { ParseError } from '../parser/parser.js';
 import { tokenize } from '../lexer/lexer.js';
-import { CompileError, OUTPUT_FNS, type Diagnostic } from './analyze.js';
+import { CompileError, OUTPUT_FNS, NAMESPACES, type Diagnostic } from './analyze.js';
+import { BUILTIN_METHODS } from '../codegen/intrinsics.js';
 
 // ───────────────────────── Public types ─────────────────────────
 
@@ -114,9 +115,9 @@ function malformedKey(label: string, why: string): CompileError {
   return diagError(`malformed library registry key ${JSON.stringify(label)}: ${why}`);
 }
 
-/** The canonical identity of a parsed `import` statement (version stringified). */
+/** The canonical identity of a parsed `import` statement (version is a verbatim string). */
 export function identityOfImport(stmt: ImportStmt): LibraryIdentity {
-  return makeIdentity(stmt.user, stmt.lib, String(stmt.version));
+  return makeIdentity(stmt.user, stmt.lib, stmt.version);
 }
 
 // ───────────────────────── Registry indexing ─────────────────────────
@@ -242,6 +243,20 @@ export function mangle(id: LibraryIdentity, symbol: string): string {
   return `__lib$${slug(id)}$${symbol}`;
 }
 
+/**
+ * Mangle an exported method to a merged name that ALSO encodes its receiver type and
+ * arity. Pine v6 permits same-named methods distinguished by receiver type/arity, but
+ * a plain {@link mangle} would collapse every overload to one name — the inliner keys
+ * functions by name (last-wins), so all call sites would inline the last overload's
+ * body regardless of the receiver. Encoding (receiverType, arity) gives each overload
+ * a distinct merged name; both the declaration and every dispatch site compute the
+ * name from the method's own signature, so they always agree. `$` is illegal in Pine
+ * identifiers, so no user symbol or plain-mangled name can collide with this form.
+ */
+export function mangleMethod(id: LibraryIdentity, name: string, receiverType: string, arity: number): string {
+  return `__lib$${slug(id)}$${name}$m$${receiverType}$${arity}`;
+}
+
 // ───────────────────────── Library surface (Req 3.2, 4, 7.3) ─────────────────────────
 
 /** One exported (or, for intra-lib dispatch, declared) method with its receiver info. */
@@ -251,6 +266,9 @@ export interface ExportedMethod {
   receiverType: string;
   /** Total parameter count (including the receiver). */
   arity: number;
+  /** True when the receiver is a user-defined type; false for a builtin type
+   *  (array/matrix/map/float/…) whose value cannot be traced to a library identity. */
+  receiverIsUdt: boolean;
 }
 
 /** A library's public API — only `export`-marked declarations (Req 7.3). */
@@ -274,7 +292,12 @@ function paramTypeName(fd: FuncDef): string {
 }
 
 function methodInfo(fd: FuncDef): ExportedMethod {
-  return { def: fd, receiverType: paramTypeName(fd), arity: fd.params.length };
+  return {
+    def: fd,
+    receiverType: paramTypeName(fd),
+    arity: fd.params.length,
+    receiverIsUdt: fd.params[0]?.declType?.kind === 'udt',
+  };
 }
 
 /**
@@ -354,6 +377,10 @@ function collectAll(program: Program): { allNames: Set<string>; allMethods: Map<
       // silently binds to a same-named symbol in the consumer). Exported vars are still
       // not part of the bindable surface (only fns/UDTs/enums/methods are).
       allNames.add(s.name);
+    } else if (s.kind === 'TupleDecl') {
+      // Top-level tuple destructuring binds several module-level names at once
+      // (`[a, b] = calcRange()`); each is self-mangled and merged exactly like a VarDecl.
+      for (const n of s.names) allNames.add(n);
     }
   }
   return { allNames, allMethods };
@@ -474,9 +501,19 @@ export class LibraryResolver {
     const nextActive = [...active, id];
     for (const s of program.body) {
       if (s.kind !== 'Import') continue;
+      const alias = s.alias ?? s.lib;
+      // A library's own imports get the same alias validation as the consumer's
+      // (Req 3.6/3.7): an alias may not shadow a builtin namespace, and two imports
+      // may not share one — otherwise `alias.*` references bind silently to the wrong
+      // library (last-win) or shadow a builtin inside this library.
+      if (NAMESPACES.has(alias)) {
+        throw diagError(`import alias '${alias}' shadows the reserved builtin namespace '${alias}'`, s.loc, id, chain);
+      }
+      if (imports.has(alias)) {
+        throw diagError(`duplicate import alias '${alias}' in library ${id.canonical}`, s.loc, id, chain);
+      }
       const childId = identityOfImport(s);
       this.resolveOne(childId, [...chain, childId], nextActive);
-      const alias = s.alias ?? s.lib;
       imports.set(alias, childId);
     }
     const surface = collectSurface(id, program);
@@ -619,7 +656,19 @@ export class RefRewriter {
     switch (t.kind) {
       case 'udt': {
         const o = this.typeOrigin(t.name);
-        return o ? { kind: 'udt', name: mangle(o.identity, o.typeName) } : t;
+        if (!o) return t;
+        // A dotted `alias.Type` annotation must name an EXPORTED type/enum; a private
+        // or misspelled one is rejected here rather than silently mangled to a dangling
+        // name (the constructor path already enforces this — keep the two consistent).
+        const dot = t.name.indexOf('.');
+        if (dot !== -1) {
+          const lib = this.lib(o.identity);
+          if (lib && !lib.surface.types.has(o.typeName) && !lib.surface.enums.has(o.typeName)) {
+            this.symbolError(t.name.slice(0, dot), lib, o.typeName);
+            return t;
+          }
+        }
+        return { kind: 'udt', name: mangle(o.identity, o.typeName) };
       }
       case 'array': return { kind: 'array', of: this.rewriteType(t.of)! };
       case 'matrix': return { kind: 'matrix', of: this.rewriteType(t.of)! };
@@ -636,9 +685,21 @@ export class RefRewriter {
 
   /** Rewrite one cloned top-level library declaration AND mangle its own name. */
   rewriteAndMangleDecl(s: Stmt): void {
+    // A method's receiver type must be read BEFORE stmt() rewrites its param types
+    // (rewriteType mangles a UDT receiver to `__lib$…`, but the discriminator uses the
+    // library-local name so it matches what methodDispatch computes).
+    const methodReceiver = s.kind === 'FuncDef' && s.isMethod ? paramTypeName(s) : null;
     this.stmt(s);
-    if ((s.kind === 'FuncDef' || s.kind === 'TypeDef' || s.kind === 'VarDecl') && this.self) {
+    if (!this.self) return;
+    if (s.kind === 'FuncDef') {
+      s.name = s.isMethod
+        ? mangleMethod(this.self.identity, s.name, methodReceiver!, s.params.length)
+        : mangle(this.self.identity, s.name);
+    } else if (s.kind === 'TypeDef' || s.kind === 'VarDecl') {
       s.name = mangle(this.self.identity, s.name);
+    } else if (s.kind === 'TupleDecl') {
+      const id = this.self.identity;
+      s.names = s.names.map((n) => mangle(id, n));
     }
   }
 
@@ -658,6 +719,12 @@ export class RefRewriter {
         if (s.target.kind === 'Ident') {
           const o = this.constructorOrigin(s.value);
           if (o) this.typeEnv.set(s.target.name, o);
+          // Self-mangle the assignment target: a module-level `var` mutated from an
+          // exported function has its declaration mangled by rewriteAndMangleDecl, so
+          // the reassignment site must be rewritten to the same name — otherwise the
+          // codegen backend hits an undefined name while the interpreter silently
+          // captures/creates a stray binding, breaking the two-backend invariant.
+          s.target = this.ident(s.target) as Ident;
         } else {
           s.target = this.expr(s.target) as Member;
         }
@@ -668,6 +735,12 @@ export class RefRewriter {
         s.expr = this.expr(s.expr);
         break;
       case 'FuncDef': {
+        // Enter a fresh type scope that inherits the enclosing one but discards this
+        // function's own additions on exit — otherwise a UDT-typed param/local named
+        // `v` here would leak into a sibling function that reuses `v` for a plain value,
+        // mis-dispatching (or spuriously rejecting) a method call on it.
+        const savedTypeEnv = this.typeEnv;
+        this.typeEnv = new Map(savedTypeEnv);
         // Record UDT-typed params so `param.method(...)` dispatches inside the body
         // (read the ORIGINAL declType, before rewriteType mangles it).
         for (const p of s.params) {
@@ -687,6 +760,7 @@ export class RefRewriter {
         this.localNames = collectBindingNames(s.params.map((p) => p.name), s.body);
         for (const b of s.body) this.stmt(b);
         this.localNames = savedLocals;
+        this.typeEnv = savedTypeEnv;
         break;
       }
       case 'TypeDef':
@@ -755,14 +829,29 @@ export class RefRewriter {
 
   private call(e: Call): Expr {
     const callee = e.callee;
-    // alias.fn(...) / alias.method(recv, ...)
-    if (callee.kind === 'Member' && callee.object.kind === 'Ident' && this.aliases.has(callee.object.name)) {
+    // alias.fn(...) / alias.method(recv, ...) — but a local/param that shadows the alias
+    // name is a plain value, not the namespace, so it must not be hijacked here.
+    if (callee.kind === 'Member' && callee.object.kind === 'Ident' && this.aliases.has(callee.object.name)
+      && !this.localNames?.has(callee.object.name)) {
       const alias = callee.object.name;
       const id = this.aliases.get(alias)!;
       const lib = this.lib(id)!;
       const name = callee.property;
-      if (lib.surface.functions.has(name) || lib.surface.methods.has(name)) {
+      const methods = lib.surface.methods.get(name);
+      if (lib.surface.functions.has(name)) {
         e.callee = { kind: 'Ident', name: mangle(id, name), loc: callee.loc };
+      } else if (methods) {
+        // Namespaced method form `alias.method(recv, …)`: the receiver is arg 0, so the
+        // overload is resolved from the argument count (and, if that is ambiguous, the
+        // receiver's type). The chosen overload's discriminated name matches its decl.
+        const chosen = this.resolveOverload(methods, e.args);
+        if (chosen) {
+          e.callee = { kind: 'Ident', name: mangleMethod(id, name, chosen.receiverType, chosen.arity), loc: callee.loc };
+        } else {
+          this.emit(mkDiag(
+            `no overload of method '${alias}.${name}' in library ${id.canonical} matches a call with ${e.args.length} argument(s)`,
+            callee.loc, this.self?.identity, this.self?.chain));
+        }
       } else {
         this.symbolError(alias, lib, name, callee.loc);
       }
@@ -772,7 +861,8 @@ export class RefRewriter {
     // alias.Type.new(...)
     if (callee.kind === 'Member' && callee.property === 'new'
       && callee.object.kind === 'Member' && callee.object.object.kind === 'Ident'
-      && this.aliases.has(callee.object.object.name)) {
+      && this.aliases.has(callee.object.object.name)
+      && !this.localNames?.has(callee.object.object.name)) {
       const alias = callee.object.object.name;
       const id = this.aliases.get(alias)!;
       const lib = this.lib(id)!;
@@ -805,41 +895,97 @@ export class RefRewriter {
     if (e.typeArgs) e.typeArgs = e.typeArgs.map((t) => this.rewriteType(t)!);
   }
 
+  /** The UDT origin an expression evaluates to (a typed variable or a constructor call). */
+  private exprOrigin(e: Expr): UdtOrigin | undefined {
+    if (e.kind === 'Ident') return this.typeEnv.get(e.name);
+    return this.constructorOrigin(e);
+  }
+
+  /** Pick the overload of a same-named method matching the call: by arity, then (if
+   *  several share that arity) by the receiver/first-argument's UDT type. */
+  private resolveOverload(cands: ExportedMethod[], args: Arg[]): ExportedMethod | undefined {
+    const byArity = cands.filter((m) => m.arity === args.length);
+    if (byArity.length <= 1) return byArity[0];
+    const origin = args.length ? this.exprOrigin(args[0].value) : undefined;
+    if (!origin) return undefined;
+    const byType = byArity.filter((m) => m.receiverType === origin.typeName);
+    return byType.length === 1 ? byType[0] : undefined;
+  }
+
+  /** Every method pool reachable from here: each imported library's exported methods,
+   *  plus (inside a library body) its own declared methods. */
+  private methodPools(): [LibraryIdentity, Map<string, ExportedMethod[]>][] {
+    const out: [LibraryIdentity, Map<string, ExportedMethod[]>][] = [];
+    const seen = new Set<string>();
+    for (const id of this.aliases.values()) {
+      if (seen.has(id.canonical)) continue;
+      seen.add(id.canonical);
+      const lib = this.lib(id);
+      if (lib) out.push([id, lib.surface.methods]);
+    }
+    if (this.self && !seen.has(this.self.identity.canonical)) {
+      out.push([this.self.identity, this.self.methods]);
+    }
+    return out;
+  }
+
+  /** Rewrite `recv.method(args)` to the discriminated merged call `mangled(recv, args)`. */
+  private bindMethodCall(e: Call, id: LibraryIdentity, m: ExportedMethod): void {
+    const callee = e.callee as Member;
+    e.callee = { kind: 'Ident', name: mangleMethod(id, m.def.name, m.receiverType, m.arity), loc: callee.loc };
+    e.args = [{ value: callee.object }, ...e.args];
+  }
+
   /** `recv.method(args)` on a value of a resolved UDT type → direct mangled call (Req 4.3, 4.8). */
   private methodDispatch(e: Call): void {
     const callee = e.callee;
     if (callee.kind !== 'Member' || callee.object.kind !== 'Ident') return;
-    const origin = this.typeEnv.get(callee.object.name);
-    if (!origin) return;
-    const owner = this.lib(origin.identity);
-    if (!owner) return;
     const method = callee.property;
-    // Own methods (all) inside their own library; exported methods when imported.
-    const pool = this.self && origin.identity.canonical === this.self.identity.canonical
-      ? this.self.methods
-      : owner.surface.methods;
-    const all = pool.get(method);
-    if (!all) return; // not a library method — leave for builtin/other dispatch
-    const arity = e.args.length + 1; // + receiver
-    const matches = all.filter((m) => m.receiverType === origin.typeName && m.arity === arity);
-    if (matches.length === 1) {
-      e.callee = { kind: 'Ident', name: mangle(origin.identity, method), loc: callee.loc };
-      e.args = [{ value: callee.object }, ...e.args];
-    } else if (matches.length === 0) {
-      this.emit(mkDiag(
-        `no method '${method}' matching receiver type '${origin.typeName}' with ${e.args.length} argument(s) in library ${owner.identity.canonical}`,
-        callee.loc, this.self?.identity, this.self?.chain));
-    } else {
-      this.emit(mkDiag(
-        `ambiguous method '${method}' on receiver type '${origin.typeName}': ${matches.length} matching overloads in library ${owner.identity.canonical}`,
-        callee.loc, this.self?.identity, this.self?.chain));
+    const origin = this.typeEnv.get(callee.object.name);
+    if (origin) {
+      const owner = this.lib(origin.identity);
+      if (!owner) return;
+      // Own methods (all) inside their own library; exported methods when imported.
+      const pool = this.self && origin.identity.canonical === this.self.identity.canonical
+        ? this.self.methods
+        : owner.surface.methods;
+      const all = pool.get(method);
+      if (!all) return; // not a library method — leave for builtin/other dispatch
+      const arity = e.args.length + 1; // + receiver
+      const matches = all.filter((m) => m.receiverType === origin.typeName && m.arity === arity);
+      if (matches.length === 1) {
+        this.bindMethodCall(e, origin.identity, matches[0]);
+      } else if (matches.length === 0) {
+        this.emit(mkDiag(
+          `no method '${method}' matching receiver type '${origin.typeName}' with ${e.args.length} argument(s) in library ${owner.identity.canonical}`,
+          callee.loc, this.self?.identity, this.self?.chain));
+      } else {
+        this.emit(mkDiag(
+          `ambiguous method '${method}' on receiver type '${origin.typeName}': ${matches.length} matching overloads in library ${owner.identity.canonical}`,
+          callee.loc, this.self?.identity, this.self?.chain));
+      }
+      return;
     }
+    // Receiver type unknown — e.g. a builtin array/matrix/map/float value, whose type
+    // does not name a library. Search every reachable library for a unique exported
+    // method on a builtin receiver with this name + arity. Builtin collection/drawing
+    // methods (arr.push, box.set_top, …) are excluded so native dispatch is untouched.
+    if (BUILTIN_METHODS.has(method)) return;
+    const arity = e.args.length + 1; // + receiver
+    const hits: { id: LibraryIdentity; m: ExportedMethod }[] = [];
+    for (const [id, pool] of this.methodPools()) {
+      for (const m of pool.get(method) ?? []) {
+        if (!m.receiverIsUdt && m.arity === arity) hits.push({ id, m });
+      }
+    }
+    if (hits.length === 1) this.bindMethodCall(e, hits[0].id, hits[0].m);
   }
 
   private member(e: Member): Expr {
     // alias.EnumType.Member  (bare access, compile-time enum constant)
     if (e.object.kind === 'Member' && e.object.object.kind === 'Ident'
-      && this.aliases.has(e.object.object.name)) {
+      && this.aliases.has(e.object.object.name)
+      && !this.localNames?.has(e.object.object.name)) {
       const alias = e.object.object.name;
       const id = this.aliases.get(alias)!;
       const lib = this.lib(id)!;
@@ -854,8 +1000,9 @@ export class RefRewriter {
       }
       // not an enum — fall through to recurse (e.g. field access on `alias.fn(...).x`)
     }
-    // alias.name  (single member: bare type/enum ref, or a private/unresolved symbol)
-    if (e.object.kind === 'Ident' && this.aliases.has(e.object.name)) {
+    // alias.name  (single member: bare type/enum ref, or a private/unresolved symbol) —
+    // skipped when a local/param shadows the alias name (then it's a plain value).
+    if (e.object.kind === 'Ident' && this.aliases.has(e.object.name) && !this.localNames?.has(e.object.name)) {
       const alias = e.object.name;
       const id = this.aliases.get(alias)!;
       const lib = this.lib(id)!;
@@ -904,7 +1051,7 @@ export function mergeLibraries(graph: ResolvedGraph): { decls: Stmt[]; diagnosti
       emit: (d) => diagnostics.push(d),
     });
     for (const s of lib.program.body) {
-      if (s.kind !== 'FuncDef' && s.kind !== 'TypeDef' && s.kind !== 'VarDecl') continue;
+      if (s.kind !== 'FuncDef' && s.kind !== 'TypeDef' && s.kind !== 'VarDecl' && s.kind !== 'TupleDecl') continue;
       const cloned = clone(s);
       rewriter.rewriteAndMangleDecl(cloned);
       decls.push(cloned);
@@ -920,6 +1067,41 @@ const FORBIDDEN_IN_EXPORT = new Set<string>([...OUTPUT_FNS, 'alertcondition']);
 const DECL_CALLS = new Set(['indicator', 'strategy', 'library']);
 
 /**
+ * Reject duplicate exported names. Pine has no user-defined function overloading, so two
+ * exported functions (or types/enums/constants) with the same name would otherwise
+ * silently collapse to the last one under name mangling. Methods MAY share a name when
+ * distinguished by receiver type + arity (that is real overloading, resolved elsewhere);
+ * only a genuine duplicate (identical name, receiver type, and arity) is an error.
+ */
+function checkExportUniqueness(lib: ResolvedLibrary): Diagnostic[] {
+  const diags: Diagnostic[] = [];
+  const seen = new Set<string>();
+  const dup = (kind: string, name: string, loc?: Loc): void => {
+    diags.push(mkDiag(`duplicate export '${name}': a library may export only one ${kind} with a given name`, loc, lib.identity, lib.chain));
+  };
+  for (const s of lib.program.body) {
+    if (s.kind === 'FuncDef' && s.export && s.isMethod) {
+      const key = `m:${s.name}/${paramTypeName(s)}/${s.params.length}`;
+      if (seen.has(key)) dup('method (same receiver type and arity)', s.name, s.loc);
+      else seen.add(key);
+    } else if (s.kind === 'FuncDef' && s.export) {
+      const key = `f:${s.name}`;
+      if (seen.has(key)) dup('function', s.name, s.loc);
+      else seen.add(key);
+    } else if (s.kind === 'TypeDef' && s.export) {
+      const key = `t:${s.name}`;
+      if (seen.has(key)) dup(s.isEnum ? 'enum' : 'type', s.name, s.loc);
+      else seen.add(key);
+    } else if (s.kind === 'VarDecl' && s.export) {
+      const key = `c:${s.name}`;
+      if (seen.has(key)) dup('constant', s.name, s.loc);
+      else seen.add(key);
+    }
+  }
+  return diags;
+}
+
+/**
  * Collect ALL export-constraint violations in a library (Req 7.1, 7.2, 7.4, 7.5):
  * an exported function may not, directly or transitively through a private symbol
  * it calls, invoke a global-only side-effecting builtin or an
@@ -927,6 +1109,7 @@ const DECL_CALLS = new Set(['indicator', 'strategy', 'library']);
  */
 export function checkExportConstraints(lib: ResolvedLibrary): Diagnostic[] {
   const diags: Diagnostic[] = [];
+  diags.push(...checkExportUniqueness(lib));
   // Index this library's own functions (exported + private) by name.
   const funcs = new Map<string, FuncDef>();
   for (const s of lib.program.body) if (s.kind === 'FuncDef') funcs.set(s.name, s);
@@ -982,6 +1165,13 @@ export function checkExportConstraints(lib: ResolvedLibrary): Diagnostic[] {
           } else if (funcs.has(name)) {
             walkFn(funcs.get(name)!, exportedName, visiting); // transitive through a private/sibling fn
           }
+        } else if (callee.kind === 'Member') {
+          // Method-syntax call `recv.helper(...)`: follow it into a same-library private
+          // method/function too, so a forbidden builtin hidden behind method syntax does
+          // not escape the export check. (Cross-library `alias.fn()` calls are validated
+          // when that library is checked, so only own-library names are followed.)
+          walkExpr(callee.object, exportedName, visiting);
+          if (funcs.has(callee.property)) walkFn(funcs.get(callee.property)!, exportedName, visiting);
         }
         e.args.forEach((a) => walkExpr(a.value, exportedName, visiting));
         break;

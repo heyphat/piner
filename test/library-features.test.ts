@@ -12,7 +12,7 @@ function bars(n = 40): Bar[] {
     return { time: i * 60000, open: c - 1, high: c + 2, low: c - 2, close: c, volume: 1000 + i };
   });
 }
-const eqNaN = (a: number, b: number) => (Number.isNaN(a) && Number.isNaN(b)) || Math.abs(a - b) < 1e-9;
+const eqNaN = (a: number, b: number) => (Number.isNaN(a) && Number.isNaN(b)) || a === b;
 
 async function bothBackends(c: CompiledScript, data = bars()) {
   const js = new Engine(c, new ArrayFeed(data), { backend: 'js' });
@@ -151,8 +151,8 @@ export r(float x) => b.inc(x) + 10.0
 ` };
     const reg = indexRegistry([base, left, right]);
     const graph = new LibraryResolver(reg).resolve([
-      { kind: 'Import', user: 'u', lib: 'left', version: 1 },
-      { kind: 'Import', user: 'u', lib: 'right', version: 1 },
+      { kind: 'Import', user: 'u', lib: 'left', version: '1' },
+      { kind: 'Import', user: 'u', lib: 'right', version: '1' },
     ]);
     // base, left, right — three distinct libraries, base resolved once.
     expect(graph.libraries.size).toBe(3);
@@ -399,6 +399,285 @@ plot(s.run(close), title="v")
     const d = bars();
     const last = 39;
     expect(js.outputs.plots.get(0)!.data[last]).toBeCloseTo((d[last].close + 5) * 2, 9);
+  });
+});
+
+// ───────────────────────── audit regressions (critical + high) ─────────────────────────
+describe('library import — state, overloads, builtin receivers (audit fixes)', () => {
+  it('a module-level var mutated by an exported function increments per bar on both backends', async () => {
+    // Reassign targets must be self-mangled like their declaration; otherwise the codegen
+    // backend hits an undefined name while the interpreter silently diverges.
+    const reg: LibraryRegistry = [{ key: 'a/counter/1', source: `//@version=6
+library("Counter")
+var int counter = 0
+export next() =>
+    counter := counter + 1
+    counter
+` }];
+    const c = compile(`//@version=6
+indicator("c")
+import a/counter/1 as cnt
+plot(cnt.next(), title="n")
+`, { libraries: reg });
+    const js = await bothBackends(c);
+    const d = js.outputs.plots.get(0)!.data;
+    expect(d[0]).toBe(1);
+    expect(d[5]).toBe(6);
+    expect(d[d.length - 1]).toBe(d.length);
+  });
+
+  it('a library-mutated module var does not clobber a same-named consumer variable', async () => {
+    const reg: LibraryRegistry = [{ key: 'a/counter/1', source: `//@version=6
+library("Counter")
+var int counter = 0
+export next() =>
+    counter := counter + 1
+    counter
+` }];
+    const c = compile(`//@version=6
+indicator("c")
+import a/counter/1 as cnt
+counter = 100.0
+plot(cnt.next(), title="n")
+plot(counter, title="mine")
+`, { libraries: reg });
+    const js = await bothBackends(c);
+    expect(js.outputs.plots.get(0)!.data[2]).toBe(3);        // library counter increments
+    expect(js.outputs.plots.get(1)!.data[2]).toBeCloseTo(100, 9); // consumer's stays 100
+  });
+
+  it('a top-level tuple binding in a library does not capture a same-named consumer var', async () => {
+    const reg: LibraryRegistry = [{ key: 'a/tup/1', source: `//@version=6
+library("Tup")
+[a, b] = [1.0, 2.0]
+export sum() => a + b
+` }];
+    const c = compile(`//@version=6
+indicator("c")
+import a/tup/1 as t
+a = 777.0
+plot(t.sum(), title="s")
+plot(a, title="a")
+`, { libraries: reg });
+    const js = await bothBackends(c);
+    expect(js.outputs.plots.get(0)!.data[10]).toBeCloseTo(3, 9);   // library a+b = 1+2
+    expect(js.outputs.plots.get(1)!.data[10]).toBeCloseTo(777, 9); // consumer's a untouched
+  });
+
+  it('same-named methods on different UDT receivers dispatch to the correct overload', async () => {
+    const reg: LibraryRegistry = [{ key: 'a/shapes/1', source: `//@version=6
+library("Shapes")
+export type Circle
+    float r = 0.0
+export type Square
+    float side = 0.0
+export method area(Circle c) => c.r * c.r * 3.0
+export method area(Square s) => s.side * s.side
+` }];
+    const c = compile(`//@version=6
+indicator("c")
+import a/shapes/1 as sh
+ci = sh.Circle.new(2.0)
+sq = sh.Square.new(5.0)
+plot(ci.area(), title="circle")
+plot(sq.area(), title="square")
+`, { libraries: reg });
+    const js = await bothBackends(c);
+    expect(js.outputs.plots.get(0)!.data[10]).toBeCloseTo(12, 9); // 2*2*3
+    expect(js.outputs.plots.get(1)!.data[10]).toBeCloseTo(25, 9); // 5*5
+  });
+
+  it('same-named methods distinguished by arity dispatch correctly', async () => {
+    const reg: LibraryRegistry = [{ key: 'a/scale/1', source: `//@version=6
+library("Scale")
+export type V
+    float x = 0.0
+export method scale(V self) => self.x * 2.0
+export method scale(V self, float k) => self.x * k
+` }];
+    const c = compile(`//@version=6
+indicator("c")
+import a/scale/1 as sc
+v = sc.V.new(10.0)
+plot(v.scale(), title="default")
+plot(v.scale(3.0), title="k")
+`, { libraries: reg });
+    const js = await bothBackends(c);
+    expect(js.outputs.plots.get(0)!.data[10]).toBeCloseTo(20, 9); // 10*2
+    expect(js.outputs.plots.get(1)!.data[10]).toBeCloseTo(30, 9); // 10*3
+  });
+
+  it('the namespaced method form alias.method(recv) resolves the overload too', async () => {
+    const reg: LibraryRegistry = [{ key: 'a/shapes2/1', source: `//@version=6
+library("Shapes2")
+export type Circle
+    float r = 0.0
+export type Square
+    float side = 0.0
+export method area(Circle c) => c.r * c.r * 3.0
+export method area(Square s) => s.side * s.side
+` }];
+    const c = compile(`//@version=6
+indicator("c")
+import a/shapes2/1 as sh
+ci = sh.Circle.new(2.0)
+sq = sh.Square.new(5.0)
+plot(sh.area(ci), title="circle")
+plot(sh.area(sq), title="square")
+`, { libraries: reg });
+    const js = await bothBackends(c);
+    expect(js.outputs.plots.get(0)!.data[10]).toBeCloseTo(12, 9);
+    expect(js.outputs.plots.get(1)!.data[10]).toBeCloseTo(25, 9);
+  });
+
+  it('an exported method on a builtin (array) receiver dispatches via method syntax', async () => {
+    const reg: LibraryRegistry = [{ key: 'a/ax/1', source: `//@version=6
+library("Ax")
+export method total(array<float> a) => array.sum(a) + 1000.0
+` }];
+    const c = compile(`//@version=6
+indicator("c")
+import a/ax/1 as ax
+arr = array.from(1.0, 2.0, 3.0)
+plot(arr.total(), title="viaMethod")
+plot(ax.total(arr), title="viaNamespace")
+`, { libraries: reg });
+    const js = await bothBackends(c);
+    expect(js.outputs.plots.get(0)!.data[10]).toBeCloseTo(1006, 9);
+    expect(js.outputs.plots.get(1)!.data[10]).toBeCloseTo(1006, 9);
+  });
+
+  it('a builtin method call on an imported UDT-less value is left to native dispatch', async () => {
+    // `arr.sum()` must NOT be hijacked by library method dispatch (sum is a builtin method).
+    const reg: LibraryRegistry = [{ key: 'a/ax2/1', source: `//@version=6
+library("Ax2")
+export method total(array<float> a) => array.sum(a)
+` }];
+    const c = compile(`//@version=6
+indicator("c")
+import a/ax2/1 as ax
+arr = array.from(1.0, 2.0, 3.0)
+plot(arr.sum(), title="native")
+`, { libraries: reg });
+    const js = await bothBackends(c);
+    expect(js.outputs.plots.get(0)!.data[10]).toBeCloseTo(6, 9);
+  });
+});
+
+// ───────────────────────── audit regressions (medium) ─────────────────────────
+describe('library import — validation & scoping (audit fixes, medium)', () => {
+  const HEAD = '//@version=6\nindicator("c")\n';
+
+  it('rejects duplicate exported function names (no user function overloading)', () => {
+    const dup = { key: 'u/dup/1', source: '//@version=6\nlibrary("Dup")\nexport pick(int x) => x * 2\nexport pick(string s) => 0\n' };
+    const e = throwsCompile(() => compile(HEAD + 'import u/dup/1 as d\nplot(d.pick(5))\n', { libraries: [dup] }));
+    expect(e.message.toLowerCase()).toContain('duplicate export');
+    expect(e.message).toContain('pick');
+  });
+
+  it('rejects a library import whose alias shadows a builtin namespace', () => {
+    const inner = { key: 'u/inner/1', source: '//@version=6\nlibrary("In")\nexport f(float x) => x\n' };
+    const outer = { key: 'u/outer/1', source: '//@version=6\nlibrary("Out")\nimport u/inner/1 as math\nexport g(float x) => math.f(x)\n' };
+    const e = throwsCompile(() => compile(HEAD + 'import u/outer/1 as o\nplot(o.g(close))\n', { libraries: [inner, outer] }));
+    expect(e.message).toContain('math');
+    expect(e.message.toLowerCase()).toContain('namespace');
+  });
+
+  it('rejects duplicate import aliases inside a library', () => {
+    const a = { key: 'u/a/1', source: '//@version=6\nlibrary("A")\nexport f(float x) => x\n' };
+    const b = { key: 'u/b/1', source: '//@version=6\nlibrary("B")\nexport f(float x) => x\n' };
+    const outer = { key: 'u/coll/1', source: '//@version=6\nlibrary("Coll")\nimport u/a/1 as util\nimport u/b/1 as util\nexport g(float x) => util.f(x)\n' };
+    const e = throwsCompile(() => compile(HEAD + 'import u/coll/1 as o\nplot(o.g(close))\n', { libraries: [a, b, outer] }));
+    expect(e.message.toLowerCase()).toContain('duplicate import alias');
+  });
+
+  it('a private (non-exported) type used as an annotation is rejected', () => {
+    const lib = { key: 'u/priv/1', source: '//@version=6\nlibrary("Priv")\ntype Secret\n    float v = 0.0\nexport pub(float x) => x\n' };
+    const e = throwsCompile(() => compile(HEAD + 'import u/priv/1 as p\np.Secret s = na\nplot(close)\n', { libraries: [lib] }));
+    expect(e.message).toContain('Secret');
+    expect(e.message.toLowerCase()).toContain('not exported');
+  });
+
+  it('a top-level consumer name colliding with an import alias is rejected', () => {
+    const lib = { key: 'u/m/1', source: '//@version=6\nlibrary("M")\nexport f(float x) => x\n' };
+    const e = throwsCompile(() => compile(HEAD + 'import u/m/1 as m\nm = 5.0\nplot(m.f(close))\n', { libraries: [lib] }));
+    expect(e.message).toContain('m');
+    expect(e.message.toLowerCase()).toContain('alias');
+  });
+
+  it('a function parameter named like an import alias is NOT hijacked (uses the param)', async () => {
+    const lib = { key: 'u/util/1', source: '//@version=6\nlibrary("Util")\nexport twice(float x) => x * 2.0\n' };
+    // The consumer imports as `u`, then defines a UDF with a param also named `u`.
+    const c = compile(`//@version=6
+indicator("c")
+import u/util/1 as u
+addOne(float u) => u + 1.0
+plot(addOne(close) + u.twice(close), title="v")
+`, { libraries: [lib] });
+    const js = await bothBackends(c);
+    const d = bars();
+    const last = 39;
+    expect(js.outputs.plots.get(0)!.data[last]).toBeCloseTo((d[last].close + 1) + d[last].close * 2, 9);
+  });
+
+  it('a UDT-typed name in one function does not leak type into a sibling function', async () => {
+    // f() types `p` as a UDT and calls p.mag(); g() reuses `p` as a plain float — g must
+    // not spuriously dispatch p.mag() nor error (typeEnv is scoped per function).
+    const reg: LibraryRegistry = [{ key: 'u/geo2/1', source: `//@version=6
+library("Geo2")
+export type P
+    float x = 0.0
+export method mag(P self) => self.x * 3.0
+export usesUDT(float a) =>
+    p = P.new(a)
+    p.mag()
+export plain(float a) =>
+    p = a + 1.0
+    p * 10.0
+` }];
+    const c = compile(`//@version=6
+indicator("c")
+import u/geo2/1 as g
+plot(g.usesUDT(close), title="udt")
+plot(g.plain(close), title="plain")
+`, { libraries: reg });
+    const js = await bothBackends(c);
+    const d = bars();
+    const last = 39;
+    expect(js.outputs.plots.get(0)!.data[last]).toBeCloseTo(d[last].close * 3, 9);
+    expect(js.outputs.plots.get(1)!.data[last]).toBeCloseTo((d[last].close + 1) * 10, 9);
+  });
+
+  it('varip state inside an exported function: both backends agree over history and realtime ticks', async () => {
+    const reg: LibraryRegistry = [{ key: 'u/vp/1', source: `//@version=6
+library("Vp")
+export tick() =>
+    varip int n = 0
+    n := n + 1
+    n
+` }];
+    const c = compile(`//@version=6
+indicator("c")
+import u/vp/1 as vp
+plot(vp.tick(), title="n")
+`, { libraries: reg });
+    const data = bars(20);
+    const js = new Engine(c, new ArrayFeed(data), { backend: 'js' });
+    const ip = new Engine(c, new ArrayFeed(data), { backend: 'interp' });
+    await js.run({ symbol: 'T', timeframe: '1' });
+    await ip.run({ symbol: 'T', timeframe: '1' });
+    // Historical: increments once per bar, identical on both backends.
+    const jd = js.outputs.plots.get(0)!.data;
+    const id = ip.outputs.plots.get(0)!.data;
+    expect(jd[0]).toBe(1);
+    expect(jd[data.length - 1]).toBe(data.length);
+    expect(jd).toEqual(id);
+    // Realtime: repaint tick then confirm — the two backends must still agree exactly.
+    const nb = data[data.length - 1];
+    const live = { ...nb, time: nb.time + 60000 };
+    js.tick(live, false); ip.tick(live, false);
+    js.tick(live, true); ip.tick(live, true);
+    expect(js.outputs.plots.get(0)!.data).toEqual(ip.outputs.plots.get(0)!.data);
   });
 });
 

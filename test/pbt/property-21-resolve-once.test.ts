@@ -21,8 +21,8 @@ describe('Property 21 — shared libraries are resolved exactly once', () => {
           { key: `${u}/${rightN}/1`, source: `//@version=6\nlibrary("R")\nimport ${u}/${baseN}/1 as b\nexport r(float x) => b.inc(x)\n` },
         ]);
         const graph = new LibraryResolver(reg).resolve([
-          { kind: 'Import', user: u, lib: leftN, version: 1 },
-          { kind: 'Import', user: u, lib: rightN, version: 1 },
+          { kind: 'Import', user: u, lib: leftN, version: '1' },
+          { kind: 'Import', user: u, lib: rightN, version: '1' },
         ]);
         expect(graph.libraries.size).toBe(3);
         expect(graph.libraries.has(`${u}/${baseN}/1`)).toBe(true);
