@@ -12,6 +12,8 @@ Piner is the engine behind [fractalchart.com](https://fractalchart.com), which
 is its primary use case, and it's published here as a standalone open-source
 library.
 
+![Fractal Chart, powered by Piner](./docs/assets/fractalchart.png)
+
 > `compile(src)` lexes → parses → analyzes → emits JS **and** an interpreter
 > oracle; the two backends are cross-checked for byte-for-byte identical output.
 > The full v6 language runs end-to-end, plus broad built-in, input, drawing,
