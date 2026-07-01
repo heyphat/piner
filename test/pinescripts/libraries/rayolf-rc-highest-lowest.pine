@@ -1,0 +1,17 @@
+library("rc_highest_lowest")
+export f_highest(int start, int end) =>
+    size = end - start
+    var high_prices = array.new(size+1)
+    for i = 0 to size
+        array.set(high_prices, i, high[start + i])
+    price_result = array.max(high_prices)
+    index_result = array.indexof(high_prices, price_result) + start
+    [index_result, price_result]
+export f_lowest(int start, int end) =>
+    size = end - start
+    var low_prices = array.new(size+1)
+    for i = 0 to size
+        array.set(low_prices, i, low[start + i])
+    price_result = array.min(low_prices)
+    index_result = array.indexof(low_prices, price_result) + start
+    [index_result, price_result]

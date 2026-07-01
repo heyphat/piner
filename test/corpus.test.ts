@@ -17,9 +17,20 @@
 import { describe, it, expect } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { compile, CompileError, ParseError, Engine, ArrayFeed, type Bar } from '../src/index.js';
+import { compile, CompileError, ParseError, Engine, ArrayFeed, type Bar, type LibraryRegistry } from '../src/index.js';
 
 const DIR = resolve(import.meta.dir, 'pinescripts/corpus');
+
+/**
+ * In-memory library sources for corpus scripts that use `import` (library-import-export).
+ * `fm-library-import-unused.pine` imports `user/lib/1 as Lib` (and never uses it); the
+ * stub just needs to be a valid library so the import resolves. (The `TradingView/*`
+ * importers — auto-pitchfork, lux-algo — live outside test/pinescripts/corpus/, so they
+ * are not classified here.)
+ */
+const CORPUS_REGISTRY: LibraryRegistry = [
+  { key: 'user/lib/1', source: '//@version=6\nlibrary("Lib")\nexport identity(float x) => x\n' },
+];
 
 // 150 hourly bars (trend + oscillation), valid OHLC, non-zero volume — enough for MAs to warm
 // up, crossovers to fire, and highest/lowest windows to have signal.
@@ -52,7 +63,7 @@ async function classify(src: string): Promise<{ stage: Stage; detail: string }> 
   if (v < MIN_VERSION) return { stage: 'legacy', detail: `//@version=${v} (pre-v${MIN_VERSION}, out of scope)` };
   let compiled;
   try {
-    compiled = compile(src);
+    compiled = compile(src, { libraries: CORPUS_REGISTRY });
   } catch (e) {
     if (e instanceof ParseError) {
       return { stage: 'parse', detail: `${e.line}:${e.col} ${e.message.replace(/^Parse error at \d+:\d+:\s*/, '')}` };
@@ -93,8 +104,9 @@ async function classify(src: string): Promise<{ stage: Stage; detail: string }> 
 }
 
 // Floor for the pass count — bump it as gaps get fixed so a regression (a script that used to
-// pass and now doesn't) fails this test. Start permissive; the printed backlog drives the work.
-const MIN_PASS = 0;
+// pass and now doesn't) fails this test. Includes `fm-library-import-unused.pine`, which now
+// resolves its `import user/lib/1` against CORPUS_REGISTRY (library-import-export).
+const MIN_PASS = 32;
 
 describe('pinescripts corpus — gap classification', () => {
   const files = readdirSync(DIR).filter((f) => f.endsWith('.pine')).sort();

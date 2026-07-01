@@ -76,6 +76,78 @@ engine.tick(liveBar, /* isClose */ false);
 as the correctness oracle (cross-checked against the generated JS). The runtime
 can also execute a hand-written `ScriptFn` directly (see `test/runtime-core.test.ts`).
 
+### Library `import` / `export`
+
+Pine `import Publisher/Lib/Version [as alias]` resolves from an **in-memory
+registry** you pass to `compile` — no network, no filesystem, fully deterministic:
+
+```ts
+import { compile, Engine, ArrayFeed } from '@heyphat/piner';
+
+const compiled = compile(`//@version=6
+indicator("uses a library")
+import alice/mathlib/1 as ml
+plot(ml.zscore(close, 20), title="z")
+`, {
+  libraries: [
+    { key: 'alice/mathlib/1', source: `//@version=6
+library("MathLib")
+export zscore(float src, int len) => (src - ta.sma(src, len)) / ta.stdev(src, len)
+` },
+  ],
+});
+```
+
+Registry keys are `"Publisher/Lib/Version"` or `{ user, lib, version }`. Exported
+functions, UDTs (`type`), enums, and `method`s resolve through the alias. Versions
+match exactly; transitive imports resolve (depth cap 32) with cycles rejected;
+export-constraint violations (e.g. `plot` inside an export) are compile errors.
+Imported symbols are inline-merged, so the two backends stay byte-for-byte identical.
+An alias equal to a builtin namespace (e.g. `ta`) is rejected — piner does not
+implement TradingView's builtin-namespace *extension*.
+
+#### Loading libraries from the filesystem (Node)
+
+The core `compile()` is pure and browser-safe (no I/O). For Node/CLI/server use, the
+optional `@heyphat/piner/node` entry point builds a registry from `.pine` files on disk —
+so you don't assemble it by hand. It's never bundled into the browser build.
+
+```ts
+import { loadLibraryDir, compile } from '@heyphat/piner/node';
+
+// Scans <root>/<publisher>/<lib>/<version>.pine  (mirrors the import identity):
+//   pine-libs/PineCoders/AllTimeHighLow/1.pine → "PineCoders/AllTimeHighLow/1"
+const libraries = loadLibraryDir('./pine-libs');
+const compiled = compile(source, { libraries });
+```
+
+`loadLibraryManifest('libs/manifest.json')` is also available for non-conventional layouts
+(a JSON map of `"Publisher/Lib/Version"` → source-file path). The identity comes from the
+path, not the file's `library("…")` title; multiple `<version>.pine` files coexist.
+
+#### Async / lazy resolution (HTTP, CDN, large trees)
+
+When sources live behind async I/O (an HTTP CDN, a database) or in a large on-disk tree you
+don't want to scan eagerly, `compileAsync(src, { resolveLibrary })` walks the import graph and
+fetches ONLY the libraries actually imported (transitively), then calls the pure `compile()`:
+
+```ts
+import { compileAsync } from '@heyphat/piner';
+
+const compiled = await compileAsync(source, {
+  resolveLibrary: async ({ canonical }) => {
+    const res = await fetch(`https://cdn.example.com/pine/${canonical}.pine`);
+    return res.ok ? await res.text() : undefined; // undefined ⇒ missing-library error
+  },
+});
+```
+
+The provider may be sync or async. Node's `fsLibrarySource('./pine-libs')` (from
+`@heyphat/piner/node`) is a ready-made **lazy** provider that reads only the single
+`<publisher>/<lib>/<version>.pine` files that are imported. `compile()` itself stays
+synchronous and pure — `compileAsync` just gathers sources first (see
+`resolveLibraryClosure` for the standalone gatherer).
+
 ## Contributing
 
 Contributions are welcome — bug reports, fixes, new built-in coverage, and docs.

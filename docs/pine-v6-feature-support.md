@@ -6,7 +6,7 @@ what's partial, and what's not.
 
 - **Scope:** piner targets **Pine Script v5 + v6**. v4 and older are out of scope (see
   [coverage-and-compatibility.md](./coverage-and-compatibility.md); rationale in the project
-  memory). Library `import`/`export` is deliberately deferred.
+  memory). Library `import`/`export` is supported via an in-memory registry (no network/FS).
 - **Locations** are file:line under `src/` — e.g. `ta.sma → runtime/builtins/ta.ts:49`. Builtin
   namespaces live in `runtime/builtins/`; the dispatch/runtime is `runtime/context.ts`; the
   language front-end is `parser/parser.ts` + `sema/analyze.ts`; the two execution backends are
@@ -74,7 +74,7 @@ diagnostics); a clean compile returns `{ main, interpret, metadata, diagnostics 
 | Inline / chained history `(expr)[n]`, `f(x)[1]`, `close[1][2]` | ✅ | `sema/analyze.ts`; `series.ts` | materialized into an auto-history slot at the use site |
 | Non-numeric series history (array/string/UDT `x[n]`) | ✅ | `runtime/series.ts` | polymorphic slot store |
 | `na` semantics + `na()`/`nz()`/`fixnan()` | ✅ | `context.ts:687-690` | na propagates; comparisons with na → false |
-| `import` / `export` (libraries) | ❌ | `parser.ts:415` parses; `sema/analyze.ts:336` no-ops | **deferred** — `import X/Y/N as z` then `z.*` → undefined (unaliased names that shadow a builtin namespace resolve to the builtin) |
+| `import` / `export` (libraries) | ✅ | `parser.ts:415`; `sema/library.ts`, `sema/alias.ts`; wired in `engine/compiler.ts` | registry-based (no network/FS): `compile(src, { libraries })`. Exact-version match; functions/UDTs/enums/methods/constants exportable; transitive resolution (depth cap 32) with cycle rejection; export constraints enforced; inline-merged so both backends stay byte-identical. An alias equal to a builtin namespace (e.g. `ta`) is a CompileError — no builtin-namespace *extension*. See `docs/coverage-and-compatibility.md` §2.1 for parity notes |
 | Multiline string literals (`"""…"""` / `'''…'''`) | ✅ | `lexer/lexer.ts` (`scanTokens`/`findTripleClose`/`closeMlString`) | Pine v6 Apr-2026; source newlines → `\n`, indentation kept literally, backslash escapes still decoded |
 | Mixed tab/space indentation in continuations | ❌ | `lexer/lexer.ts:83` | rejected; use consistent indentation |
 
@@ -261,7 +261,7 @@ captured but not dispatched.
 | Feature | Status | Why |
 |---|---|---|
 | Pine **v4 and older** | ❌ | out of scope — deprecated, divergent dialect (use TradingView's converter) |
-| Library `import` / `export` | ❌ | deferred — needs a library-source registry + namespace resolution |
+| Library `import` / `export` | ✅ | supported — in-memory library-source registry + namespace resolution (see the `import`/`export` row above) |
 | Mixed tab/space indentation (continuations) | ❌ | rejected by the lexer; use consistent indentation |
 | `ta.pivot_point_levels` anchored variants | ⚠️ | partial |
 | Fundamental/alternative data (`request.dividends/earnings/financial/…`, `syminfo` fundamentals) | ❌ | no data feed → `na` |
