@@ -5,6 +5,7 @@
       "name": "piner",
       "devDependencies": {
         "@types/bun": "^1.2.5",
+        "fast-check": "^4.8.0",
         "pinets": "0.9.22",
         "typescript": "^5.7.2",
       },
@@ -23,7 +24,11 @@
 
     "bun-types": ["bun-types@1.3.14", "", { "dependencies": { "@types/node": "*" } }, "sha512-4N0ig0fEomHt5R0KCFWjovxow98rIoRwKolrYdCcknNwMekCXRnWEUvgu5soYV8QXtVsrUD8B95MBOZGPvr6KQ=="],
 
+    "fast-check": ["fast-check@4.8.0", "", { "dependencies": { "pure-rand": "^8.0.0" } }, "sha512-GOJ158CUMnN6cSahsv4+ExARvIDuzzinFjkp0E9WtiBa5zcVeLozVkWaE4IzFcc+Y48Wp1EDlUZsXRyAztQcSg=="],
+
     "pinets": ["pinets@0.9.22", "", { "dependencies": { "acorn": "^8.14.0", "acorn-walk": "^8.3.4", "astring": "^1.9.0" } }, "sha512-CPezZZ4uoF38hlS50c7IUtXMUsjF0jSEeWgcJyAM/qgWZv+gq4KfZSc69A2TP1WLqU75Wka9EAM+8dUTdE+5NQ=="],
+
+    "pure-rand": ["pure-rand@8.4.1", "", {}, "sha512-c58R2+SPFcSIPXoU834QN/KPDDOSd8sXcSrqf6e83Me6Rrp1EYkxukkjXMVrKvKaADs1SOyNkWdfvLf6zY8qLQ=="],
 
     "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 

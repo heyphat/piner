@@ -5,10 +5,16 @@
 import { tokenize } from '../lexer/lexer.js';
 import { parse } from '../parser/parser.js';
 import { inlineUserFunctions } from '../sema/inline.js';
-import { analyze, type Diagnostic, type InputDecl } from '../sema/analyze.js';
+import { analyze, CompileError, type Diagnostic, type InputDecl } from '../sema/analyze.js';
+import {
+  indexRegistry, LibraryResolver, mergeLibraries, checkExportConstraints,
+  classifyDeclaration, type CompileOptions,
+} from '../sema/library.js';
+import { AliasResolver } from '../sema/alias.js';
+import { resolveLibraryClosure, type AsyncLibrarySource } from '../sema/resolve.js';
 import { emit } from '../codegen/emit.js';
 import { makeInterpreted } from '../interp/interpreter.js';
-import type { Program, Call, Expr } from '../parser/ast.js';
+import type { Program, Call, Expr, ImportStmt } from '../parser/ast.js';
 import type { ScriptFn } from './driver.js';
 import type { StrategySettings } from '../runtime/builtins/strategy.js';
 
@@ -43,26 +49,59 @@ export interface CompiledScript {
   diagnostics: Diagnostic[];
 }
 
-export class CompileError extends Error {
-  constructor(message: string, readonly diagnostics: Diagnostic[]) {
-    super(message);
-    this.name = 'CompileError';
-  }
-}
+// `CompileError` now lives in `../sema/analyze.js` (the home of `Diagnostic`) so
+// the library/alias modules can throw it without importing this file. Re-exported
+// here to keep the public API (`import { CompileError } from '@heyphat/piner'`)
+// and every existing call site unchanged.
+export { CompileError } from '../sema/analyze.js';
 
-export function compile(source: string): CompiledScript {
+/**
+ * Compile Pine v6 source to a {@link CompiledScript}.
+ *
+ * @param source   the Pine source.
+ * @param options  optional {@link CompileOptions}; supply `libraries` to resolve
+ *                 `import` statements from an in-memory registry (no network/FS).
+ *
+ * Backward compatible: `compile(source)` on an import-free script takes the exact
+ * existing pipeline path and produces byte-identical output (Req 2.4).
+ */
+export function compile(source: string, options?: CompileOptions): CompiledScript {
   const lex = tokenize(source);
   const program = parse(lex);
-  // Inline user-defined function calls before analysis (monomorphization).
-  const inlined = inlineUserFunctions(program);
+
+  // Req 1: validate the consumer's top-level declaration (conflicting declarations;
+  // and, if it is itself a library, its title). Throws CompileError on violation.
+  classifyDeclaration(program);
+
+  const consumerImports = program.body.filter((s): s is ImportStmt => s.kind === 'Import');
+
+  // Resolve + merge imported libraries when a registry is supplied OR the script
+  // has imports. Otherwise take the untouched fast path (Req 2.4).
+  let toCompile = program;
+  if (options?.libraries !== undefined || consumerImports.length > 0) {
+    const registry = indexRegistry(options?.libraries ?? []);
+    const graph = new LibraryResolver(registry).resolve(consumerImports);
+
+    // Req 7: enforce export constraints across ALL libraries; report every violation.
+    const constraintDiags: Diagnostic[] = [];
+    for (const lib of graph.libraries.values()) constraintDiags.push(...checkExportConstraints(lib));
+    throwIfErrors(constraintDiags);
+
+    // Req 3/4: bind consumer aliases + rewrite `alias.*` references in place.
+    const { diagnostics: aliasDiags } = new AliasResolver(graph).bindAndRewrite(program);
+    // Req 5/8.6: mangle + merge every library's declarations.
+    const { decls, diagnostics: mergeDiags } = mergeLibraries(graph);
+    throwIfErrors([...aliasDiags, ...mergeDiags]);
+
+    toCompile = { ...program, body: [...decls, ...program.body] };
+  }
+
+  // Inline user-defined (and now merged imported) function calls before analysis.
+  const inlined = inlineUserFunctions(toCompile);
   const analysis = analyze(inlined.program);
   const diagnostics = [...inlined.diagnostics, ...analysis.diagnostics];
 
-  const errors = diagnostics.filter((d) => d.severity === 'error');
-  if (errors.length) {
-    const summary = errors.map((d) => `  ${d.line}:${d.col} ${d.message}`).join('\n');
-    throw new CompileError(`Pine compile failed:\n${summary}`, diagnostics);
-  }
+  throwIfErrors(diagnostics);
 
   const { source: jsSource, main } = emit(analysis);
   const interpret = makeInterpreted(analysis);
@@ -72,6 +111,7 @@ export function compile(source: string): CompiledScript {
     interpret,
     source: jsSource,
     metadata: {
+      // Metadata is always the Consumer_Script's (merged library decls carry none).
       ...extractMetadata(program),
       historySlotCount: analysis.historySlotCount,
       stateSiteCount: analysis.stateSiteCount,
@@ -80,6 +120,44 @@ export function compile(source: string): CompiledScript {
     },
     diagnostics,
   };
+}
+
+/** Options for {@link compileAsync}: {@link CompileOptions} plus an async source provider. */
+export interface CompileAsyncOptions extends CompileOptions {
+  /**
+   * Lazily provides Pine source for an imported library identity (HTTP, filesystem, DB, …).
+   * The transitive closure reachable from the script's imports is fetched via this provider
+   * (only imported libraries are fetched), then handed to the synchronous {@link compile}.
+   * Any `libraries` supplied are used as already-in-hand seeds before the provider is called.
+   */
+  resolveLibrary?: AsyncLibrarySource;
+}
+
+/**
+ * Async variant of {@link compile} that resolves imports through an async/lazy provider.
+ *
+ * `compile()` itself stays pure and synchronous; this wrapper simply gathers the needed
+ * library sources first (via {@link resolveLibraryClosure}) and then calls `compile()`. With
+ * no `resolveLibrary`, it is exactly `compile(source, options)`.
+ */
+export async function compileAsync(source: string, options: CompileAsyncOptions = {}): Promise<CompiledScript> {
+  const { resolveLibrary, ...rest } = options;
+  if (!resolveLibrary) return compile(source, rest);
+  const libraries = await resolveLibraryClosure(source, resolveLibrary, { seed: rest.libraries });
+  return compile(source, { ...rest, libraries });
+}
+
+/** Throw a {@link CompileError} if any diagnostic is an error, preserving attribution. */
+function throwIfErrors(diagnostics: Diagnostic[]): void {
+  const errors = diagnostics.filter((d) => d.severity === 'error');
+  if (!errors.length) return;
+  const summary = errors
+    .map((d) => {
+      const where = d.library ? ` [${d.library.canonical}]` : '';
+      return `  ${d.line}:${d.col}${where} ${d.message}`;
+    })
+    .join('\n');
+  throw new CompileError(`Pine compile failed:\n${summary}`, diagnostics);
 }
 
 function extractMetadata(program: Program): Pick<ScriptMetadata, 'title' | 'overlay' | 'isStrategy' | 'strategy' | 'maxLinesCount' | 'maxLabelsCount' | 'maxBoxesCount' | 'maxPolylinesCount'> {

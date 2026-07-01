@@ -11,6 +11,9 @@
 import type {
   Program, Stmt, Expr, SymRef, VarSlot, TypeField,
 } from '../parser/ast.js';
+// Type-only (erased at runtime) — avoids a runtime import cycle with library.ts,
+// which imports CompileError/OUTPUT_FNS from this module.
+import type { LibraryIdentity } from './library.js';
 import { SlotAllocator } from './slots.js';
 import type { PineType } from './types.js';
 import { TA_VARS } from '../codegen/intrinsics.js';
@@ -39,6 +42,24 @@ export interface Diagnostic {
   message: string;
   line: number;
   col: number;
+  /** Set when the diagnostic originates inside an imported library (Req 9.3). */
+  library?: LibraryIdentity;
+  /** Ordered chain Consumer → … → originating library (Req 9.4). */
+  importChain?: LibraryIdentity[];
+}
+
+/**
+ * The error piner throws for semantic (and library-resolution) failures. Carries
+ * the structured diagnostics. Defined here — the home of {@link Diagnostic} — so
+ * `library.ts`/`alias.ts` can throw it without importing `compiler.ts` (which
+ * imports them, which would form a cycle). Re-exported from `compiler.ts` and the
+ * package index, so the public API is unchanged.
+ */
+export class CompileError extends Error {
+  constructor(message: string, readonly diagnostics: Diagnostic[]) {
+    super(message);
+    this.name = 'CompileError';
+  }
 }
 
 /** A discovered `input.*` declaration — the settings-panel schema for one input. */
@@ -109,14 +130,14 @@ export const NAMESPACES = new Set([
 // data family is na-stubbed at runtime (no external feed in a headless run), so
 // nothing is hard-deferred at analysis time.
 const DEFERRED_NAMESPACES = new Set<string>([]);
-const GLOBAL_FNS = new Set([
+export const GLOBAL_FNS = new Set([
   'plot', 'plotshape', 'plotchar', 'plotarrow', 'plotcandle', 'plotbar', 'hline',
   'fill', 'bgcolor', 'barcolor', 'nz', 'na', 'fixnan', 'alert', 'alertcondition',
   'indicator', 'strategy', 'library', 'int', 'float', 'bool', 'string',
   'year', 'month', 'dayofmonth', 'dayofweek', 'hour', 'minute', 'second', 'weekofyear',
 ]);
 const DEFERRED_FNS = new Set<string>([]);
-const OUTPUT_FNS = new Set([
+export const OUTPUT_FNS = new Set([
   'plot', 'plotshape', 'plotchar', 'plotarrow', 'plotcandle', 'plotbar',
   'hline', 'fill', 'bgcolor', 'barcolor',
 ]);

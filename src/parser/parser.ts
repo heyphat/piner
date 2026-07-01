@@ -7,6 +7,8 @@
 import { TokenKind, type Token } from '../lexer/token.js';
 import type { LexResult } from '../lexer/lexer.js';
 import { Qualifier, type PineType } from '../sema/types.js';
+// Type-only (erased at runtime) — no runtime import cycle with library.ts.
+import type { LibraryIdentity } from '../sema/library.js';
 import type {
   Program, Stmt, Expr, VarDecl, TupleDecl, ExprStmt, FuncDef, TypeDef,
   ImportStmt, IfNode, SwitchNode, ForNode, ForInNode, WhileNode, Param, TypeField,
@@ -14,9 +16,22 @@ import type {
 } from './ast.js';
 
 export class ParseError extends Error {
-  constructor(message: string, readonly line: number, readonly col: number) {
-    super(`Parse error at ${line}:${col}: ${message}`);
+  /** The unformatted message body (without the `Parse error at L:C:` prefix), so a
+   *  library parse failure can be re-wrapped with identity/chain attribution. */
+  readonly raw: string;
+  constructor(
+    message: string,
+    readonly line: number,
+    readonly col: number,
+    /** Set when the parse failure occurred inside an imported library (Req 9.1). */
+    readonly library?: LibraryIdentity,
+    /** Ordered chain Consumer → … → originating library (Req 9.4). */
+    readonly importChain?: LibraryIdentity[],
+  ) {
+    const where = library ? ` in library ${library.canonical}` : '';
+    super(`Parse error at ${line}:${col}${where}: ${message}`);
     this.name = 'ParseError';
+    this.raw = message;
   }
 }
 

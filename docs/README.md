@@ -36,8 +36,9 @@ drawing objects), **inputs** (schema + override-by-title), broad
   compile *and run* end-to-end with **0 backend divergences**; the auto-generated
   gap report covers **846/884 manual entries (95.7%)** with every *fillable* gap
   closed. See [coverage-and-compatibility.md](./coverage-and-compatibility.md).
-- **Still deferred:** library `import`/`export` (needs a multi-module resolver),
-  fundamental/alternative `request.*` data feeds, a live
+- **Now supported:** library `import`/`export` via an in-memory source registry
+  (`compile(src, { libraries })`; no network/FS, both backends byte-identical).
+- **Still deferred:** fundamental/alternative `request.*` data feeds, a live
   session model, and ULP-level numeric parity vs TradingView itself.
 
 ## Reading order

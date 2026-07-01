@@ -29,6 +29,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js",
+      "require": "./dist/node.cjs"
     }
   },
   "files": [
@@ -41,15 +46,18 @@
     "test": "bun test",
     "test:watch": "bun test --watch",
     "typecheck": "tsc --noEmit",
-    "build": "bun run build:js && bun run build:cjs && bun run build:types",
+    "build": "bun run build:js && bun run build:cjs && bun run build:node && bun run build:node:cjs && bun run build:types",
     "build:js": "bun build ./src/index.ts --outdir dist --target browser --format esm --sourcemap=linked",
     "build:cjs": "bun build ./src/index.ts --outdir dist --target node --format cjs --entry-naming \"[name].cjs\" --sourcemap=linked",
+    "build:node": "bun build ./src/node.ts --outdir dist --target node --format esm --sourcemap=linked",
+    "build:node:cjs": "bun build ./src/node.ts --outdir dist --target node --format cjs --entry-naming \"[name].cjs\" --sourcemap=linked",
     "build:types": "tsc -p tsconfig.build.json",
     "dev": "bun build ./src/index.ts --outdir dist --target browser --format esm --watch",
     "prepublishOnly": "bun run build"
   },
   "devDependencies": {
     "@types/bun": "^1.2.5",
+    "fast-check": "^4.8.0",
     "pinets": "0.9.22",
     "typescript": "^5.7.2"
   },

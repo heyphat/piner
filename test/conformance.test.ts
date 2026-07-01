@@ -83,27 +83,22 @@ describe('conformance — hardening', () => {
     expect(() => compile('//@version=6\nindicator("x")\nimport user/lib/1 as lib\nplot(lib.f(close))\n')).toThrow(CompileError);
   });
 
-  it('AlgoAlpha S/R Retest script runs on both backends and emits zones (ta.requestUpAndDownVolume)', async () => {
-    // Regression: `import TradingView/ta/12` + ta.requestUpAndDownVolume crashed the whole
-    // script at runtime (undefined fn → nothing rendered). It must now run and draw zones.
+  it('AlgoAlpha S/R Retest script: `import TradingView/ta/12` is rejected cleanly (library-import-export)', () => {
+    // Feature library-import-export changed import semantics. This script does
+    // `import TradingView/ta/12` with no alias, so its alias defaults to the lib
+    // component `ta` — a reserved builtin namespace. piner deliberately does NOT
+    // implement TradingView's builtin-namespace *extension*: an alias equal to a
+    // builtin namespace is a CompileError (Req 3.7), and with no registry supplied
+    // the library is unresolved (Req 2.8). Either way the compiler must fail cleanly
+    // (a structured CompileError, never a raw crash) — this script is no longer
+    // compilable as-authored.
     const src = readFileSync(join(import.meta.dir, 'pinescripts/lux-algo/support-resistent-retest.pine'), 'utf8');
-    const swing: Bar[] = Array.from({ length: 400 }, (_, i) => {
-      const c = 100 + Math.sin(i / 13) * 18 + Math.sin(i / 4) * 4 + (i % 9) * 0.5;
-      return { time: i * 3600000, open: c - Math.cos(i) * 0.8, high: c + 2.5, low: c - 2.5, close: c, volume: 1000 + (i % 17) * 30 };
-    });
-    const c = compile(src);
-    const counts = (b: 'js' | 'interp') => (async () => {
-      const eng = new Engine(c, new ArrayFeed(swing), { backend: b });
-      return eng.run({ symbol: 'XAUUSDT', timeframe: '60' }).then(() => {
-        const byType: Record<string, number> = {};
-        for (const d of eng.drawings) byType[d.type] = (byType[d.type] ?? 0) + 1;
-        return byType;
-      });
-    })();
-    const js = await counts('js');
-    const ip = await counts('interp');
-    expect((js.box ?? 0)).toBeGreaterThan(0); // S/R zone boxes were actually drawn
-    expect(ip).toEqual(js);                   // both backends agree
+    // No registry → missing-library CompileError (Req 2.8).
+    expect(() => compile(src)).toThrow(CompileError);
+    // Even WITH the library provided, its default alias `ta` shadows the builtin
+    // namespace → CompileError (Req 3.7).
+    const withStub = () => compile(src, { libraries: [{ key: 'TradingView/ta/12', source: '//@version=6\nlibrary("ta")\nexport noop() => 0\n' }] });
+    expect(withStub).toThrow(CompileError);
   });
 
   it('AlgoAlpha Regression Trend script runs on both backends (color.new(na) is na, not a crash)', async () => {

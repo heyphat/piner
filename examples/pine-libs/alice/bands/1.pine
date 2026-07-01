@@ -1,0 +1,35 @@
+//@version=6
+library("Bands")
+
+// A library may import OTHER libraries (resolved from the same on-disk tree).
+import alice/mathx/1 as mx
+
+// An exported user-defined type (UDT).
+export type Band
+    float basis = 0.0
+    float upper = 0.0
+    float lower = 0.0
+
+// An exported enum.
+export enum Side
+    Above
+    Below
+    Inside
+
+// An exported method — callable via receiver dispatch: `b.width()`.
+export method width(Band self) =>
+    self.upper - self.lower
+
+// An exported function returning a UDT instance.
+export compute(float src, int len, float mult) =>
+    basis = ta.sma(src, len)
+    dev = mult * ta.stdev(src, len)
+    Band.new(basis, basis + dev, basis - dev)
+
+// Takes an imported-UDT parameter and returns an enum member.
+export classify(float src, Band bnd) =>
+    src > bnd.upper ? Side.Above : src < bnd.lower ? Side.Below : Side.Inside
+
+// Uses the TRANSITIVELY-imported MathX library.
+export zWidth(float src, int len, float mult) =>
+    math.abs(mx.zscore(src, len)) * mult

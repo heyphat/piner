@@ -91,7 +91,43 @@ Three independent verification layers run on every commit:
 | User-defined types (UDT) + `.new()` + field access | ✅ | `type T`, `T.new(...)` (positional/named args + field defaults), field read/assign; both backends build identical instances |
 | `enum` + `input.enum` | ✅ | members resolve to their title constant at compile time |
 | User `method` (receiver dispatch) | ✅ | `recv.m(…)` dispatches user `method`s (on UDTs *and* built-in types), monomorphized like UDFs — `this`-binding, per-call-site state, chaining. A user method whose name collides with a built-in collection/drawing method (`push`/`get`/…) is reachable only in function form `m(recv, …)` |
-| `import` / library `export` | ❌ | deferred (needs a library resolver + multi-module compilation) |
+| `import` / library `export` | ✅ | registry-based (no network/FS) via `compile(src, { libraries })`: exact-version match, functions/UDTs/enums/methods exportable, transitive resolution (depth cap 32) with cycle rejection, enforced export constraints; inline-merged so both backends stay byte-identical. An alias equal to a builtin namespace is a CompileError |
+
+### 2.1 Library import/export — parity notes vs. the TradingView docs
+
+Audited against the official [Libraries](https://www.tradingview.com/pine-script-docs/concepts/libraries/)
+page (the doc's own `AllTimeHighLow`, `Point`, `Signal`, and `PivotLabels` examples run verbatim
+through both backends — see `test/library-doc-examples.test.ts`). The full documented **feature
+surface is supported**: `library()` scripts; `export` of functions, methods, UDTs, enums, **and
+constants** (`export NAME = …`, the v6 addition); `import Publisher/Lib/Version [as alias]` with
+explicit versions and optional aliasing (namespace defaults to the lib name); transitive imports
+(including a library importing a *previous version of itself*); UDT construction/fields/methods;
+enum members; and tuple returns.
+
+Resolution is registry-based and pure (no I/O) so the core stays browser-safe and
+deterministic. For Node/CLI use, the optional `@heyphat/piner/node` entry point
+(`loadLibraryDir`/`loadLibraryManifest`) builds a `LibraryRegistry` from `.pine` files on
+disk (`<root>/<publisher>/<lib>/<version>.pine`); it is never bundled into the browser entry.
+For async or lazy sources (HTTP/CDN, large trees), `compileAsync(src, { resolveLibrary })`
+fetches only the transitively-imported libraries via a caller-supplied provider (browser-safe;
+`fsLibrarySource` is a ready-made lazy filesystem provider) and then calls the pure `compile()`.
+
+piner is a **permissive superset**: it never rejects valid TradingView library code, but by design
+it accepts a few constructs TradingView rejects, because the inline-merge model makes imported code
+behave exactly like local code and piner uses a coarse (unqualified) type system:
+
+| TradingView rule | piner | Why |
+|---|---|---|
+| Qualifier control — a `series` arg to a `simple`-inferred param is an error; `simple`/`series` keywords shape results | accepted / ignored | no qualifier-inference system; imported fns are inlined + monomorphized like local fns |
+| Exported fn may not call `input.*()` | accepted (input hoists to the consumer schema) | export purity not enforced beyond side-effecting global builtins + declarations |
+| Exported fn may not use non-`const` globals (const globals are allowed) | accepted (const globals allowed too) | distinguishing const vs. non-const globals needs qualifier analysis |
+| Exported fn parameter types are mandatory | untyped params accepted | params are typeless in piner as in local UDFs |
+
+Intentional restriction (stricter than a naive reading): an import whose alias equals a builtin
+namespace (e.g. the default `ta` alias of `import TradingView/ta/12`) is a **CompileError** — piner
+does not implement TradingView's builtin-namespace *extension*. Overloaded exports (same
+method/function name distinguished only by receiver type or arity) collapse under name mangling,
+matching piner's pre-existing local-function limitation (imported ≡ local).
 
 ## 3. Built-in coverage
 
@@ -155,9 +191,10 @@ already stubs `request.footprint` → na; the `footprint` UDT itself is not mode
 
 ## 4. Empirical corpus — remaining failure buckets
 
-Only ~6 single-script examples still fail, and only **one is a genuine piner gap**
-(library `import`/`export`); the rest are corpus artifacts (no failure is a silent
-wrong-answer — those are caught by §3 parity):
+Only ~6 single-script examples still fail, and they are all corpus artifacts (no
+failure is a silent wrong-answer — those are caught by §3 parity). Library
+`import`/`export` is now **supported** (registry-based; see §2), so it is no longer
+a genuine gap:
 
 | Bucket | ~count | Disposition |
 |---|---|---|

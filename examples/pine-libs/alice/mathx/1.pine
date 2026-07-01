@@ -1,0 +1,10 @@
+//@version=6
+library("MathX")
+
+// A PRIVATE (non-exported) helper: merged into any script that calls an exported
+// function using it, but a consumer cannot reference `mathx.mean`.
+mean(float src, int len) => ta.sma(src, len)
+
+// z-score = (value − mean) / standard deviation
+export zscore(float src, int len) =>
+    (src - mean(src, len)) / ta.stdev(src, len)
