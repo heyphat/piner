@@ -1,0 +1,179 @@
+//@version=6
+// Smart Money Concepts (SMC) — Structure + FVG backtest strategy
+//
+// A self-contained SMC strategy that trades pullbacks in the direction of
+// market structure. It combines the core SMC building blocks:
+//   1. Swing structure   — pivot highs/lows define the working range.
+//   2. Directional bias  — Break of Structure (BOS) / Change of Character
+//                          (CHoCH) flip a persistent bullish/bearish bias.
+//   3. Fair Value Gaps   — 3-candle imbalances mark institutional entry zones.
+//   4. Premium/Discount  — only buy the discount half / sell the premium half
+//                          of the current range (equilibrium filter).
+// Entries fire when price retraces into a fresh FVG that agrees with the bias
+// and the premium/discount filter. Risk is anchored to the protected swing,
+// with a configurable reward multiple.
+
+strategy(
+  "SMC — Structure + FVG",
+  overlay              = true,
+  initial_capital      = 10000,
+  default_qty_type     = strategy.percent_of_equity,
+  default_qty_value    = 10,
+  commission_type      = strategy.commission.percent,
+  commission_value     = 0.04,
+  calc_on_every_tick   = false,
+  process_orders_on_close = true,
+  max_boxes_count      = 200,
+  max_lines_count      = 200)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INPUTS
+// ─────────────────────────────────────────────────────────────────────────────
+swingLen     = input.int(5,    "Swing Length",          minval=2, maxval=50, group="Structure", tooltip="Bars either side of a pivot. Larger = higher-timeframe structure.")
+tradeDir     = input.string("Both", "Trade Direction",  options=["Both", "Long", "Short"], group="Structure")
+
+useFvgFilter = input.bool(true, "Require FVG entry",     group="Entry")
+minFvgAtr    = input.float(0.25, "Min FVG size (ATR)",   minval=0.0, step=0.05, group="Entry", tooltip="Ignore imbalances smaller than this multiple of ATR.")
+usePremDisc  = input.bool(true, "Premium/Discount filter", group="Entry", tooltip="Only long the discount half and short the premium half of the range.")
+
+riskReward   = input.float(2.0, "Reward : Risk",         minval=0.5, step=0.5, group="Risk")
+slBufferAtr  = input.float(0.5, "Stop buffer (ATR)",     minval=0.0, step=0.1, group="Risk", tooltip="Extra room beyond the protected swing, in ATR.")
+
+showZones    = input.bool(true, "Draw structure & zones", group="Visuals")
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SWING STRUCTURE
+// ─────────────────────────────────────────────────────────────────────────────
+atr = ta.atr(14)
+
+ph = ta.pivothigh(swingLen, swingLen)
+pl = ta.pivotlow(swingLen, swingLen)
+
+var float swingHigh = na   // most recent confirmed swing high level
+var float swingLow  = na   // most recent confirmed swing low level
+
+if not na(ph)
+    swingHigh := ph
+if not na(pl)
+    swingLow := pl
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DIRECTIONAL BIAS — Break of Structure (BOS) / Change of Character (CHoCH)
+// ─────────────────────────────────────────────────────────────────────────────
+var int   bias        = 0        // 1 = bullish, -1 = bearish, 0 = undefined
+var bool  brokeHigh   = false    // guards against re-firing on the same swing
+var bool  brokeLow    = false
+
+// A new swing high/low resets its own break guard.
+if not na(ph)
+    brokeHigh := false
+if not na(pl)
+    brokeLow := false
+
+bosUp   = not na(swingHigh) and close > swingHigh and not brokeHigh
+bosDown = not na(swingLow)  and close < swingLow  and not brokeLow
+
+choch = na(bias) ? false : (bosUp and bias == -1) or (bosDown and bias == 1)
+
+if bosUp
+    bias      := 1
+    brokeHigh := true
+if bosDown
+    bias      := -1
+    brokeLow  := true
+
+// Equilibrium of the current working range for premium/discount classification.
+eq        = (not na(swingHigh) and not na(swingLow)) ? math.avg(swingHigh, swingLow) : na
+inDiscount = not na(eq) and close < eq
+inPremium  = not na(eq) and close > eq
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FAIR VALUE GAPS (3-candle imbalance)
+// ─────────────────────────────────────────────────────────────────────────────
+// Bullish FVG: gap between high[2] (bottom) and low (top) — price is expected
+// to retrace down into the gap before continuing up. Bearish is the mirror.
+gapUp   = high[2]
+gapDown = low[2]
+
+bullFvgNew = low > high[2] and (low - high[2]) > minFvgAtr * atr
+bearFvgNew = high < low[2] and (low[2] - high) > minFvgAtr * atr
+
+// Track the freshest un-mitigated FVG of each side.
+var float bullFvgTop = na
+var float bullFvgBot = na
+var float bearFvgTop = na
+var float bearFvgBot = na
+
+if bullFvgNew
+    bullFvgTop := low
+    bullFvgBot := high[2]
+if bearFvgNew
+    bearFvgTop := low[2]
+    bearFvgBot := high
+
+// Invalidate a bullish FVG once price closes fully below it (gap filled/broken),
+// and a bearish FVG once price closes fully above it.
+if not na(bullFvgBot) and close < bullFvgBot
+    bullFvgTop := na
+    bullFvgBot := na
+if not na(bearFvgTop) and close > bearFvgTop
+    bearFvgTop := na
+    bearFvgBot := na
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENTRY CONDITIONS
+// ─────────────────────────────────────────────────────────────────────────────
+allowLong  = tradeDir != "Short"
+allowShort = tradeDir != "Long"
+
+// Price is tapping the FVG zone this bar.
+tapBull = not na(bullFvgTop) and low <= bullFvgTop and high >= bullFvgBot
+tapBear = not na(bearFvgTop) and high >= bearFvgBot and low <= bearFvgTop
+
+longFvgOk  = not useFvgFilter or tapBull
+shortFvgOk = not useFvgFilter or tapBear
+
+longDiscOk  = not usePremDisc or inDiscount
+shortPremOk = not usePremDisc or inPremium
+
+longSignal  = allowLong  and bias == 1  and longFvgOk  and longDiscOk  and not na(swingLow)
+shortSignal = allowShort and bias == -1 and shortFvgOk and shortPremOk and not na(swingHigh)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ORDERS — anchor risk to the protected swing, target a reward multiple
+// ─────────────────────────────────────────────────────────────────────────────
+var float longStop  = na
+var float longLimit = na
+var float shortStop  = na
+var float shortLimit = na
+
+if longSignal and strategy.position_size <= 0
+    stopPx  = swingLow - slBufferAtr * atr
+    risk    = close - stopPx
+    if risk > 0
+        longStop  := stopPx
+        longLimit := close + riskReward * risk
+        strategy.entry("Long", strategy.long)
+        strategy.exit("Long TP/SL", "Long", stop=longStop, limit=longLimit)
+
+if shortSignal and strategy.position_size >= 0
+    stopPx  = swingHigh + slBufferAtr * atr
+    risk    = stopPx - close
+    if risk > 0
+        shortStop  := stopPx
+        shortLimit := close - riskReward * risk
+        strategy.entry("Short", strategy.short)
+        strategy.exit("Short TP/SL", "Short", stop=shortStop, limit=shortLimit)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VISUALS
+// ─────────────────────────────────────────────────────────────────────────────
+plot(showZones ? swingHigh : na, "Swing High", color=color.new(color.red, 40),   style=plot.style_linebr)
+plot(showZones ? swingLow  : na, "Swing Low",  color=color.new(color.green, 40), style=plot.style_linebr)
+plot(showZones ? eq        : na, "Equilibrium", color=color.new(color.gray, 50), style=plot.style_linebr)
+
+plotshape(choch, "CHoCH", shape.diamond, location.abovebar, color.orange, size=size.tiny)
+plotshape(bosUp   and not choch, "BOS↑", shape.triangleup,   location.belowbar, color.green, size=size.tiny)
+plotshape(bosDown and not choch, "BOS↓", shape.triangledown, location.abovebar, color.red,   size=size.tiny)
+
+bgcolor(bias == 1 ? color.new(color.green, 92) : bias == -1 ? color.new(color.red, 92) : na, title="Bias")

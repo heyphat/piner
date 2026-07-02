@@ -71,7 +71,7 @@ class Interp {
       case 'For': return this.forStmt(s);
       case 'ForIn': return this.forInStmt(s);
       case 'While': return this.whileStmt(s);
-      case 'Switch': { this.switchValue(s); return; }
+      case 'Switch': { const r = this.switchValue(s); return r === BREAK || r === CONTINUE ? r : undefined; }
       case 'Break': return BREAK;
       case 'Continue': return CONTINUE;
       case 'FuncDef':
@@ -104,9 +104,11 @@ class Interp {
   }
 
   private compound(op: string, target: Ident | Member, value: Expr): unknown {
-    const v = this.expr(value);
-    if (op === ':=') return v;
+    if (op === ':=') return this.expr(value);
+    // Read the current value BEFORE the RHS (`x += f()` is `x := x + f()`,
+    // left-to-right) — matches codegen when the RHS reassigns the target.
     const cur = this.expr(target) as number;
+    const v = this.expr(value);
     switch (op) {
       case '+=': return this.$.add(cur, v as number);
       case '-=': return this.$.sub(cur, v as number);
@@ -119,8 +121,8 @@ class Interp {
 
   // ── control flow ──────────────────────────────────────────
   private ifStmt(s: IfNode): typeof BREAK | typeof CONTINUE | void {
-    if (this.expr(s.cond)) return this.runBlock(s.then);
-    for (const el of s.elifs) if (this.expr(el.cond)) return this.runBlock(el.body);
+    if (this.$.toBool(this.expr(s.cond))) return this.runBlock(s.then);
+    for (const el of s.elifs) if (this.$.toBool(this.expr(el.cond))) return this.runBlock(el.body);
     if (s.else) return this.runBlock(s.else);
   }
 
@@ -153,7 +155,7 @@ class Interp {
     }
   }
   private whileStmt(s: WhileNode): void {
-    while (this.expr(s.cond)) {
+    while (this.$.toBool(this.expr(s.cond))) {
       this.$.consumeLoopIteration();
       const r = this.runBlock(s.body);
       if (r === BREAK) break;
@@ -175,7 +177,10 @@ class Interp {
 
   /** Block value = last statement's value (expression, or assigned value). */
   private blockValue(body: Stmt[]): unknown {
-    for (let i = 0; i < body.length - 1; i++) this.stmt(body[i]);
+    for (let i = 0; i < body.length - 1; i++) {
+      const r = this.stmt(body[i]);
+      if (r === BREAK || r === CONTINUE) return r; // loop control escapes the value block (break in a switch case)
+    }
     const last = body[body.length - 1];
     if (last) {
       if (last.kind === 'ExprStmt') return this.expr(last.expr);
@@ -183,7 +188,8 @@ class Interp {
       if (last.kind === 'Reassign' && last.target.kind === 'Ident' && last.sym) { this.stmt(last); return this.readSymVal(last.sym); }
       // `if`/`switch` are expressions in Pine — a trailing one is the block's value. Evaluate it.
       if (last.kind === 'If' || last.kind === 'Switch') return this.expr(last);
-      this.stmt(last);
+      const r = this.stmt(last);
+      if (r === BREAK || r === CONTINUE) return r;
     }
     return this.$.NA;
   }
@@ -193,7 +199,7 @@ class Interp {
     let defaultBody: Stmt[] | null = null;
     for (const c of s.cases) {
       if (!c.test) { defaultBody = c.body; continue; }
-      const match = s.subject ? this.$.eq(subj, this.expr(c.test)) : this.expr(c.test);
+      const match = s.subject ? this.$.eq(subj, this.expr(c.test)) : this.$.toBool(this.expr(c.test));
       if (match) return this.blockValue(c.body);
     }
     return defaultBody ? this.blockValue(defaultBody) : this.$.NA;
@@ -219,12 +225,12 @@ class Interp {
           : e.op === '-' ? this.$.neg(this.expr(e.operand) as number)
           : this.expr(e.operand);
       case 'Binary': return this.binary(e);
-      case 'Ternary': return this.expr(e.cond) ? this.expr(e.then) : this.expr(e.else);
+      case 'Ternary': return this.$.toBool(this.expr(e.cond)) ? this.expr(e.then) : this.expr(e.else);
       case 'Call': return this.call(e);
       case 'Tuple': return e.items.map((it) => this.expr(it));
       case 'If': {
-        if (this.expr(e.cond)) return this.blockValue(e.then);
-        for (const el of e.elifs) if (this.expr(el.cond)) return this.blockValue(el.body);
+        if (this.$.toBool(this.expr(e.cond))) return this.blockValue(e.then);
+        for (const el of e.elifs) if (this.$.toBool(this.expr(el.cond))) return this.blockValue(el.body);
         return e.else ? this.blockValue(e.else) : this.$.NA;
       }
       case 'Switch': return this.switchValue(e);
@@ -264,8 +270,9 @@ class Interp {
   }
 
   private binary(e: Extract<Expr, { kind: 'Binary' }>): unknown {
-    if (e.op === 'and') return (this.expr(e.left) as boolean) && (this.expr(e.right) as boolean);
-    if (e.op === 'or') return (this.expr(e.left) as boolean) || (this.expr(e.right) as boolean);
+    // v6: bools cannot hold na — na coerces to false. Lazy RHS preserved by &&/||.
+    if (e.op === 'and') return this.$.toBool(this.expr(e.left)) && this.$.toBool(this.expr(e.right));
+    if (e.op === 'or') return this.$.toBool(this.expr(e.left)) || this.$.toBool(this.expr(e.right));
     const l = this.expr(e.left);
     const r = this.expr(e.right);
     switch (e.op) {
@@ -385,20 +392,27 @@ class Interp {
       for (let i = 0; i < coords.length; i++) slots[i] = positionalArgs[i]?.value; // coord slots
       coords.forEach((pname, i) => { const v = named.get(pname); if (v !== undefined) slots[i] = v; }); // a coord passed by name
       // Everything else → the trailing opts bag: extra POSITIONAL args keyed by their Pine
-      // param name (optsPos), then NAMED args that aren't coords.
-      const opts: Record<string, unknown> = {};
-      let hasOpts = false;
+      // param name (optsPos), then NAMED args that aren't coords. Decide membership
+      // syntactically first — coord slots must EVALUATE before opts values to match the
+      // emitted `$.fn(coord…, {opts})` left-to-right argument order.
+      const extraPos: [string, Expr][] = [];
       for (let i = coords.length; i < positionalArgs.length; i++) {
         const pname = optsPos?.[i - coords.length];
-        if (pname) { opts[pname] = this.expr(positionalArgs[i].value); hasOpts = true; }
+        if (pname) extraPos.push([pname, positionalArgs[i].value]);
       }
-      for (const a of e.args) if (a.name && !coords.includes(a.name)) { opts[a.name] = this.expr(a.value); hasOpts = true; }
+      const namedOpts = e.args.filter((a) => a.name && !coords.includes(a.name));
+      const hasOpts = extraPos.length > 0 || namedOpts.length > 0;
       // Pad coord slots up to coords.length when an opts bag exists so it lands in the
       // runtime's trailing `opts` parameter, not a skipped middle positional.
       const span = hasOpts ? Math.max(slots.length, coords.length) : slots.length;
       const out: unknown[] = [];
       for (let i = 0; i < span; i++) out.push(slots[i] !== undefined ? this.expr(slots[i]!) : undefined);
-      if (hasOpts) out.push(opts);
+      if (hasOpts) {
+        const opts: Record<string, unknown> = {};
+        for (const [pname, v] of extraPos) opts[pname] = this.expr(v);
+        for (const a of namedOpts) opts[a.name!] = this.expr(a.value);
+        out.push(opts);
+      }
       return out;
     }
     const positional = e.args.filter((a) => !a.name).map((a) => this.expr(a.value));

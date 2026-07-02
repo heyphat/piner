@@ -97,6 +97,28 @@ plot(midPrice(p, q), "mid")`);
     expect(mid.length).toBe(bars.length);
     expect(mid.every((v) => Number.isFinite(v))).toBe(true);
   });
+
+  it('chart.point.copy clones a point (na-safe) and chart.point.now defaults to close', async () => {
+    // Real-script gap (auto-pitchfork): `chart.point.copy(prev2P)` then mutating the copy's
+    // price — the original must not move. copy(na) is na; now() takes price = close.
+    const e = await bothBackends(`//@version=6
+indicator("cpc")
+p = chart.point.from_index(bar_index, close)
+c = chart.point.copy(p)
+c.price := c.price + 1
+plot(p.price, "orig")
+plot(c.price, "copy")
+chart.point q = na
+plot(na(chart.point.copy(q)) ? 1 : 0, "na-safe")
+plot(chart.point.now().price, "now")`);
+    const orig = plot(e, 'orig'), copy = plot(e, 'copy'), nasafe = plot(e, 'na-safe'), now = plot(e, 'now');
+    for (let i = 0; i < bars.length; i++) {
+      expect(copy[i]).toBeCloseTo(orig[i] + 1, 9); // the copy moved…
+      expect(orig[i]).toBeCloseTo(bars[i].close, 9); // …the original did not
+      expect(now[i]).toBeCloseTo(bars[i].close, 9);
+    }
+    expect(nasafe.every((v) => v === 1)).toBe(true);
+  });
 });
 
 describe('inline-expression history (expr)[n]', () => {

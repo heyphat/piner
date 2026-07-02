@@ -35,9 +35,9 @@ export function historicalBarState(isLast: boolean, isFirst = false): BarState {
   };
 }
 
-export function realtimeBarState(isNewTick: boolean, isClose: boolean): BarState {
+export function realtimeBarState(isNewTick: boolean, isClose: boolean, isFirst = false): BarState {
   return {
-    isfirst: false,
+    isfirst: isFirst, // true when the dataset had no history (bar_index === 0 live)
     isnew: isNewTick,
     isconfirmed: isClose,
     islast: true,

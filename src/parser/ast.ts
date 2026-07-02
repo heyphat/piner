@@ -174,7 +174,9 @@ export interface ImportStmt {
   kind: 'Import';
   user: string;
   lib: string;
-  version: number;
+  /** The version segment as written, verbatim (e.g. "1"). Kept as a string so matching
+   *  against a registry key is exact — no numeric coercion (`01` ≠ `1`). */
+  version: string;
   alias?: string;
   loc?: Loc;
 }

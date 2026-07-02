@@ -79,7 +79,6 @@ const EXACT: [string, string][] = [
   ['rsi', 'plot(ta.rsi(close,14),"v")'],
   ['atr', 'plot(ta.atr(14),"v")'],
   ['tr(true)', 'plot(ta.tr(true),"v")'],
-  ['tr (bare variable)', 'plot(ta.tr,"v")'],
   ['stdev', 'plot(ta.stdev(close,20),"v")'],
   ['dev', 'plot(ta.dev(close,20),"v")'],
   ['variance', 'plot(ta.variance(close,20),"v")'],
@@ -305,6 +304,15 @@ describe.skipIf(!PineTS)('parity vs PineTS — verified piner-correct (PineTS mi
     expect(r.data[0]).toBeCloseTo(123.46, 9);
     expect(g.data[0]).toBe(6);
     expect(f.data[0]).toBe(720);
+  });
+
+  it('bare ta.tr ≡ tr(handle_na=false): na on bar 0 (v6 manual); PineTS returns high-low', async () => {
+    const eng = new Engine(compile('//@version=6\nindicator("x")\nplot(ta.tr,"bare")\nplot(ta.tr(true),"hna")\n'), new ArrayFeed(PB));
+    await eng.run({ symbol: 'T', timeframe: '60' });
+    const [bare, hna] = [...eng.outputs.plots.values()];
+    expect(Number.isNaN(bare.data[0])).toBe(true);
+    expect(hna.data[0]).toBeCloseTo(PB[0].high - PB[0].low, 9);
+    for (let i = 1; i < PB.length; i++) expect(bare.data[i]).toBeCloseTo(hna.data[i], 9); // identical past bar 0
   });
 
   it('barstate.isfirst / islastconfirmedhistory', async () => {

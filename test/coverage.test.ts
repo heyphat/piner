@@ -118,7 +118,7 @@ plot(time_close, title="tc")
     expect(eng.outputs.alerts.length).toBe(bars.length); // fired each bar
     const b = bars[6];
     expect(eng.outputs.plots.get(0)!.data[6]).toBeCloseTo((b.high + b.low + b.close + b.close) / 4, 9);
-    expect(eng.outputs.plots.get(1)!.data[6]).toBe(b.time);
+    expect(eng.outputs.plots.get(1)!.data[6]).toBe(b.time + 60_000); // close time = open + one tf ("1" = 1min)
   });
 });
 

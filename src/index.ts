@@ -7,8 +7,13 @@
  */
 
 // Compiler pipeline
-export { compile, CompileError } from './engine/compiler.js';
-export type { CompiledScript, ScriptMetadata } from './engine/compiler.js';
+export { compile, compileAsync, CompileError } from './engine/compiler.js';
+export type { CompiledScript, ScriptMetadata, CompileAsyncOptions } from './engine/compiler.js';
+export { resolveLibraryClosure } from './sema/resolve.js';
+export type { AsyncLibrarySource, ResolveClosureOptions } from './sema/resolve.js';
+export type {
+  CompileOptions, LibraryRegistry, LibraryRegistryKey, LibraryIdentity, LibraryIdentityObject,
+} from './sema/library.js';
 export { tokenize, LexError } from './lexer/lexer.js';
 export { parse, ParseError } from './parser/parser.js';
 export { analyze } from './sema/analyze.js';

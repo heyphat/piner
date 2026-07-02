@@ -146,7 +146,7 @@ export class OutputCollector {
   }
   fillColor(id: number, bar: number, color: string | null): void {
     const s = this.fills.get(id);
-    if (s && color != null) s.colors[bar] = color;
+    if (s) s.colors[bar] = color; // null (na) stored too — a realtime tick may clear a fill set by an earlier tick
   }
   fillGradientPoint(id: number, bar: number, topValue: number, bottomValue: number, topColor: string | null, bottomColor: string | null): void {
     const s = this.fills.get(id);

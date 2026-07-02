@@ -20,7 +20,7 @@
 import type {
   Program, Stmt, Expr, FuncDef, VarDecl, IfNode, Arg, Loc,
 } from '../parser/ast.js';
-import type { Diagnostic } from './analyze.js';
+import { NAMESPACES, type Diagnostic } from './analyze.js';
 import { BUILTIN_METHODS } from '../codegen/intrinsics.js';
 
 const MAX_EXPANSIONS = 5000; // runaway guard (also catches pathological fan-out)
@@ -106,8 +106,14 @@ class Inliner {
         // user-method dot-call sugar: `recv.m(args)` → `m(recv, args)` when `m` is a
         // user `method` and not a built-in collection/drawing method (those dispatch
         // by receiver shape, e.g. `arr.push(x)`). The receiver becomes `this` (param 0).
+        // A bare Ident receiver naming a builtin namespace (`str.contains(...)`, …) is a
+        // namespace CALL, never method sugar — otherwise a user `method contains` would
+        // hijack it. (Trade-off: a user variable shadowing a namespace name loses dot-call
+        // sugar; the inliner runs before name resolution, so it can't tell, and protecting
+        // the builtin is the common case.)
         if (e.callee.kind === 'Member' && this.methods.has(e.callee.property)
-          && !BUILTIN_METHODS.has(e.callee.property)) {
+          && !BUILTIN_METHODS.has(e.callee.property)
+          && !(e.callee.object.kind === 'Ident' && NAMESPACES.has(e.callee.object.name))) {
           const recv = this.expr(e.callee.object);
           const args: Arg[] = [{ value: recv }, ...e.args.map((a) => ({ name: a.name, value: this.expr(a.value) }))];
           return this.expand(e.callee.property, args, e.loc);
@@ -134,6 +140,16 @@ class Inliner {
     }
     const func = this.funcs.get(name)!;
     const positional = args.filter((a) => !a.name);
+    // Bind each argument expression to a FRESH temp first, then bind the params from
+    // the temps. Every argument (and default) thus evaluates in the CALLER's scope
+    // before any parameter name exists, so an argument referencing a caller variable
+    // named like a parameter (`f(a, b) => a - b` called as `f(1, a)`) cannot capture
+    // the fresh `a` binding — in either direction. This also covers the method-receiver
+    // case (`d.show(this.name)`: the arg reads the caller's `this`, not the receiver),
+    // which previously needed a receiver-last reordering. The expansion counter makes
+    // the temp names collision-proof across nested expansions.
+    const expId = this.expansions;
+    const tempDecls: VarDecl[] = [];
     const paramDecls: VarDecl[] = func.params.map((p, i) => {
       const named = args.find((a) => a.name === p.name);
       let init: Expr;
@@ -144,7 +160,9 @@ class Inliner {
         this.err(loc, `missing argument for parameter '${p.name}' in call to '${name}'`);
         init = { kind: 'Na', loc };
       }
-      return { kind: 'VarDecl', mode: 'none', name: p.name, init, loc };
+      const tempName = `__arg${i}_${expId}`;
+      tempDecls.push({ kind: 'VarDecl', mode: 'none', name: tempName, init, loc });
+      return { kind: 'VarDecl', mode: 'none', name: p.name, init: { kind: 'Ident', name: tempName, loc }, loc };
     });
 
     // Clone the body and inline its own calls under this function's active scope.
@@ -152,18 +170,10 @@ class Inliner {
     const body = func.body.map((b) => this.stmt(clone(b)));
     this.active.delete(name);
 
-    // Methods bind the receiver to `this` (param 0). It must be bound AFTER the other params:
-    // a sibling argument may reference the CALLER's `this` (e.g. `d.show(this.name)`), and
-    // binding the receiver first shadows it — the arg would then read the receiver's field
-    // instead of the caller's, yielding na. Non-receiver params' inits are caller-scope
-    // expressions (and Pine defaults are constants), so deferring the receiver is safe.
-    const orderedParams =
-      func.isMethod && paramDecls.length > 1 ? [...paramDecls.slice(1), paramDecls[0]] : paramDecls;
-
     return {
       kind: 'If',
       cond: { kind: 'Bool', value: true, loc },
-      then: [...orderedParams, ...body],
+      then: [...tempDecls, ...paramDecls, ...body],
       elifs: [],
       synthetic: true,
       loc,

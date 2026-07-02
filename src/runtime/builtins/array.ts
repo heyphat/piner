@@ -9,6 +9,19 @@
  */
 const isNum = (x: number) => typeof x === 'number' && !Number.isNaN(x);
 
+/** Type-aware sort comparator: numbers numerically (na pinned last, like matrix.sort),
+ *  strings lexicographically; `sign` = -1 flips for descending. */
+const cmpElems = (x: unknown, y: unknown, sign: number): number => {
+  if (typeof x === 'string' || typeof y === 'string') {
+    const a = String(x), b = String(y);
+    return (a < b ? -1 : a > b ? 1 : 0) * sign;
+  }
+  const nx = x as number, ny = y as number;
+  if (Number.isNaN(nx)) return Number.isNaN(ny) ? 0 : 1;
+  if (Number.isNaN(ny)) return -1;
+  return (nx - ny) * sign;
+};
+
 export const ArrayNs = {
   /** Generic constructor for `array.new<T>(size, initial)` (type arg dropped). */
   new<T>(size = 0, initial: T = NaN as unknown as T): T[] { return new Array(size).fill(initial); },
@@ -34,7 +47,8 @@ export const ArrayNs = {
   set<T>(a: T[], i: number, x: T): void { if (i >= 0 && i < a.length) a[i] = x; },
   size(a: unknown[]): number { return a.length; },
   clear(a: unknown[]): void { a.length = 0; },
-  insert<T>(a: T[], i: number, x: T): void { a.splice(i, 0, x); },
+  // Out-of-range/na index is a no-op (soft-fail; JS splice(-1) would wrap from the end).
+  insert<T>(a: T[], i: number, x: T): void { if (i >= 0 && i <= a.length) a.splice(i, 0, x); },
   remove<T>(a: T[], i: number): T | number { return i >= 0 && i < a.length ? (a.splice(i, 1)[0] as T) : NaN; },
   first<T>(a: T[]): T | number { return a.length ? a[0] : NaN; },
   last<T>(a: T[]): T | number { return a.length ? a[a.length - 1] : NaN; },
@@ -68,7 +82,7 @@ export const ArrayNs = {
     return lo > 0 && a[lo - 1] === val ? lo - 1 : lo;
   },
 
-  sum(a: number[]): number { return a.reduce((s, x) => s + (isNum(x) ? x : 0), 0); },
+  sum(a: number[]): number { const v = a.filter(isNum); return v.length ? v.reduce((s, x) => s + x, 0) : NaN; },
   avg(a: number[]): number { const v = a.filter(isNum); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : NaN; },
   /** Smallest value (nth=0), or the (nth+1)-th smallest. */
   min(a: number[], nth = 0): number {
@@ -82,14 +96,18 @@ export const ArrayNs = {
   },
 
   copy<T>(a: T[]): T[] { return a.slice(); },
-  slice<T>(a: T[], from = 0, to = a.length): T[] { return a.slice(from, to); },
+  slice<T>(a: T[], from = 0, to = a.length): T[] { return a.slice(Math.max(0, from), Math.max(0, to)); },
   concat<T>(a: T[], b: T[]): T[] { for (const x of b) a.push(x); return a; },
   join(a: unknown[], sep = ','): string { return a.map((x) => String(x)).join(sep); },
-  fill<T>(a: T[], v: T, from = 0, to = a.length): void { for (let i = from; i < to; i++) a[i] = v; },
+  // Bounds clamped to the current size (soft-fail; unclamped writes would GROW the array).
+  fill<T>(a: T[], v: T, from = 0, to = a.length): void {
+    const hi = Math.min(a.length, to);
+    for (let i = Math.max(0, from); i < hi; i++) a[i] = v;
+  },
   range(a: number[]): number { const v = a.filter(isNum); return v.length ? Math.max(...v) - Math.min(...v) : NaN; },
   sort(a: number[], order?: string): void {
-    a.sort((x, y) => (x as number) - (y as number));
-    if (order === 'descending') a.reverse();
+    const sign = order === 'descending' ? -1 : 1;
+    a.sort((x, y) => cmpElems(x, y, sign));
   },
   median(a: number[]): number {
     const v = a.filter(isNum).sort((x, y) => x - y);
@@ -118,21 +136,24 @@ export const ArrayNs = {
   stdev(a: number[], biased = true): number { return Math.sqrt(ArrayNs.variance(a, biased)); },
   /** biased=true (default): /n. biased=false: /(n-1). */
   covariance(a: number[], b: number[], biased = true): number {
-    const n = Math.min(a.length, b.length);
+    const len = Math.min(a.length, b.length);
+    const xs: number[] = [], ys: number[] = [];
+    for (let i = 0; i < len; i++) if (isNum(a[i]) && isNum(b[i])) { xs.push(a[i]); ys.push(b[i]); }
+    const n = xs.length;
     if (!n) return NaN;
-    const ma = a.slice(0, n).reduce((s, x) => s + x, 0) / n;
-    const mb = b.slice(0, n).reduce((s, x) => s + x, 0) / n;
+    const ma = xs.reduce((s, x) => s + x, 0) / n;
+    const mb = ys.reduce((s, x) => s + x, 0) / n;
     let cov = 0;
-    for (let i = 0; i < n; i++) cov += (a[i] - ma) * (b[i] - mb);
+    for (let i = 0; i < n; i++) cov += (xs[i] - ma) * (ys[i] - mb);
     const denom = biased ? n : n - 1;
     return denom > 0 ? cov / denom : NaN;
   },
 
   /** New int array of indices that would sort the source ascending (or descending); source untouched. */
   sort_indices(a: number[], order?: string): number[] {
+    const sign = order === 'descending' ? -1 : 1;
     const idx = a.map((_, i) => i);
-    idx.sort((x, y) => (a[x] as number) - (a[y] as number));
-    if (order === 'descending') idx.reverse();
+    idx.sort((x, y) => cmpElems(a[x], a[y], sign));
     return idx;
   },
   /** New float array of standardized elements: (x - mean) / stdev. */

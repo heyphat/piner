@@ -19,6 +19,12 @@ import { compile, Engine, ArrayFeed, CompileError, type Bar } from '../src/index
 const DOCS = '/Users/phat/phat.vn/fractal-chart/pinescriptv6';
 const FLOOR = 0.92; // full-script compile+run floor (measured ~0.96; guards regressions)
 
+/** Run `fn`, returning the CompileError it throws (or undefined if it did not throw one). */
+function catchCompile(fn: () => unknown): CompileError | undefined {
+  try { fn(); } catch (e) { if (e instanceof CompileError) return e; throw e; }
+  return undefined;
+}
+
 const bars: Bar[] = Array.from({ length: 60 }, (_, i) => {
   const c = 100 + Math.sin(i / 4) * 8 + (i % 7);
   return { time: i * 60000, open: c - 1, high: c + 2, low: c - 2, close: c, volume: 1000 + i * 3 };
@@ -83,27 +89,42 @@ describe('conformance — hardening', () => {
     expect(() => compile('//@version=6\nindicator("x")\nimport user/lib/1 as lib\nplot(lib.f(close))\n')).toThrow(CompileError);
   });
 
-  it('AlgoAlpha S/R Retest script runs on both backends and emits zones (ta.requestUpAndDownVolume)', async () => {
-    // Regression: `import TradingView/ta/12` + ta.requestUpAndDownVolume crashed the whole
-    // script at runtime (undefined fn → nothing rendered). It must now run and draw zones.
+  it('AlgoAlpha S/R Retest script: `import TradingView/ta/12` is rejected cleanly (library-import-export)', () => {
+    // Feature library-import-export changed import semantics. This script does
+    // `import TradingView/ta/12` with no alias, so its alias defaults to the lib
+    // component `ta` — a reserved builtin namespace. piner deliberately does NOT
+    // implement TradingView's builtin-namespace *extension*: an alias equal to a
+    // builtin namespace is a CompileError (Req 3.7), and with no registry supplied
+    // the library is unresolved (Req 2.8). Either way the compiler must fail cleanly
+    // (a structured CompileError, never a raw crash) — this script is no longer
+    // compilable as-authored.
     const src = readFileSync(join(import.meta.dir, 'pinescripts/lux-algo/support-resistent-retest.pine'), 'utf8');
-    const swing: Bar[] = Array.from({ length: 400 }, (_, i) => {
-      const c = 100 + Math.sin(i / 13) * 18 + Math.sin(i / 4) * 4 + (i % 9) * 0.5;
-      return { time: i * 3600000, open: c - Math.cos(i) * 0.8, high: c + 2.5, low: c - 2.5, close: c, volume: 1000 + (i % 17) * 30 };
-    });
-    const c = compile(src);
-    const counts = (b: 'js' | 'interp') => (async () => {
-      const eng = new Engine(c, new ArrayFeed(swing), { backend: b });
-      return eng.run({ symbol: 'XAUUSDT', timeframe: '60' }).then(() => {
-        const byType: Record<string, number> = {};
-        for (const d of eng.drawings) byType[d.type] = (byType[d.type] ?? 0) + 1;
-        return byType;
-      });
-    })();
-    const js = await counts('js');
-    const ip = await counts('interp');
-    expect((js.box ?? 0)).toBeGreaterThan(0); // S/R zone boxes were actually drawn
-    expect(ip).toEqual(js);                   // both backends agree
+    // No registry → missing-library CompileError naming the identity (Req 2.8).
+    const noReg = catchCompile(() => compile(src));
+    expect(noReg).toBeInstanceOf(CompileError);
+    expect(noReg!.message.toLowerCase()).toContain('registry');
+    expect(noReg!.message).toContain('TradingView/ta/12');
+    // Even WITH the library provided, its default alias `ta` shadows the builtin
+    // namespace → CompileError naming the namespace (Req 3.7).
+    const withStub = catchCompile(() => compile(src, { libraries: [{ key: 'TradingView/ta/12', source: '//@version=6\nlibrary("ta")\nexport noop() => 0\n' }] }));
+    expect(withStub).toBeInstanceOf(CompileError);
+    expect(withStub!.message.toLowerCase()).toContain('namespace');
+    expect(withStub!.message).toContain('ta');
+  });
+
+  it('a library-driven overlay script runs on both backends with byte-for-byte identical drawings', async () => {
+    // Restores end-to-end two-backend + drawings coverage: an imported library computes a
+    // level, the consumer draws a box + plots it, and both backends must agree exactly.
+    const reg = [{ key: 'u/levels/1', source: '//@version=6\nlibrary("Levels")\nexport mid(float h, float l) => (h + l) / 2.0\n' }];
+    const src = '//@version=6\nindicator("c", overlay=true)\nimport u/levels/1 as lv\nm = lv.mid(high, low)\nbox.new(bar_index, m + 1.0, bar_index + 1, m - 1.0)\nplot(m)\n';
+    const c = compile(src, { libraries: reg });
+    const js = new Engine(c, new ArrayFeed(bars), { backend: 'js' });
+    const ip = new Engine(c, new ArrayFeed(bars), { backend: 'interp' });
+    await js.run({ symbol: 'T', timeframe: '60' });
+    await ip.run({ symbol: 'T', timeframe: '60' });
+    expect(js.drawings.length).toBeGreaterThan(0);
+    expect(JSON.stringify(js.drawings)).toBe(JSON.stringify(ip.drawings));
+    expect(js.outputs.plots.get(0)!.data).toEqual(ip.outputs.plots.get(0)!.data);
   });
 
   it('AlgoAlpha Regression Trend script runs on both backends (color.new(na) is na, not a crash)', async () => {

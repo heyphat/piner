@@ -15,3 +15,7 @@ src/*.js
 
 # local npm auth — never commit tokens
 .npmrc
+.kiro
+.claude
+.gemini
+dev-docs

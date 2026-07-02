@@ -25,14 +25,21 @@ import {
 } from './builtins/constants.js';
 import type { BarState } from './barstate.js';
 
-/** Seconds in one bar of a timeframe string ("" / "S" / "D" / "W" / "M" units). */
+/** Seconds in one bar of a timeframe string ("" / "S" / "D" / "W" / "M" units).
+ *  Memoized: `time_close`/`timenow` read it every bar, but a context's timeframe is fixed
+ *  (and only a handful of distinct strings ever appear), so parse each string once. */
+const TF_SECONDS_CACHE = new Map<string, number>();
 function tfSeconds(tf: string): number {
+  const cached = TF_SECONDS_CACHE.get(tf);
+  if (cached !== undefined) return cached;
   const m = /^(\d*)([a-zA-Z]?)$/.exec(tf) ?? [];
   const mult = m[1] ? Number(m[1]) : 1;
   const unit = (m[2] || '').toUpperCase(); // '' ⇒ minutes
   // "1M" uses 2628003s (365/12 = 30.4167 days), per the v6 manual.
   const secPer: Record<string, number> = { '': 60, S: 1, D: 86400, W: 604800, M: 2628003 };
-  return mult * (secPer[unit] ?? 60);
+  const result = mult * (secPer[unit] ?? 60);
+  TF_SECONDS_CACHE.set(tf, result);
+  return result;
 }
 
 const TZ_OFFSET_HOUR_MS = 60 * 60 * 1000;
@@ -149,6 +156,10 @@ export interface RollbackSnapshot {
   vars: Map<number, unknown>;
   misc: Map<number, unknown>;
   draw: ReturnType<DrawingPool['snapshot']>;
+  /** Broker state (pending orders, position, trades) — mutated by strategy.* calls. */
+  strategy: unknown;
+  /** Alerts are append-only; a rolled-back tick's alerts must be discarded. */
+  alertCount: number;
 }
 
 /** na (NaN) propagates; comparisons with na yield false (v6, §4.5). */
@@ -334,7 +345,7 @@ export class ExecutionContext {
   get close() { return this.series.get(BuiltinSlot.Close, 0); }
   get volume() { return this.series.get(BuiltinSlot.Volume, 0); }
   get time() { return this.series.get(BuiltinSlot.Time, 0); }
-  get time_close() { return this.series.get(BuiltinSlot.Time, 0); }
+  get time_close() { const t = this.series.get(BuiltinSlot.Time, 0); return Number.isNaN(t) ? NaN : t + tfSeconds(this.tfStr) * 1000; }
   get hl2() { return (this.high + this.low) / 2; }
   get hlc3() { return (this.high + this.low + this.close) / 3; }
   get ohlc4() { return (this.open + this.high + this.low + this.close) / 4; }
@@ -361,7 +372,8 @@ export class ExecutionContext {
         new: (time: number, index: number, price: number) => ({ time, index, price }),
         from_index: (index: number, price: number) => ({ index, time: NaN, price }),
         from_time: (time: number, price: number) => ({ time, index: NaN, price }),
-        now: (price: number) => ({ index: this.idx, time: this.time, price }),
+        now: (price?: unknown) => ({ index: this.idx, time: this.time, price: price === undefined || isNa(price) ? this.close : Number(price) }),
+        copy: (p: unknown) => (p == null || isNa(p) ? NA : { ...(p as object) }),
       },
       is_standard: true,
       is_heikinashi: false,
@@ -596,8 +608,10 @@ export class ExecutionContext {
   private computeSecurity(symbol: string, tf: string, lookahead: boolean, evalFn: (sub: ExecutionContext) => unknown): unknown[] {
     const sym = this.symbol;
     this.out.recordSecurityRequest(symbol || sym, tf, false); // declare the dependency (P0)
+    // Same-symbol only on exact match or an exchange-prefix boundary ("BINANCE:BTCUSDT"
+    // vs "BTCUSDT") — a bare endsWith would misclassify e.g. WETHUSDT as ETHUSDT.
     const sameSymbol =
-      !symbol || (!!sym && (symbol === sym || symbol.endsWith(sym) || symbol.endsWith(`:${sym}`) || sym.endsWith(symbol)));
+      !symbol || (!!sym && (symbol === sym || symbol.endsWith(`:${sym}`) || sym.endsWith(`:${symbol}`)));
     if (!sameSymbol) {
       // CROSS-symbol: resolve against host-injected bars; absent → all-na (no feed → Pine's
       // own behavior). Aligned to the chart bars by TIME (the other symbol has its own bars).
@@ -770,7 +784,7 @@ export class ExecutionContext {
   ge(a: unknown, b: unknown): boolean { return isNa(a) || isNa(b) ? false : (a as number) >= (b as number); }
   eq(a: unknown, b: unknown): boolean { return isNa(a) || isNa(b) ? false : a === b; }
   ne(a: unknown, b: unknown): boolean { return isNa(a) || isNa(b) ? false : a !== b; }
-  not(a: boolean): boolean { return !a; }
+  not(a: unknown): boolean { return !this.toBool(a); } // v6: na bool coerces to false, so `not na` is true
 
   // ── outputs (the visual IR; per-bar color where applicable) ─
   plot(id: number, value: number, color?: unknown, title = `plot ${id}`, options: Record<string, unknown> = {}): number {
@@ -849,6 +863,8 @@ export class ExecutionContext {
       vars: structuredClone(this.vars),
       misc: structuredClone(this.misc),
       draw: this.drawPool.snapshot(),
+      strategy: this.strategyBroker.snapshot(),
+      alertCount: this.out.alerts.length,
     };
   }
   restoreMutable(snap: RollbackSnapshot): void {
@@ -856,7 +872,16 @@ export class ExecutionContext {
     this.vars = structuredClone(snap.vars);
     this.misc = structuredClone(snap.misc); // fixnan state is rolled back like ta state
     this.drawPool.restore(snap.draw); // drawing objects roll back on each realtime tick
+    this.strategyBroker.restore(snap.strategy); // pending orders/fills from a superseded tick are discarded
+    this.out.alerts.length = snap.alertCount; // ditto duplicate alert/log events
     // only varips intentionally escape rollback within the same realtime bar
+  }
+
+  /** Drop request.security caches — the driver calls this on each realtime tick so
+   *  cached per-bar columns (computed over `allBars`) pick up the developing bar. */
+  invalidateSecurityCaches(): void {
+    this.secCache.clear();
+    this.ltfCache.clear();
   }
 
   /** Live drawing objects (for rendering). */

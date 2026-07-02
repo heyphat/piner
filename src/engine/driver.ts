@@ -59,8 +59,15 @@ export class Driver {
     this.rollback();
     this.beginBar(tick, this.committed);
     if (this.committed > $.lastBarIndex) $.lastBarIndex = this.committed;
-    $.bar = realtimeBarState(firstTick, isClose);
+    // Keep allBars in sync with the developing bar and drop the request.security
+    // caches (per-bar columns computed over allBars) so security calls see realtime
+    // bars instead of running off the end of the historical cache.
+    $.allBars[this.committed] = tick;
+    $.invalidateSecurityCaches();
+    $.bar = realtimeBarState(firstTick, isClose, this.committed === 0);
+    $.onStrategyBar(); // same fill pass as historical bars — orders fill on ticks too
     this.main($);
+    $.onStrategyBarClose(); // process_orders_on_close (no-op unless configured)
 
     if (isClose) {
       $.series.commitBar();
@@ -74,8 +81,11 @@ export class Driver {
 
   private rollback(): void {
     const $ = this.$;
+    // Realtime-only usage (no runHistorical) still needs a baseline to roll back
+    // to — capture the pre-run state on the first tick.
+    if (!this.snapshot) this.snapshot = $.snapshotMutable();
     $.series.truncateTo(this.committed); // history slots
-    if (this.snapshot) $.restoreMutable(this.snapshot); // ta state + var store (varip exempt)
+    $.restoreMutable(this.snapshot); // ta/broker state + var store (varip exempt)
   }
 
   private beginBar(bar: Bar, idx: number): void {

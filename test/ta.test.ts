@@ -71,15 +71,17 @@ describe('ta.rsi', () => {
 });
 
 describe('ta.tr / ta.atr (read host OHLC)', () => {
-  it('tr is high-low on the first bar then includes prev close', () => {
+  it('tr is na on the first bar (handle_na=false default) then includes prev close', () => {
     const ta = new Ta();
     const host = { open: 0, high: 0, low: 0, close: 0, volume: 0, time: 0 };
     ta.host = host;
     host.high = 10; host.low = 8; host.close = 9;
-    expect(ta.tr(0)).toBe(2); // first bar: high-low
+    expect(ta.tr(0)).toBeNaN(); // first bar: no prev close → na (TV: bare ta.tr)
+    expect(ta.tr(true, 1)).toBe(2); // handle_na=true: high-low on the first bar
     host.high = 12; host.low = 9; host.close = 11;
     // max(12-9, |12-9|, |9-9|) = 3
     expect(ta.tr(0)).toBe(3);
+    expect(ta.tr(true, 1)).toBe(3);
   });
   it('atr is the rma of true range and non-negative', () => {
     const ta = new Ta();

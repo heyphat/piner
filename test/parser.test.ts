@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import { tokenize } from '../src/lexer/lexer.js';
 import { parse } from '../src/parser/parser.js';
-import type { VarDecl, Binary, Call, Ternary, IfNode, FuncDef } from '../src/parser/ast.js';
+import type { VarDecl, Binary, Call, Ternary, IfNode, FuncDef, TupleDecl, TypeDef } from '../src/parser/ast.js';
 
 const prog = (src: string) => parse(tokenize(src));
 
@@ -115,6 +115,40 @@ describe('parser', () => {
   it('does not misread a qualified member call (chart.point.from_index) as a decl', () => {
     const p = prog('//@version=6\nindicator("x")\nchart.point.from_index(bar_index, close)\n');
     expect(p.body[1].kind).toBe('ExprStmt');
+  });
+
+  // Parser bug: a block-form `if`/`switch` expression already consumed its block's
+  // NL+DEDENT, so the next statement's leading `[` / `(` must not be treated as a
+  // postfix operator on the if-expression (spurious "expected ]").
+  it('does not postfix a block-form if expression with the next statement\'s leading [', () => {
+    const p = prog('//@version=6\nindicator("x")\nv = if useA\n    1\nelse\n    2\n[macdLine, signalLine] = ta.macd(close, 12, 26, 9)\n');
+    const v = p.body[1] as VarDecl;
+    expect(v.kind).toBe('VarDecl');
+    expect(v.init.kind).toBe('If');
+    const tup = p.body[2] as TupleDecl;
+    expect(tup.kind).toBe('TupleDecl');
+    expect(tup.names).toEqual(['macdLine', 'signalLine']);
+  });
+
+  it('does not postfix a block-form switch expression with the next statement\'s leading (', () => {
+    const p = prog('//@version=6\nindicator("x")\nw = switch\n    close > open => 1\n    => 2\n(close + open)\n');
+    const w = p.body[1] as VarDecl;
+    expect(w.init.kind).toBe('Switch'); // NOT a Call on the switch-expression
+    expect(p.body.length).toBe(3);
+    expect(p.body[2].kind).toBe('ExprStmt');
+    expect(((p.body[2] as any).expr as Binary).op).toBe('+');
+  });
+
+  // Parser bug: UDT fields with dotted builtin types (`chart.point point`) failed the
+  // "has type prefix" gate — peek(1) checked name/`<`/`[` but not `.`.
+  it('parses UDT fields with dotted builtin types (chart.point / chart.point[])', () => {
+    const p = prog('//@version=6\nindicator("x")\ntype Pivot\n    chart.point point\n    chart.point[] pts\n    float price\n');
+    const td = p.body[1] as TypeDef;
+    expect(td.kind).toBe('TypeDef');
+    expect(td.fields.map((f) => f.name)).toEqual(['point', 'pts', 'price']);
+    expect(td.fields[0].declType).toEqual({ kind: 'udt', name: 'chart.point' });
+    expect(td.fields[1].declType).toEqual({ kind: 'array', of: { kind: 'udt', name: 'chart.point' } });
+    expect(td.fields[2].declType?.kind).toBe('float');
   });
 
   it('still parses qualified params (series int x) without treating the qualifier as the name', () => {
