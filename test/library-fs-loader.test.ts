@@ -90,6 +90,26 @@ describe('filesystem library loader — hardening (audit fixes)', () => {
     expect(() => loadLibraryManifest(join(mroot, 'manifest.json'))).toThrow(/escapes/);
     rmSync(mroot, { recursive: true, force: true });
   });
+
+  it('loadLibraryManifest rejects a SYMLINK inside the manifest dir that escapes it', () => {
+    // A lexically-inside path (`lib.pine`) that is a symlink to an out-of-tree host file must
+    // be refused — the lexical check alone would pass and read an arbitrary file.
+    const mroot = mkdtempSync(join(tmpdir(), 'piner-man-'));
+    const secretDir = mkdtempSync(join(tmpdir(), 'piner-secret-'));
+    const secret = join(secretDir, 'credentials');
+    writeFileSync(secret, 'TOP SECRET');
+    try {
+      symlinkSync(secret, join(mroot, 'lib.pine'), 'file'); // inside the manifest dir, points outside
+    } catch {
+      rmSync(mroot, { recursive: true, force: true });
+      rmSync(secretDir, { recursive: true, force: true });
+      return; // symlinks unavailable on this platform — skip
+    }
+    writeFileSync(join(mroot, 'manifest.json'), JSON.stringify({ 'a/b/1': 'lib.pine' }));
+    expect(() => loadLibraryManifest(join(mroot, 'manifest.json'))).toThrow(/escapes/);
+    rmSync(mroot, { recursive: true, force: true });
+    rmSync(secretDir, { recursive: true, force: true });
+  });
 });
 
 describe('filesystem library loader (@heyphat/piner/node)', () => {

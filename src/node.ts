@@ -102,6 +102,7 @@ export function loadLibraryDir(root: string, opts: LoadLibraryDirOptions = {}): 
 export function loadLibraryManifest(manifestPath: string): LibraryRegistry {
   const abs = resolve(manifestPath);
   const base = dirname(abs);
+  const baseReal = realpathSync(base);
   const map = JSON.parse(readFileSync(abs, 'utf8')) as Record<string, string>;
   return Object.entries(map).map(([key, rel]) => {
     // Source paths are resolved relative to the manifest and must stay inside its
@@ -111,7 +112,19 @@ export function loadLibraryManifest(manifestPath: string): LibraryRegistry {
     if (srcPath !== base && !srcPath.startsWith(base + sep)) {
       throw new Error(`loadLibraryManifest: source path "${rel}" for "${key}" escapes the manifest directory`);
     }
-    return { key, source: readFileSync(srcPath, 'utf8') };
+    // The lexical check above cannot see through symlinks. Follow them and require the
+    // REAL target to stay inside the manifest directory too, so a symlink planted in the
+    // tree (e.g. `lib.pine → /etc/passwd`) cannot read an arbitrary host file — matching
+    // the realpath containment `loadLibraryDir`/`fsLibrarySource` enforce.
+    let real: string;
+    try { real = realpathSync(srcPath); } catch { throw new Error(`loadLibraryManifest: source "${rel}" for "${key}" does not exist`); }
+    if (real !== baseReal && !real.startsWith(baseReal + sep)) {
+      throw new Error(`loadLibraryManifest: source path "${rel}" for "${key}" escapes the manifest directory`);
+    }
+    if (!statSync(real).isFile()) {
+      throw new Error(`loadLibraryManifest: source "${rel}" for "${key}" is not a regular file`);
+    }
+    return { key, source: readFileSync(real, 'utf8') };
   });
 }
 

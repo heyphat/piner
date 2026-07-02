@@ -61,9 +61,16 @@ export class AliasResolver {
       }
     }
 
+    // The consumer's own `method` declarations: the downstream inliner dispatches these via
+    // dot-call sugar, so the rewriter must not let an imported library method of the same
+    // name hijack a `receiver.method(...)` call that belongs to a local method.
+    const localMethods = new Set<string>();
+    for (const s of program.body) if (s.kind === 'FuncDef' && s.isMethod) localMethods.add(s.name);
+
     const rewriter = new RefRewriter({
       aliases,
       graph: this.graph.libraries,
+      localMethods,
       emit: (d) => diagnostics.push(d),
     });
     rewriter.rewriteBody(program.body);

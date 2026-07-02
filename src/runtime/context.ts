@@ -25,14 +25,21 @@ import {
 } from './builtins/constants.js';
 import type { BarState } from './barstate.js';
 
-/** Seconds in one bar of a timeframe string ("" / "S" / "D" / "W" / "M" units). */
+/** Seconds in one bar of a timeframe string ("" / "S" / "D" / "W" / "M" units).
+ *  Memoized: `time_close`/`timenow` read it every bar, but a context's timeframe is fixed
+ *  (and only a handful of distinct strings ever appear), so parse each string once. */
+const TF_SECONDS_CACHE = new Map<string, number>();
 function tfSeconds(tf: string): number {
+  const cached = TF_SECONDS_CACHE.get(tf);
+  if (cached !== undefined) return cached;
   const m = /^(\d*)([a-zA-Z]?)$/.exec(tf) ?? [];
   const mult = m[1] ? Number(m[1]) : 1;
   const unit = (m[2] || '').toUpperCase(); // '' ⇒ minutes
   // "1M" uses 2628003s (365/12 = 30.4167 days), per the v6 manual.
   const secPer: Record<string, number> = { '': 60, S: 1, D: 86400, W: 604800, M: 2628003 };
-  return mult * (secPer[unit] ?? 60);
+  const result = mult * (secPer[unit] ?? 60);
+  TF_SECONDS_CACHE.set(tf, result);
+  return result;
 }
 
 const TZ_OFFSET_HOUR_MS = 60 * 60 * 1000;

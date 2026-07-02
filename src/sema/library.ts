@@ -262,13 +262,25 @@ export function mangleMethod(id: LibraryIdentity, name: string, receiverType: st
 /** One exported (or, for intra-lib dispatch, declared) method with its receiver info. */
 export interface ExportedMethod {
   def: FuncDef;
-  /** Original UDT/fundamental type name of param 0 (the receiver). */
+  /** Receiver discriminator AS WRITTEN in the declaring library (a local/dotted UDT name
+   *  like `Band`/`t.Point`, or a structural builtin kind like `array_float`). */
   receiverType: string;
   /** Total parameter count (including the receiver). */
   arity: number;
   /** True when the receiver is a user-defined type; false for a builtin type
    *  (array/matrix/map/float/…) whose value cannot be traced to a library identity. */
   receiverIsUdt: boolean;
+  /** ABSOLUTE identity of a UDT receiver's type (owning library + type name), resolved
+   *  against the DECLARING library's own imports. This — not the alias-relative name in
+   *  `receiverType` — is what dispatch compares against a value's origin, so a method
+   *  exported by library A on a type owned by library B dispatches no matter which alias
+   *  each script reached the type through. Unset for builtin/unresolvable receivers. */
+  receiverOrigin?: UdtOrigin;
+  /** The receiver discriminator embedded in the mangled merged name: the absolute
+   *  `slug(owner)$Type` for a resolved UDT receiver, else the structural `receiverType`.
+   *  Declaration mangling and every dispatch site read this one field, so they agree
+   *  by construction. */
+  receiverKey: string;
 }
 
 /** A library's public API — only `export`-marked declarations (Req 7.3). */
@@ -283,20 +295,39 @@ export interface LibrarySurface {
   constants: Set<string>;
 }
 
+/**
+ * A discriminator string for a receiver/param type, used both to key method overloads
+ * (uniqueness + dispatch) and to build the mangled method name. It encodes the FULL type
+ * including a container's element type, so `array<float>` and `array<string>` are distinct
+ * overloads (TradingView allows methods distinguished by generic parameter) rather than
+ * collapsing to a bare `array` and colliding. The encoding uses only `_` separators so the
+ * result stays a legal JS identifier fragment when embedded in a mangled name (`<`/`,`
+ * would break the emitted function names).
+ */
+function typeDiscriminator(t?: PineType): string {
+  if (!t) return '';
+  switch (t.kind) {
+    case 'udt': return t.name;
+    case 'array': return `array_${typeDiscriminator(t.of)}`;
+    case 'matrix': return `matrix_${typeDiscriminator(t.of)}`;
+    case 'map': return `map_${typeDiscriminator(t.key)}_${typeDiscriminator(t.value)}`;
+    default: return t.kind;
+  }
+}
+
 /** The type name of a param's declared type, or a fundamental kind, for dispatch. */
 function paramTypeName(fd: FuncDef): string {
-  const t = fd.params[0]?.declType;
-  if (!t) return '';
-  if (t.kind === 'udt') return t.name;
-  return t.kind;
+  return typeDiscriminator(fd.params[0]?.declType);
 }
 
 function methodInfo(fd: FuncDef): ExportedMethod {
+  const receiverType = paramTypeName(fd);
   return {
     def: fd,
-    receiverType: paramTypeName(fd),
+    receiverType,
     arity: fd.params.length,
     receiverIsUdt: fd.params[0]?.declType?.kind === 'udt',
+    receiverKey: receiverType, // upgraded to the absolute key once the library resolves
   };
 }
 
@@ -346,8 +377,79 @@ export interface ResolvedLibrary {
   allNames: Set<string>;
   /** Every declared method (exported + private) grouped by name for intra-lib dispatch. */
   allMethods: Map<string, ExportedMethod[]>;
+  /** Function name → the resolved UDT type it returns, when the function's tail expression
+   *  is a direct constructor call (the common factory pattern, `mk(...) => T.new(...)`). Lets
+   *  `v = alias.mk(...)` then `v.method()` dispatch without an explicit type annotation. */
+  returnUdt: Map<string, UdtOrigin>;
   /** The ordered import chain Consumer → … → this library (first discovery), for Req 9.4. */
   chain: LibraryIdentity[];
+}
+
+/**
+ * Resolve a UDT type name as written inside a library (`Band`, or `t.Point` through the
+ * library's own import alias `t`) to its absolute origin, or undefined for a builtin
+ * (`chart.point`) or unknown name.
+ */
+function resolveTypeName(
+  name: string,
+  aliases: Map<string, LibraryIdentity>,
+  selfTypeNames: Set<string>,
+  selfId: LibraryIdentity,
+): UdtOrigin | undefined {
+  const dot = name.indexOf('.');
+  if (dot !== -1) {
+    const id = aliases.get(name.slice(0, dot));
+    return id ? { identity: id, typeName: name.slice(dot + 1) } : undefined;
+  }
+  return selfTypeNames.has(name) ? { identity: selfId, typeName: name } : undefined;
+}
+
+/**
+ * Upgrade every method's receiver info from the alias-relative name it was declared with
+ * to its absolute origin + mangling key. Runs once per library at resolve time, over BOTH
+ * method indexes (exported surface and all-methods), which hold distinct objects.
+ */
+function resolveMethodReceivers(lib: ResolvedLibrary): void {
+  const selfTypes = new Set<string>();
+  for (const s of lib.program.body) if (s.kind === 'TypeDef') selfTypes.add(s.name);
+  for (const pool of [lib.surface.methods, lib.allMethods]) {
+    for (const list of pool.values()) {
+      for (const m of list) {
+        if (!m.receiverIsUdt) continue;
+        const origin = resolveTypeName(m.receiverType, lib.imports, selfTypes, lib.identity);
+        if (origin) {
+          m.receiverOrigin = origin;
+          m.receiverKey = `${slug(origin.identity)}$${origin.typeName}`;
+        }
+      }
+    }
+  }
+}
+
+/**
+ * The UDT a function returns, IF its tail (last) statement is a direct constructor call —
+ * `T.new(...)` (a self type) or `alias.T.new(...)` (an imported type). Returns undefined for
+ * any less-direct return (a variable, a conditional, another call); those need full type
+ * inference, which happens later in the pipeline. Resolved against the DECLARING library's
+ * own imports/self names, so the origin it yields is absolute.
+ */
+function returnUdtOf(
+  fn: FuncDef,
+  aliases: Map<string, LibraryIdentity>,
+  selfNames: Set<string>,
+  selfId: LibraryIdentity,
+): UdtOrigin | undefined {
+  const last = fn.body[fn.body.length - 1];
+  const tail = last?.kind === 'ExprStmt' ? last.expr : undefined;
+  if (!tail || tail.kind !== 'Call' || tail.callee.kind !== 'Member' || tail.callee.property !== 'new') return undefined;
+  const recv = tail.callee.object;
+  if (recv.kind === 'Ident') {
+    return selfNames.has(recv.name) ? { identity: selfId, typeName: recv.name } : undefined;
+  }
+  if (recv.kind === 'Member' && recv.object.kind === 'Ident' && aliases.has(recv.object.name)) {
+    return { identity: aliases.get(recv.object.name)!, typeName: recv.property };
+  }
+  return undefined;
 }
 
 /** The libraries reachable from the Consumer_Script, resolved exactly once each. */
@@ -518,7 +620,27 @@ export class LibraryResolver {
     }
     const surface = collectSurface(id, program);
     const { allNames, allMethods } = collectAll(program);
-    const resolved: ResolvedLibrary = { identity: id, program, surface, imports, metadata, allNames, allMethods, chain: [...chain] };
+    // An import alias may not also name a top-level declaration in this library — otherwise
+    // `alias.member` binds to the imported library while a bare `alias` reference is the
+    // local declaration (one name, two meanings). This mirrors the consumer-side check in
+    // alias.ts; without it a library was held to a laxer rule than the scripts importing it.
+    for (const alias of imports.keys()) {
+      if (allNames.has(alias)) {
+        throw diagError(
+          `'${alias}' is declared at the top level of library ${id.canonical} but is also an import alias — rename one of them`,
+          undefined, id, chain,
+        );
+      }
+    }
+    const returnUdt = new Map<string, UdtOrigin>();
+    for (const s of program.body) {
+      if (s.kind === 'FuncDef' && !s.isMethod) {
+        const o = returnUdtOf(s, imports, allNames, id);
+        if (o) returnUdt.set(s.name, o);
+      }
+    }
+    const resolved: ResolvedLibrary = { identity: id, program, surface, imports, metadata, allNames, allMethods, returnUdt, chain: [...chain] };
+    resolveMethodReceivers(resolved);
     this.visited.set(id.canonical, resolved);
     return resolved;
   }
@@ -540,6 +662,11 @@ export interface RewriteOptions {
   graph: Map<string, ResolvedLibrary>;
   /** Present when rewriting a library's OWN declarations (intra-lib self-mangling). */
   self?: { identity: LibraryIdentity; names: Set<string>; methods: Map<string, ExportedMethod[]>; chain: LibraryIdentity[] };
+  /** Method names DEFINED in the program being rewritten (a consumer script's own UDF
+   *  methods). The downstream inliner dispatches these via dot-call sugar, so the
+   *  builtin-receiver fallback must not let an imported library method of the same name
+   *  hijack them. Only set on the consumer path (a library's own methods live in `self`). */
+  localMethods?: ReadonlySet<string>;
   /** Diagnostic sink. */
   emit: (d: Diagnostic) => void;
 }
@@ -600,6 +727,7 @@ export class RefRewriter {
   private readonly aliases: Map<string, LibraryIdentity>;
   private readonly graph: Map<string, ResolvedLibrary>;
   private readonly self?: RewriteOptions['self'];
+  private readonly localMethods?: ReadonlySet<string>;
   private readonly emit: (d: Diagnostic) => void;
   /** Variable/param name → the resolved UDT type it holds (for method dispatch). */
   private typeEnv = new Map<string, UdtOrigin>();
@@ -610,6 +738,7 @@ export class RefRewriter {
     this.aliases = opts.aliases;
     this.graph = opts.graph;
     this.self = opts.self;
+    this.localMethods = opts.localMethods;
     this.emit = opts.emit;
   }
 
@@ -685,15 +814,22 @@ export class RefRewriter {
 
   /** Rewrite one cloned top-level library declaration AND mangle its own name. */
   rewriteAndMangleDecl(s: Stmt): void {
-    // A method's receiver type must be read BEFORE stmt() rewrites its param types
-    // (rewriteType mangles a UDT receiver to `__lib$…`, but the discriminator uses the
-    // library-local name so it matches what methodDispatch computes).
-    const methodReceiver = s.kind === 'FuncDef' && s.isMethod ? paramTypeName(s) : null;
+    // A method's receiver key must be read BEFORE stmt() rewrites its param types
+    // (rewriteType mangles a UDT receiver to `__lib$…`, but the key was computed from the
+    // library-local name). `s` is a CLONE, so the resolved ExportedMethod (which carries
+    // the absolute receiverKey every dispatch site uses) is found by its pre-rewrite
+    // signature — name + raw receiver discriminator + arity — not by node identity.
+    let methodReceiverKey: string | null = null;
+    if (s.kind === 'FuncDef' && s.isMethod) {
+      const raw = paramTypeName(s);
+      const info = this.self?.methods.get(s.name)?.find((m) => m.receiverType === raw && m.arity === s.params.length);
+      methodReceiverKey = info?.receiverKey ?? raw;
+    }
     this.stmt(s);
     if (!this.self) return;
     if (s.kind === 'FuncDef') {
       s.name = s.isMethod
-        ? mangleMethod(this.self.identity, s.name, methodReceiver!, s.params.length)
+        ? mangleMethod(this.self.identity, s.name, methodReceiverKey!, s.params.length)
         : mangle(this.self.identity, s.name);
     } else if (s.kind === 'TypeDef' || s.kind === 'VarDecl') {
       s.name = mangle(this.self.identity, s.name);
@@ -798,8 +934,16 @@ export class RefRewriter {
   private recordVarType(s: VarDecl): void {
     let o: UdtOrigin | undefined;
     if (s.declType?.kind === 'udt') o = this.typeOrigin(s.declType.name);
-    if (!o) o = this.constructorOrigin(s.init);
-    if (o) this.typeEnv.set(s.name, o);
+    if (!o) o = this.exprOrigin(s.init);
+    if (!o) return;
+    this.typeEnv.set(s.name, o);
+    // A library's module-level var is self-mangled, and so is every reference to it —
+    // by the time methodDispatch sees `gp.mag()` the receiver Ident already reads
+    // `__lib$…$gp`. Record the type under the mangled name too, or the lookup misses
+    // and the method call silently degrades to na.
+    if (this.self && !this.localNames && this.self.names.has(s.name)) {
+      this.typeEnv.set(mangle(this.self.identity, s.name), o);
+    }
   }
 
   // ── expressions ─────────────────────────────────────────
@@ -846,7 +990,7 @@ export class RefRewriter {
         // receiver's type). The chosen overload's discriminated name matches its decl.
         const chosen = this.resolveOverload(methods, e.args);
         if (chosen) {
-          e.callee = { kind: 'Ident', name: mangleMethod(id, name, chosen.receiverType, chosen.arity), loc: callee.loc };
+          e.callee = { kind: 'Ident', name: mangleMethod(id, name, chosen.receiverKey, chosen.arity), loc: callee.loc };
         } else {
           this.emit(mkDiag(
             `no overload of method '${alias}.${name}' in library ${id.canonical} matches a call with ${e.args.length} argument(s)`,
@@ -895,20 +1039,36 @@ export class RefRewriter {
     if (e.typeArgs) e.typeArgs = e.typeArgs.map((t) => this.rewriteType(t)!);
   }
 
-  /** The UDT origin an expression evaluates to (a typed variable or a constructor call). */
+  /** The UDT origin an expression evaluates to: a typed variable, a constructor call, or a
+   *  call to a library factory function whose recorded return type is a UDT. */
   private exprOrigin(e: Expr): UdtOrigin | undefined {
     if (e.kind === 'Ident') return this.typeEnv.get(e.name);
-    return this.constructorOrigin(e);
+    return this.constructorOrigin(e) ?? this.callReturnOrigin(e);
+  }
+
+  /** The UDT returned by `alias.fn(...)` (or a bare self `fn(...)` inside a library body),
+   *  using the callee library's recorded factory return types. */
+  private callReturnOrigin(e: Expr): UdtOrigin | undefined {
+    if (e.kind !== 'Call') return undefined;
+    const callee = e.callee;
+    if (callee.kind === 'Member' && callee.object.kind === 'Ident'
+      && this.aliases.has(callee.object.name) && !this.localNames?.has(callee.object.name)) {
+      return this.lib(this.aliases.get(callee.object.name)!)?.returnUdt.get(callee.property);
+    }
+    if (this.self && callee.kind === 'Ident' && this.self.names.has(callee.name) && !this.localNames?.has(callee.name)) {
+      return this.lib(this.self.identity)?.returnUdt.get(callee.name);
+    }
+    return undefined;
   }
 
   /** Pick the overload of a same-named method matching the call: by arity, then (if
-   *  several share that arity) by the receiver/first-argument's UDT type. */
+   *  several share that arity) by the receiver/first-argument's absolute UDT type. */
   private resolveOverload(cands: ExportedMethod[], args: Arg[]): ExportedMethod | undefined {
     const byArity = cands.filter((m) => m.arity === args.length);
     if (byArity.length <= 1) return byArity[0];
     const origin = args.length ? this.exprOrigin(args[0].value) : undefined;
     if (!origin) return undefined;
-    const byType = byArity.filter((m) => m.receiverType === origin.typeName);
+    const byType = byArity.filter((m) => RefRewriter.receiverMatches(m, origin));
     return byType.length === 1 ? byType[0] : undefined;
   }
 
@@ -932,8 +1092,15 @@ export class RefRewriter {
   /** Rewrite `recv.method(args)` to the discriminated merged call `mangled(recv, args)`. */
   private bindMethodCall(e: Call, id: LibraryIdentity, m: ExportedMethod): void {
     const callee = e.callee as Member;
-    e.callee = { kind: 'Ident', name: mangleMethod(id, m.def.name, m.receiverType, m.arity), loc: callee.loc };
+    e.callee = { kind: 'Ident', name: mangleMethod(id, m.def.name, m.receiverKey, m.arity), loc: callee.loc };
     e.args = [{ value: callee.object }, ...e.args];
+  }
+
+  /** True when a method's (absolute) receiver type is exactly the given value origin. */
+  private static receiverMatches(m: ExportedMethod, origin: UdtOrigin): boolean {
+    return m.receiverOrigin !== undefined
+      && m.receiverOrigin.identity.canonical === origin.identity.canonical
+      && m.receiverOrigin.typeName === origin.typeName;
   }
 
   /** `recv.method(args)` on a value of a resolved UDT type → direct mangled call (Req 4.3, 4.8). */
@@ -941,27 +1108,53 @@ export class RefRewriter {
     const callee = e.callee;
     if (callee.kind !== 'Member' || callee.object.kind !== 'Ident') return;
     const method = callee.property;
+    // A method defined in the script being rewritten (a consumer's own UDF method) is
+    // dispatched by the downstream inliner's dot-call sugar; don't let an imported library
+    // method of the same name hijack it here — the script's own declaration shadows imports.
+    // (A library's own methods live in `self` and ARE dispatched below, since the inliner
+    // never sees their pre-mangled call sites.)
+    if (this.localMethods?.has(method)) return;
+    const arity = e.args.length + 1; // + receiver
     const origin = this.typeEnv.get(callee.object.name);
     if (origin) {
-      const owner = this.lib(origin.identity);
-      if (!owner) return;
-      // Own methods (all) inside their own library; exported methods when imported.
-      const pool = this.self && origin.identity.canonical === this.self.identity.canonical
-        ? this.self.methods
-        : owner.surface.methods;
-      const all = pool.get(method);
-      if (!all) return; // not a library method — leave for builtin/other dispatch
-      const arity = e.args.length + 1; // + receiver
-      const matches = all.filter((m) => m.receiverType === origin.typeName && m.arity === arity);
-      if (matches.length === 1) {
-        this.bindMethodCall(e, origin.identity, matches[0]);
-      } else if (matches.length === 0) {
+      // Search EVERY reachable pool (each imported library's exports + own methods inside a
+      // library body), matching the receiver's absolute type identity — a method may be
+      // exported by a different library than the one owning the type, and each declaration
+      // may spell the type through a different alias.
+      const cands: { id: LibraryIdentity; m: ExportedMethod }[] = [];
+      for (const [id, pool] of this.methodPools()) {
+        for (const m of pool.get(method) ?? []) {
+          if (RefRewriter.receiverMatches(m, origin)) cands.push({ id, m });
+        }
+      }
+      const matches = cands.filter(({ m }) => m.arity === arity);
+      if (matches.length === 1) { this.bindMethodCall(e, matches[0].id, matches[0].m); return; }
+      if (matches.length > 1) {
+        // Two libraries export a same-name method on the same type: the current library's
+        // own declaration wins inside its own body; otherwise it is a genuine ambiguity.
+        const selfHit = this.self ? matches.find((h) => h.id.canonical === this.self!.identity.canonical) : undefined;
+        if (selfHit) { this.bindMethodCall(e, selfHit.id, selfHit.m); return; }
+        const libs = [...new Set(matches.map((h) => h.id.canonical))].join(', ');
         this.emit(mkDiag(
-          `no method '${method}' matching receiver type '${origin.typeName}' with ${e.args.length} argument(s) in library ${owner.identity.canonical}`,
+          `ambiguous method '${method}' on receiver type '${origin.typeName}': exported by more than one library (${libs}) — call it as \`alias.${method}(receiver, …)\` to disambiguate`,
           callee.loc, this.self?.identity, this.self?.chain));
-      } else {
+        return;
+      }
+      if (cands.length) {
+        // The exact type has this method, but no overload takes this argument count.
         this.emit(mkDiag(
-          `ambiguous method '${method}' on receiver type '${origin.typeName}': ${matches.length} matching overloads in library ${owner.identity.canonical}`,
+          `no method '${method}' matching receiver type '${origin.typeName}' with ${e.args.length} argument(s) in library ${cands[0].id.canonical}`,
+          callee.loc, this.self?.identity, this.self?.chain));
+        return;
+      }
+      // The type-OWNER declares the name but on a different receiver/arity → a real
+      // mismatch worth reporting. Any other unmatched name falls through untouched
+      // (it may be a builtin method like `.get`, handled by native dispatch later).
+      const owner = this.self && origin.identity.canonical === this.self.identity.canonical
+        ? this.self.methods : this.lib(origin.identity)?.surface.methods;
+      if (owner?.has(method)) {
+        this.emit(mkDiag(
+          `no method '${method}' matching receiver type '${origin.typeName}' with ${e.args.length} argument(s) in library ${origin.identity.canonical}`,
           callee.loc, this.self?.identity, this.self?.chain));
       }
       return;
@@ -971,14 +1164,24 @@ export class RefRewriter {
     // method on a builtin receiver with this name + arity. Builtin collection/drawing
     // methods (arr.push, box.set_top, …) are excluded so native dispatch is untouched.
     if (BUILTIN_METHODS.has(method)) return;
-    const arity = e.args.length + 1; // + receiver
     const hits: { id: LibraryIdentity; m: ExportedMethod }[] = [];
     for (const [id, pool] of this.methodPools()) {
       for (const m of pool.get(method) ?? []) {
         if (!m.receiverIsUdt && m.arity === arity) hits.push({ id, m });
       }
     }
-    if (hits.length === 1) this.bindMethodCall(e, hits[0].id, hits[0].m);
+    if (hits.length === 1) { this.bindMethodCall(e, hits[0].id, hits[0].m); return; }
+    if (hits.length > 1) {
+      // Prefer the current library's own method when rewriting a library body; otherwise
+      // the call is genuinely ambiguous across imported libraries. Report it rather than
+      // silently leaving it unresolved (which evaluates to na at runtime with no diagnostic).
+      const selfHit = this.self ? hits.find((h) => h.id.canonical === this.self!.identity.canonical) : undefined;
+      if (selfHit) { this.bindMethodCall(e, selfHit.id, selfHit.m); return; }
+      const libs = [...new Set(hits.map((h) => h.id.canonical))].join(', ');
+      this.emit(mkDiag(
+        `ambiguous method '${method}' with ${e.args.length} argument(s): a matching builtin-receiver method is exported by more than one library (${libs}) — call it as \`alias.${method}(receiver, …)\` to disambiguate`,
+        callee.loc, this.self?.identity, this.self?.chain));
+    }
   }
 
   private member(e: Member): Expr {
@@ -1081,7 +1284,11 @@ function checkExportUniqueness(lib: ResolvedLibrary): Diagnostic[] {
   };
   for (const s of lib.program.body) {
     if (s.kind === 'FuncDef' && s.export && s.isMethod) {
-      const key = `m:${s.name}/${paramTypeName(s)}/${s.params.length}`;
+      // Key on the ABSOLUTE receiver key, so `method f(Point p)` and `method f(t.Point p)`
+      // collide exactly when both receivers resolve to the same type — however each was
+      // spelled — and stay distinct otherwise.
+      const info = lib.allMethods.get(s.name)?.find((m) => m.def === s);
+      const key = `m:${s.name}/${info?.receiverKey ?? paramTypeName(s)}/${s.params.length}`;
       if (seen.has(key)) dup('method (same receiver type and arity)', s.name, s.loc);
       else seen.add(key);
     } else if (s.kind === 'FuncDef' && s.export) {
@@ -1170,8 +1377,17 @@ export function checkExportConstraints(lib: ResolvedLibrary): Diagnostic[] {
           // method/function too, so a forbidden builtin hidden behind method syntax does
           // not escape the export check. (Cross-library `alias.fn()` calls are validated
           // when that library is checked, so only own-library names are followed.)
+          //
+          // But do NOT follow a builtin namespace call (`array.get`, `math.max`) or a
+          // builtin collection/drawing method (`arr.push`) just because a private helper
+          // happens to share the property name — that misattributes an innocent builtin
+          // call to an unrelated private function and rejects a valid library. Match the
+          // same exclusions the dispatch layer uses.
           walkExpr(callee.object, exportedName, visiting);
-          if (funcs.has(callee.property)) walkFn(funcs.get(callee.property)!, exportedName, visiting);
+          const isNamespaceCall = callee.object.kind === 'Ident' && NAMESPACES.has(callee.object.name);
+          if (!isNamespaceCall && !BUILTIN_METHODS.has(callee.property) && funcs.has(callee.property)) {
+            walkFn(funcs.get(callee.property)!, exportedName, visiting);
+          }
         }
         e.args.forEach((a) => walkExpr(a.value, exportedName, visiting));
         break;
@@ -1200,7 +1416,3 @@ export function checkExportConstraints(lib: ResolvedLibrary): Diagnostic[] {
 
   return diags;
 }
-
-// Re-exported for downstream modules that build on this file.
-export { OUTPUT_FNS, ParseError, parse, tokenize };
-export type { Diagnostic, Program, Stmt, Expr, FuncDef, TypeDef, ImportStmt, Call, Arg };

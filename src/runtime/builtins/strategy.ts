@@ -104,6 +104,11 @@ export class StrategyBroker {
   avgPrice = NaN;
   private entryId = '';
   private entryBar = 0;
+  // Per-entry-id open lots making up the current position (unsigned contracts, in add order).
+  // The aggregate size/avgPrice model above can't isolate a single entry's quantity, so this
+  // lets `strategy.close(id)` close exactly the part opened under `id` (TradingView keys close
+  // orders by entry id). Without it, closing anything but the FIRST entry's id was a no-op.
+  private entryLots: { id: string; qty: number }[] = [];
   // Number of same-direction entry/order adds making up the current position. Drives the
   // pyramiding cap (TradingView allows `pyramiding` same-side entries); reset to 0 when the
   // position is fully closed. v1 used a 0/1 stub which let pyramiding ≥ 2 add without bound.
@@ -133,20 +138,35 @@ export class StrategyBroker {
   private exits: ExitBracket[] = [];
 
   // ── realtime rollback (the driver snapshots before speculative intrabar ticks) ─
-  private static readonly SNAP_KEYS = [
-    'pending', 'exits', 'size', 'avgPrice', 'entryId', 'entryBar', 'entryCount', 'entryCommission',
-    'realized', 'grossProfit', 'grossLoss', 'wins', 'losses', 'evens', 'closedTrades', 'equityCurve',
+  // Fields captured/restored around every speculative tick, split by copy strategy so
+  // rollback stays correct without deep-cloning the ever-growing history arrays each tick:
+  //  DEEP    — arrays whose element objects mutate in place (orders gain `triggered`,
+  //            brackets ratchet `trailStop`, lots shed `qty`): must be structuredClone'd.
+  //  APPEND  — arrays only appended, with entries never mutated after (closed trades,
+  //            per-bar equity): a shallow slice suffices (a later push/assign replaces the
+  //            array, leaving the snapshot's copy untouched).
+  //  SCALARS — primitives: assigned directly.
+  private static readonly SNAP_DEEP = ['pending', 'exits', 'entryLots'] as const;
+  private static readonly SNAP_APPEND = ['closedTrades', 'equityCurve'] as const;
+  private static readonly SNAP_SCALARS = [
+    'size', 'avgPrice', 'entryId', 'entryBar', 'entryCount', 'entryCommission',
+    'realized', 'grossProfit', 'grossLoss', 'wins', 'losses', 'evens',
     'peakEquity', 'valleyEquity', 'maxDrawdown', 'maxDrawdownPercent', 'maxRunup', 'maxRunupPercent',
     'maxContractsAll', 'maxContractsLong', 'maxContractsShort',
   ] as const;
   snapshot(): unknown {
     const s: Record<string, unknown> = {};
-    for (const k of StrategyBroker.SNAP_KEYS) s[k] = structuredClone(this[k]);
+    for (const k of StrategyBroker.SNAP_DEEP) s[k] = structuredClone(this[k]);
+    for (const k of StrategyBroker.SNAP_APPEND) s[k] = (this[k] as unknown[]).slice();
+    for (const k of StrategyBroker.SNAP_SCALARS) s[k] = this[k];
     return s;
   }
   restore(s: unknown): void {
     const snap = s as Record<string, unknown>;
-    for (const k of StrategyBroker.SNAP_KEYS) (this as Record<string, unknown>)[k] = structuredClone(snap[k]);
+    const self = this as Record<string, unknown>;
+    for (const k of StrategyBroker.SNAP_DEEP) self[k] = structuredClone(snap[k]);
+    for (const k of StrategyBroker.SNAP_APPEND) self[k] = (snap[k] as unknown[]).slice();
+    for (const k of StrategyBroker.SNAP_SCALARS) self[k] = snap[k];
   }
 
   configure(s: Partial<StrategySettings>): void {
@@ -408,10 +428,14 @@ export class StrategyBroker {
   }
 
   private fill(o: Order, price: number): void {
-    if (o.kind === 'closeAll' || o.kind === 'close') {
-      // strategy.close only acts on the position opened under the SAME entry id
-      if (o.kind === 'close' && o.id !== this.entryId) return;
+    if (o.kind === 'closeAll') {
       this.closePosition(price, o.qty);
+      return;
+    }
+    if (o.kind === 'close') {
+      // strategy.close(id) closes the quantity opened under THAT entry id (a no-op if the id
+      // holds nothing open) — including a pyramided add whose id is not the first entry's.
+      this.closePosition(price, o.qty, o.id);
       return;
     }
     const dir = o.dir;
@@ -448,11 +472,13 @@ export class StrategyBroker {
       this.entryBar = this.host.idx;
       this.entryCount = 1;
       this.entryCommission = 0;
+      this.entryLots = [{ id: o.id, qty }];
     } else {
       const newSize = this.size + dir * qty;
       this.avgPrice = (this.avgPrice * Math.abs(this.size) + price * qty) / Math.abs(newSize);
       this.size = newSize;
       this.entryCount += 1;
+      this.entryLots.push({ id: o.id, qty });
     }
     const fee = this.commission(qty, price);
     this.entryCommission += fee; // carried on the open position; pro-rated into trade profit
@@ -476,10 +502,22 @@ export class StrategyBroker {
     };
   }
 
-  private closePosition(price: number, qty?: number): void {
+  /**
+   * Close some (or all) of the open position at `price`.
+   * @param qty      max contracts to close (default: the whole eligible quantity).
+   * @param entryId  when set, restrict the close to the lots opened under this entry id
+   *                 (`strategy.close(id)`), a no-op if that id holds nothing open.
+   */
+  private closePosition(price: number, qty?: number, entryId?: string): void {
     if (this.size === 0) return;
     const dir = sign(this.size);
-    const closeQty = qty != null && !Number.isNaN(qty) ? Math.min(qty, Math.abs(this.size)) : Math.abs(this.size);
+    // Quantity eligible to close: the whole position, or just the named entry's open lots.
+    const eligible = entryId != null
+      ? this.entryLots.reduce((a, l) => a + (l.id === entryId ? l.qty : 0), 0)
+      : Math.abs(this.size);
+    if (eligible <= 0) return; // named entry id has no open quantity → no-op
+    const closeQty = qty != null && !Number.isNaN(qty) ? Math.min(qty, eligible) : eligible;
+    if (closeQty <= 0) return;
     // trade profit nets BOTH sides' commission; the entry side was already charged to
     // `realized` at fill time, so only the exit side moves realized here.
     const entryFee = this.entryCommission * (closeQty / Math.abs(this.size));
@@ -490,11 +528,25 @@ export class StrategyBroker {
     else if (profit < 0) { this.grossLoss += -profit; this.losses++; }
     else this.evens++;
     this.closedTrades.push({
-      entryId: this.entryId, dir, qty: closeQty, entryPrice: this.avgPrice, exitPrice: price,
+      entryId: entryId ?? this.entryId, dir, qty: closeQty, entryPrice: this.avgPrice, exitPrice: price,
       entryBar: this.entryBar, exitBar: this.host.idx, profit, cumProfit: this.realized,
     });
     this.size = dir * (Math.abs(this.size) - closeQty);
-    if (this.size === 0) { this.avgPrice = NaN; this.exits = []; this.entryCount = 0; this.entryCommission = 0; }
+    this.reduceLots(closeQty, entryId);
+    if (this.size === 0) { this.avgPrice = NaN; this.exits = []; this.entryCount = 0; this.entryCommission = 0; this.entryLots = []; }
+  }
+
+  /** Remove `qty` contracts from the open lots, oldest first; restricted to `entryId` when set. */
+  private reduceLots(qty: number, entryId?: string): void {
+    let rem = qty;
+    for (const lot of this.entryLots) {
+      if (rem <= 0) break;
+      if (entryId != null && lot.id !== entryId) continue;
+      const take = Math.min(lot.qty, rem);
+      lot.qty -= take;
+      rem -= take;
+    }
+    this.entryLots = this.entryLots.filter((l) => l.qty > 1e-9);
   }
 }
 

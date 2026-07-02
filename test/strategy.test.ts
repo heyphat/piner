@@ -97,6 +97,21 @@ describe('strategy — broker simulator', () => {
     expect(three.outputs.plots.get(0)!.data[9]).toBe(3);
   });
 
+  it('strategy.close(id) closes a pyramided add by its own id (was a no-op for non-first ids)', async () => {
+    // pyramiding=2: entry "A" fills bar1, entry "B" fills bar2 → size 2. close("B") queued
+    // bar3 fills bar4 open → closes B's 1 contract, leaving A's 1. Previously close("B") was
+    // a silent no-op because only the FIRST entry's id ("A") was tracked.
+    const eng = await bothBackends(
+      '//@version=6\nstrategy("s", pyramiding = 2, default_qty_value = 1)\nif bar_index == 0\n    strategy.entry("A", strategy.long)\nif bar_index == 1\n    strategy.entry("B", strategy.long)\nif bar_index == 3\n    strategy.close("B")\nplot(strategy.position_size)\n',
+    );
+    const sz = eng.outputs.plots.get(0)!.data;
+    expect(sz[2]).toBe(2); // both adds on
+    expect(sz[9]).toBe(1); // B closed, A remains — not 2 (no-op) and not 0 (over-close)
+    expect(eng.strategy.closedTrades.length).toBe(1);
+    expect(eng.strategy.closedTrades[0].entryId).toBe('B');
+    expect(eng.strategy.closedTrades[0].qty).toBe(1);
+  });
+
   it('configurable mintick scales tick-denominated exits (was hard-coded 0.01)', async () => {
     // Long fills bar1 @101; lows are 98+i, so the lowest low from bar1 on is 99.
     // exit loss=50 ticks → stop = 101 - 50*mintick. mintick=0.01 → 100.5 (>= 99 → stopped
