@@ -52,6 +52,9 @@ function runReal(file: string, opts: { bars?: Bar[]; inputs?: Record<string, unk
     if (JSON.stringify(js.drawings) !== JSON.stringify(ip.drawings)) {
       throw new Error(`backend divergence in drawings (${js.drawings.length} js vs ${ip.drawings.length} interp)`);
     }
+    if (c.metadata.isStrategy && JSON.stringify(js.strategy) !== JSON.stringify(ip.strategy)) {
+      throw new Error(`backend divergence in the strategy report (${js.strategy.closedTrades.length} js vs ${ip.strategy.closedTrades.length} interp trades)`);
+    }
     return { c, js };
   });
 }
@@ -129,3 +132,61 @@ function drawCounts(eng: Engine): Record<string, number> {
   for (const o of pool.objects.values()) byType[o.type] = (byType[o.type] ?? 0) + 1;
   return byType;
 }
+
+describe('realistic strategy corpus (test/pinescripts/strategies)', () => {
+  // Seeded LCG random walk with slow bull/bear regimes and occasional impulse bars —
+  // organic enough to form swings, BOS/CHoCH flips, and FVGs that price retraces into.
+  // Deterministic: the SMC assertions below are pinned to this exact series.
+  function smcBars(n: number, seed: number, drift = 0.8, vol = 1.6): Bar[] {
+    let s = seed >>> 0;
+    const rnd = () => (s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+    const out: Bar[] = [];
+    let px = 100;
+    const start = Date.UTC(2021, 0, 4);
+    for (let i = 0; i < n; i++) {
+      const regime = Math.sin(i / 40) > 0 ? 1 : -1;
+      const shock = rnd() < 0.08 ? (rnd() < 0.5 ? -1 : 1) * vol * 4 : 0;
+      const move = regime * drift + (rnd() - 0.5) * 2 * vol + shock;
+      const open = px;
+      const close = px + move;
+      const wickU = rnd() * vol * (shock !== 0 ? 0.15 : 0.9);
+      const wickD = rnd() * vol * (shock !== 0 ? 0.15 : 0.9);
+      out.push({ time: start + i * 3_600_000, open, close,
+        high: Math.max(open, close) + wickU, low: Math.min(open, close) - wickD,
+        volume: 1000 + Math.floor(rnd() * 900) });
+      px = close;
+    }
+    return out;
+  }
+
+  it('SMC Structure + FVG: trades both sides through the reworked broker (POC, % equity, commission)', async () => {
+    // End-to-end exercise of the broker rework on a realistic strategy:
+    // percent_of_equity sizing, percent commission, process_orders_on_close,
+    // and stop+limit exit brackets keyed by from_entry. runReal asserts
+    // byte-for-byte plot/drawing/strategy-report parity across backends.
+    const data = smcBars(700, 37);
+    const { c, js } = await runReal('strategies/smc-structure.pine', { bars: data });
+    expect(c.metadata.title).toBe('SMC — Structure + FVG');
+    expect(c.metadata.isStrategy).toBe(true);
+    const s = js.strategy;
+    // Pinned to the seeded series — a change here means broker semantics moved.
+    expect(s.closedTrades.length).toBe(6);
+    expect(s.closedTrades.filter((t) => t.dir > 0).length).toBe(3);
+    expect(s.closedTrades.filter((t) => t.dir < 0).length).toBe(3);
+    expect(s.wins).toBeGreaterThan(0);
+    expect(s.losses).toBeGreaterThan(0);
+    for (const t of s.closedTrades) {
+      // process_orders_on_close: every (market) entry fills at ITS OWN bar's close.
+      expect(t.entryPrice).toBe(data[t.entryBar].close);
+      // percent-of-equity sizing → fractional, price-dependent quantities (not the fixed default 1)
+      expect(t.qty).toBeGreaterThan(0);
+      expect(t.qty).not.toBe(1);
+      // 0.04% commission on both sides is netted into the trade's profit
+      const raw = t.dir * (t.exitPrice - t.entryPrice) * t.qty;
+      expect(t.profit).toBeLessThan(raw);
+      expect(raw - t.profit).toBeCloseTo((0.04 / 100) * t.qty * (t.entryPrice + t.exitPrice), 6);
+    }
+    // exits come from the stop/limit bracket, not market closes
+    expect(js.outputs.plots.size).toBeGreaterThanOrEqual(3); // swing/eq level plots
+  });
+});
