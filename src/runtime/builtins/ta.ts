@@ -51,7 +51,7 @@ export class Ta {
     if (!isNum(src)) return NaN;
     s.buf.push(src);
     s.sum += src;
-    if (s.buf.length > len) s.sum -= s.buf.shift()!;
+    while (s.buf.length > len) s.sum -= s.buf.shift()!;
     return s.buf.length < len ? NaN : s.sum / len;
   }
 
@@ -81,7 +81,7 @@ export class Ta {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     if (!isNum(src)) return NaN;
     s.buf.push(src);
-    if (s.buf.length > len) s.buf.shift();
+    while (s.buf.length > len) s.buf.shift();
     if (s.buf.length < len) return NaN;
     let num = 0;
     let den = 0;
@@ -130,12 +130,18 @@ export class Ta {
   }
 
   // ── ranges / volatility ───────────────────────────────────
-  // Convention: value args first, `site` last. ta.tr has no value args.
-  tr(site: number): number {
+  // Convention: value args first, `site` last. ta.tr takes an optional
+  // handle_na (default false, as the bare `ta.tr` variable): with no prev
+  // close the result is na unless handle_na is true (then high − low).
+  tr(...args: Array<number | boolean>): number {
+    const site = args[args.length - 1] as number;
+    const handleNa = args.length >= 2 && args[0] === true;
     const s = this.st(site, () => ({ prevClose: NaN }));
     const { high, low, close } = this.host;
     const r = !isNum(s.prevClose)
-      ? high - low
+      ? handleNa
+        ? high - low
+        : NaN
       : Math.max(high - low, Math.abs(high - s.prevClose), Math.abs(low - s.prevClose));
     s.prevClose = close;
     return r;
@@ -160,7 +166,7 @@ export class Ta {
   highest(src: number, len: number, site: number): number {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     s.buf.push(isNum(src) ? src : NaN);
-    if (s.buf.length > len) s.buf.shift();
+    while (s.buf.length > len) s.buf.shift();
     if (s.buf.length < len) return NaN;
     let m = -Infinity;
     for (const v of s.buf) if (isNum(v) && v > m) m = v;
@@ -169,7 +175,7 @@ export class Ta {
   lowest(src: number, len: number, site: number): number {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     s.buf.push(isNum(src) ? src : NaN);
-    if (s.buf.length > len) s.buf.shift();
+    while (s.buf.length > len) s.buf.shift();
     if (s.buf.length < len) return NaN;
     let m = Infinity;
     for (const v of s.buf) if (isNum(v) && v < m) m = v;
@@ -179,7 +185,7 @@ export class Ta {
   highestbars(src: number, len: number, site: number): number {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     s.buf.push(isNum(src) ? src : NaN);
-    if (s.buf.length > len) s.buf.shift();
+    while (s.buf.length > len) s.buf.shift();
     if (s.buf.length < len) return NaN;
     let idx = -1;
     for (let i = 0; i < s.buf.length; i++) if (isNum(s.buf[i]) && (idx < 0 || s.buf[i] >= s.buf[idx])) idx = i;
@@ -189,7 +195,7 @@ export class Ta {
   lowestbars(src: number, len: number, site: number): number {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     s.buf.push(isNum(src) ? src : NaN);
-    if (s.buf.length > len) s.buf.shift();
+    while (s.buf.length > len) s.buf.shift();
     if (s.buf.length < len) return NaN;
     let idx = -1;
     for (let i = 0; i < s.buf.length; i++) if (isNum(s.buf[i]) && (idx < 0 || s.buf[i] <= s.buf[idx])) idx = i;
@@ -200,7 +206,7 @@ export class Ta {
     const s = this.st(site, () => ({ x: [] as number[], y: [] as number[] }));
     if (!isNum(a) || !isNum(b)) return NaN;
     s.x.push(a); s.y.push(b);
-    if (s.x.length > len) { s.x.shift(); s.y.shift(); }
+    while (s.x.length > len) { s.x.shift(); s.y.shift(); }
     if (s.x.length < len) return NaN;
     const mx = s.x.reduce((p, c) => p + c, 0) / len;
     const my = s.y.reduce((p, c) => p + c, 0) / len;
@@ -238,7 +244,7 @@ export class Ta {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     if (!isNum(src)) return NaN;
     s.buf.push(src);
-    if (s.buf.length > len) s.buf.shift();
+    while (s.buf.length > len) s.buf.shift();
     if (s.buf.length < len) return NaN;
     const mean = s.buf.reduce((a: number, b: number) => a + b, 0) / len;
     const variance = s.buf.reduce((a: number, b: number) => a + (b - mean) ** 2, 0) / len;
@@ -248,23 +254,22 @@ export class Ta {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     if (!isNum(src)) return NaN;
     s.buf.push(src);
-    if (s.buf.length > len) s.buf.shift();
+    while (s.buf.length > len) s.buf.shift();
     if (s.buf.length < len) return NaN;
     const mean = s.buf.reduce((a: number, b: number) => a + b, 0) / len;
     return s.buf.reduce((a: number, b: number) => a + Math.abs(b - mean), 0) / len;
   }
 
   // ── change / momentum ─────────────────────────────────────
-  /** src - src[len]: difference from `len` bars ago (default len handled by caller). */
+  /** src - src[len]: BAR-indexed offset (na occupies its slot; na endpoints → na). */
   change(src: number, len: number, site: number): number {
     const s = this.st(site, () => ({ buf: [] as number[] }));
-    if (!isNum(src)) return NaN; // skip na inputs (consistent with other windows)
-    s.buf.push(src);
-    // keep the last len+1 values; the oldest is src[len]
-    if (s.buf.length > len + 1) s.buf.shift();
+    s.buf.push(isNum(src) ? src : NaN);
+    // keep the last len+1 bars; the oldest is src[len]
+    while (s.buf.length > len + 1) s.buf.shift();
     if (s.buf.length < len + 1) return NaN;
     const past = s.buf[0];
-    return isNum(past) ? src - past : NaN;
+    return isNum(src) && isNum(past) ? src - past : NaN;
   }
 
   // ── crosses ───────────────────────────────────────────────
@@ -332,17 +337,17 @@ export class Ta {
   }
   roc(src: number, len: number, site: number): number {
     const s = this.st(site, () => ({ buf: [] as number[] }));
-    if (!isNum(src)) return NaN;
-    s.buf.push(src);
-    if (s.buf.length > len + 1) s.buf.shift();
+    s.buf.push(isNum(src) ? src : NaN); // bar-indexed, like change
+    while (s.buf.length > len + 1) s.buf.shift();
     if (s.buf.length < len + 1) return NaN;
     const past = s.buf[0];
-    return past === 0 ? NaN : (100 * (src - past)) / past;
+    if (!isNum(src) || !isNum(past) || past === 0) return NaN;
+    return (100 * (src - past)) / past;
   }
   rising(src: number, len: number, site: number): boolean {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     s.buf.push(src);
-    if (s.buf.length > len + 1) s.buf.shift();
+    while (s.buf.length > len + 1) s.buf.shift();
     if (s.buf.length < len + 1) return false;
     for (let i = 1; i < s.buf.length; i++) if (!(s.buf[i] > s.buf[i - 1])) return false;
     return true;
@@ -350,7 +355,7 @@ export class Ta {
   falling(src: number, len: number, site: number): boolean {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     s.buf.push(src);
-    if (s.buf.length > len + 1) s.buf.shift();
+    while (s.buf.length > len + 1) s.buf.shift();
     if (s.buf.length < len + 1) return false;
     for (let i = 1; i < s.buf.length; i++) if (!(s.buf[i] < s.buf[i - 1])) return false;
     return true;
@@ -361,7 +366,7 @@ export class Ta {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     if (!isNum(src)) return NaN;
     s.buf.push(src);
-    if (s.buf.length > len) s.buf.shift();
+    while (s.buf.length > len) s.buf.shift();
     if (s.buf.length < len) return NaN;
     const mean = s.buf.reduce((a: number, b: number) => a + b, 0) / len;
     return s.buf.reduce((a: number, b: number) => a + (b - mean) ** 2, 0) / len;
@@ -370,7 +375,7 @@ export class Ta {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     if (!isNum(src)) return NaN;
     s.buf.push(src);
-    if (s.buf.length > len) s.buf.shift();
+    while (s.buf.length > len) s.buf.shift();
     if (s.buf.length < len) return NaN;
     const sorted = s.buf.slice().sort((a: number, b: number) => a - b);
     const mid = Math.floor(len / 2);
@@ -379,11 +384,10 @@ export class Ta {
   percentrank(src: number, len: number, site: number): number {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     s.buf.push(src);
-    if (s.buf.length > len + 1) s.buf.shift();
-    if (s.buf.length < len + 1) return NaN;
-    const cur = s.buf[s.buf.length - 1];
+    while (s.buf.length > len + 1) s.buf.shift();
+    if (s.buf.length < len + 1 || !isNum(src)) return NaN;
     let count = 0;
-    for (let i = 0; i < s.buf.length - 1; i++) if (s.buf[i] <= cur) count++;
+    for (let i = 0; i < s.buf.length - 1; i++) if (s.buf[i] <= src) count++;
     return (count / len) * 100;
   }
 
@@ -400,7 +404,7 @@ export class Ta {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     if (!isNum(src)) return NaN;
     s.buf.push(src);
-    if (s.buf.length > len) s.buf.shift();
+    while (s.buf.length > len) s.buf.shift();
     if (s.buf.length < len) return NaN;
     // least-squares line over the window; x = 0..len-1 (oldest..newest)
     let sx = 0, sy = 0, sxx = 0, sxy = 0;
@@ -422,7 +426,7 @@ export class Ta {
   private smaInto(s: { buf: number[]; sum: number }, src: number, len: number): number {
     s.buf.push(src);
     s.sum += src;
-    if (s.buf.length > len) s.sum -= s.buf.shift()!;
+    while (s.buf.length > len) s.sum -= s.buf.shift()!;
     return s.buf.length < len ? NaN : s.sum / len;
   }
   private emaInto(s: { prev: number; seeded: boolean }, src: number, len: number): number {
@@ -448,9 +452,10 @@ export class Ta {
   /** ta.bb → [basis, upper, lower]. */
   bb(src: number, len: number, mult: number, site: number): number[] {
     const s = this.st(site, () => ({ sma: { buf: [] as number[], sum: 0 }, dev: { buf: [] as number[] } }));
+    if (!isNum(src)) return [NaN, NaN, NaN]; // skip na inputs like sma (else s.sma.sum poisons)
     const basis = this.smaInto(s.sma, src, len);
     s.dev.buf.push(src);
-    if (s.dev.buf.length > len) s.dev.buf.shift();
+    while (s.dev.buf.length > len) s.dev.buf.shift();
     let sd = NaN;
     if (s.dev.buf.length === len) {
       const mean = s.dev.buf.reduce((a: number, b: number) => a + b, 0) / len;
@@ -463,7 +468,7 @@ export class Ta {
     const s = this.st(site, () => ({ hi: [] as number[], lo: [] as number[] }));
     s.hi.push(highSrc);
     s.lo.push(lowSrc);
-    if (s.hi.length > len) { s.hi.shift(); s.lo.shift(); }
+    while (s.hi.length > len) { s.hi.shift(); s.lo.shift(); }
     if (s.hi.length < len) return NaN;
     const hh = Math.max(...s.hi);
     const ll = Math.min(...s.lo);
@@ -473,7 +478,7 @@ export class Ta {
   private wmaInto(s: { buf: number[] }, src: number, len: number): number {
     if (!isNum(src)) return NaN;
     s.buf.push(src);
-    if (s.buf.length > len) s.buf.shift();
+    while (s.buf.length > len) s.buf.shift();
     if (s.buf.length < len) return NaN;
     let num = 0, den = 0;
     for (let i = 0; i < len; i++) { const w = i + 1; num += s.buf[i] * w; den += w; }
@@ -491,7 +496,7 @@ export class Ta {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     if (!isNum(src)) return NaN;
     s.buf.push(src);
-    if (s.buf.length > len) s.buf.shift();
+    while (s.buf.length > len) s.buf.shift();
     if (s.buf.length < len) return NaN;
     let num = 0, den = 0;
     for (let j = 0; j < len; j++) { const w = len - j; num += s.buf[j] * w; den += s.buf[j]; }
@@ -499,11 +504,11 @@ export class Ta {
   }
   cmo(src: number, len: number, site: number): number {
     const s = this.st(site, () => ({ prev: NaN, buf: [] as number[] }));
-    let ch = 0;
-    if (isNum(s.prev) && isNum(src)) ch = src - s.prev;
+    const ch = isNum(s.prev) && isNum(src) ? src - s.prev : NaN; // first bar: na (Pine warmup)
     s.prev = src;
+    if (!isNum(ch)) return NaN;
     s.buf.push(ch);
-    if (s.buf.length > len) s.buf.shift();
+    while (s.buf.length > len) s.buf.shift();
     if (s.buf.length < len) return NaN;
     let up = 0, dn = 0;
     for (const d of s.buf) { if (d > 0) up += d; else dn += -d; }
@@ -513,7 +518,7 @@ export class Ta {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     if (!isNum(src)) return NaN;
     s.buf.push(src);
-    if (s.buf.length > len) s.buf.shift();
+    while (s.buf.length > len) s.buf.shift();
     if (s.buf.length < len) return NaN;
     const mean = s.buf.reduce((a, b) => a + b, 0) / len;
     const sd = Math.sqrt(s.buf.reduce((a, b) => a + (b - mean) ** 2, 0) / len);
@@ -523,7 +528,7 @@ export class Ta {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     if (!isNum(src)) return NaN;
     s.buf.push(src);
-    if (s.buf.length > len) s.buf.shift();
+    while (s.buf.length > len) s.buf.shift();
     if (s.buf.length < len) return NaN;
     const mean = s.buf.reduce((a, b) => a + b, 0) / len;
     const md = s.buf.reduce((a, b) => a + Math.abs(b - mean), 0) / len;
@@ -534,7 +539,7 @@ export class Ta {
     const s = this.st(site, () => ({ hi: [] as number[], lo: [] as number[] }));
     const { high, low, close } = this.host;
     s.hi.push(high); s.lo.push(low);
-    if (s.hi.length > len) { s.hi.shift(); s.lo.shift(); }
+    while (s.hi.length > len) { s.hi.shift(); s.lo.shift(); }
     if (s.hi.length < len) return NaN;
     const hh = Math.max(...s.hi), ll = Math.min(...s.lo);
     return hh === ll ? NaN : (-100 * (hh - close)) / (hh - ll);
@@ -543,11 +548,13 @@ export class Ta {
     const s = this.st(site, () => ({ prev: NaN, pos: [] as number[], neg: [] as number[] }));
     const vol = this.host.volume;
     const rmf = src * vol;
-    let p = 0, n = 0;
-    if (isNum(s.prev)) { if (src > s.prev) p = rmf; else if (src < s.prev) n = rmf; }
+    const valid = isNum(s.prev) && isNum(src) && isNum(vol); // first bar: na change → na (Pine warmup)
+    const p = valid ? (src > s.prev ? rmf : 0) : NaN;
+    const n = valid ? (src < s.prev ? rmf : 0) : NaN;
     s.prev = src;
+    if (!valid) return NaN;
     s.pos.push(p); s.neg.push(n);
-    if (s.pos.length > len) { s.pos.shift(); s.neg.shift(); }
+    while (s.pos.length > len) { s.pos.shift(); s.neg.shift(); }
     if (s.pos.length < len) return NaN;
     const sp = s.pos.reduce((a, b) => a + b, 0), sn = s.neg.reduce((a, b) => a + b, 0);
     return sn === 0 ? 100 : 100 - 100 / (1 + sp / sn);
@@ -556,17 +563,19 @@ export class Ta {
    * Volume-weighted average price. Two forms (the trailing arg is always the
    * state `site`, appended by the caller):
    *   - `ta.vwap(source)` → float, anchored to the session (resets each new UTC day).
-   *   - `ta.vwap(source, anchor, stdev_mult)` → `[vwap, upper, lower]`, where a
-   *     truthy `anchor` restarts the accumulation and the bands sit `stdev_mult`
-   *     volume-weighted standard deviations either side of the VWAP.
+   *   - `ta.vwap(source, anchor)` → float, a truthy `anchor` restarts the accumulation.
+   *   - `ta.vwap(source, anchor, stdev_mult)` → `[vwap, upper, lower]`, anchored as
+   *     above, with bands `stdev_mult` volume-weighted standard deviations either
+   *     side of the VWAP.
    */
   vwap(src: number, ...rest: Array<number | boolean>): number | number[] {
     const site = rest[rest.length - 1] as number;
+    const anchored = rest.length >= 2; // (anchor, site) or (anchor, stdev_mult, site)
     const banded = rest.length === 3; // (anchor, stdev_mult, site)
     const s = this.st(site, () => ({ pv: 0, v: 0, sv2: 0, day: NaN }));
 
     let reset: boolean;
-    if (banded) {
+    if (anchored) {
       reset = rest[0] === true || (typeof rest[0] === 'number' && rest[0] !== 0 && isNum(rest[0]));
     } else {
       const day = Math.floor(this.host.time / 86400000);
@@ -591,7 +600,7 @@ export class Ta {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     s.buf.push(src);
     const win = left + right + 1;
-    if (s.buf.length > win) s.buf.shift();
+    while (s.buf.length > win) s.buf.shift();
     if (s.buf.length < win) return NaN;
     const center = s.buf[left];
     for (let i = 0; i < win; i++) if (i !== left && s.buf[i] >= center) return NaN;
@@ -601,7 +610,7 @@ export class Ta {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     s.buf.push(src);
     const win = left + right + 1;
-    if (s.buf.length > win) s.buf.shift();
+    while (s.buf.length > win) s.buf.shift();
     if (s.buf.length < win) return NaN;
     const center = s.buf[left];
     for (let i = 0; i < win; i++) if (i !== left && s.buf[i] <= center) return NaN;
@@ -609,13 +618,13 @@ export class Ta {
   }
   // ── tuple-returning channel/trend indicators ──────────────
   kc(src: number, len: number, mult: number, site: number): number[] {
-    const s = this.st(site, () => ({ ema: { prev: NaN, seeded: false }, atr: { prevClose: NaN, rma: { prev: NaN, n: 0, sum: 0 } } }));
+    const s = this.st(site, () => ({ ema: { prev: NaN, seeded: false }, prevClose: NaN, range: { prev: NaN, seeded: false } }));
     const { high, low, close } = this.host;
     const mid = this.emaInto(s.ema, src, len);
-    const tr = !isNum(s.atr.prevClose) ? high - low : Math.max(high - low, Math.abs(high - s.atr.prevClose), Math.abs(low - s.atr.prevClose));
-    s.atr.prevClose = close;
-    const atr = this.rmaInto(s.atr.rma, tr, len);
-    return [mid, mid + mult * atr, mid - mult * atr];
+    const tr = !isNum(s.prevClose) ? high - low : Math.max(high - low, Math.abs(high - s.prevClose), Math.abs(low - s.prevClose));
+    s.prevClose = close;
+    const span = this.emaInto(s.range, tr, len); // Pine: EMA of true range, not RMA
+    return [mid, mid + mult * span, mid - mult * span];
   }
   kcw(src: number, len: number, mult: number, site: number): number {
     const [mid, up, lo] = this.kc(src, len, mult, site);
@@ -684,14 +693,14 @@ export class Ta {
     if (!isNum(src)) return NaN;
     s.buf.push(src);
     s.sum += src;
-    if (s.buf.length > len) s.sum -= s.buf.shift()!;
+    while (s.buf.length > len) s.sum -= s.buf.shift()!;
     return s.buf.length < len ? NaN : s.sum;
   }
   alma(src: number, len: number, offset: number, sigma: number, site: number): number {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     if (!isNum(src)) return NaN;
     s.buf.push(src);
-    if (s.buf.length > len) s.buf.shift();
+    while (s.buf.length > len) s.buf.shift();
     if (s.buf.length < len) return NaN;
     const m = offset * (len - 1);
     const sd = len / sigma;
@@ -852,7 +861,7 @@ export class Ta {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     if (!isNum(src)) return NaN;
     s.buf.push(src);
-    if (s.buf.length > len) s.buf.shift();
+    while (s.buf.length > len) s.buf.shift();
     if (s.buf.length < len) return NaN;
     return Math.max(...s.buf) - Math.min(...s.buf);
   }
@@ -861,7 +870,7 @@ export class Ta {
   percentile_nearest_rank(src: number, len: number, percentage: number, site: number): number {
     const s = this.st(site, () => ({ buf: [] as number[], seen: 0 }));
     s.buf.push(src);
-    if (s.buf.length > len) s.buf.shift();
+    while (s.buf.length > len) s.buf.shift();
     s.seen++;
     if (s.seen < len) return NaN;
     const vals = s.buf.filter(isNum);
@@ -878,7 +887,7 @@ export class Ta {
   percentile_linear_interpolation(src: number, len: number, percentage: number, site: number): number {
     const s = this.st(site, () => ({ buf: [] as number[], seen: 0 }));
     s.buf.push(src);
-    if (s.buf.length > len) s.buf.shift();
+    while (s.buf.length > len) s.buf.shift();
     s.seen++;
     if (s.seen < len) return NaN;
     for (const v of s.buf) if (!isNum(v)) return NaN;
@@ -901,7 +910,7 @@ export class Ta {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     if (!isNum(src)) return NaN;
     s.buf.push(src);
-    if (s.buf.length > len) s.buf.shift();
+    while (s.buf.length > len) s.buf.shift();
     if (s.buf.length < len) return NaN;
     if (len < 2) return NaN;
     // Time rank: oldest = 1 … newest = len (buf is push-ordered, oldest first).
@@ -940,7 +949,7 @@ export class Ta {
     const s = this.st(site, () => ({ buf: [] as number[] }));
     if (isNum(src)) {
       s.buf.push(src);
-      if (s.buf.length > len) s.buf.shift();
+      while (s.buf.length > len) s.buf.shift();
     }
     if (s.buf.length < len) return NaN;
     const counts = new Map<number, number>();
@@ -1026,7 +1035,8 @@ export class Ta {
         break;
       }
       case 'Woodie': {
-        const P = (H + L + 2 * C) / 4;
+        // Woodie PP anchors on the CURRENT period's open: (H_prev + L_prev + 2*O_cur)/4.
+        const P = (H + L + 2 * s.o) / 4;
         out[0] = P;
         out[1] = P * 2 - L;             // R1
         out[2] = P * 2 - H;             // S1

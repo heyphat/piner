@@ -88,7 +88,8 @@ class Emitter {
     const sym = s.sym;
     const valueJs = this.compound(s.op, s.target, s.value);
     if (s.target.kind === 'Member') {
-      return `${this.expr(s.target)} = (${valueJs});`;
+      // Direct write — member() reads use `?.`, which is illegal on an assignment target.
+      return `(${this.expr(s.target.object)}).${s.target.property} = (${valueJs});`;
     }
     if (sym && (sym.kind === 'var' || sym.kind === 'varip')) {
       const set = sym.kind === 'var' ? 'setVar' : 'setVarip';
@@ -125,8 +126,8 @@ class Emitter {
 
   // ── control flow as statements ────────────────────────────
   private ifStmt(s: IfNode): string {
-    let code = `if (${this.expr(s.cond)}) {\n${this.block(s.then)}\n}`;
-    for (const el of s.elifs) code += ` else if (${this.expr(el.cond)}) {\n${this.block(el.body)}\n}`;
+    let code = `if ($.toBool(${this.expr(s.cond)})) {\n${this.block(s.then)}\n}`;
+    for (const el of s.elifs) code += ` else if ($.toBool(${this.expr(el.cond)})) {\n${this.block(el.body)}\n}`;
     if (s.else) code += ` else {\n${this.block(s.else)}\n}`;
     return code;
   }
@@ -151,15 +152,30 @@ class Emitter {
     const iter = `(${this.expr(s.iterable)} ?? [])`;
     if (s.indexSym) {
       const idx = s.indexSym.jsName!;
-      return `{ let ${idx} = 0; for (const ${val} of ${iter}) { $.consumeLoopIteration();\n${this.block(s.body)}\n ${idx}++; } }`;
+      // Increment at the TOP so a `continue` in the body can't skip it (index = element position).
+      return `{ let ${idx} = -1; for (const ${val} of ${iter}) { ${idx}++; $.consumeLoopIteration();\n${this.block(s.body)}\n} }`;
     }
     return `for (const ${val} of ${iter}) {\n$.consumeLoopIteration();\n${this.block(s.body)}\n}`;
   }
   private whileStmt(s: WhileNode): string {
-    return `while (${this.expr(s.cond)}) {\n$.consumeLoopIteration();\n${this.block(s.body)}\n}`;
+    return `while ($.toBool(${this.expr(s.cond)})) {\n$.consumeLoopIteration();\n${this.block(s.body)}\n}`;
   }
   private switchStmt(s: SwitchNode): string {
-    return `${this.switchExpr(s)};`;
+    // Statement form must NOT lower to the IIFE (switchExpr): a `break`/`continue`
+    // in a case body targets the enclosing Pine loop, which is illegal inside an
+    // arrow function. Lower to a plain if/else chain instead.
+    const parts: string[] = [];
+    let defaultBody: string | null = null;
+    for (const c of s.cases) {
+      const body = this.block(c.body);
+      if (!c.test) { defaultBody = body; continue; }
+      const cond = s.subject ? `$.eq(__subj, (${this.expr(c.test)}))` : `$.toBool(${this.expr(c.test)})`;
+      parts.push(`if (${cond}) {\n${body}\n}`);
+    }
+    const chain = parts.length
+      ? parts.join(' else ') + (defaultBody !== null ? ` else {\n${defaultBody}\n}` : '')
+      : defaultBody ?? '';
+    return s.subject ? `{ const __subj = (${this.expr(s.subject)});\n${chain} }` : `{ ${chain} }`;
   }
 
   private block(body: Stmt[]): string {
@@ -221,7 +237,7 @@ class Emitter {
           : e.op === '-' ? `$.neg(${this.expr(e.operand)})`
           : `(${this.expr(e.operand)})`;
       case 'Binary': return this.binary(e);
-      case 'Ternary': return `(${this.expr(e.cond)} ? (${this.expr(e.then)}) : (${this.expr(e.else)}))`;
+      case 'Ternary': return `($.toBool(${this.expr(e.cond)}) ? (${this.expr(e.then)}) : (${this.expr(e.else)}))`;
       case 'Call': return this.call(e);
       case 'Tuple': return `[${e.items.map((it) => this.expr(it)).join(', ')}]`;
       case 'If': return `(() => {\n${this.ifExprBody(e)}\n})()`;
@@ -232,8 +248,8 @@ class Emitter {
   }
 
   private ifExprBody(s: IfNode): string {
-    let code = `if (${this.expr(s.cond)}) {\n${this.blockValue(s.then)}\n}`;
-    for (const el of s.elifs) code += ` else if (${this.expr(el.cond)}) {\n${this.blockValue(el.body)}\n}`;
+    let code = `if ($.toBool(${this.expr(s.cond)})) {\n${this.blockValue(s.then)}\n}`;
+    for (const el of s.elifs) code += ` else if ($.toBool(${this.expr(el.cond)})) {\n${this.blockValue(el.body)}\n}`;
     if (s.else) code += ` else {\n${this.blockValue(s.else)}\n}`;
     code += '\nreturn $.NA;';
     return code;
@@ -246,7 +262,7 @@ class Emitter {
     for (const c of s.cases) {
       const body = this.blockValue(c.body);
       if (!c.test) { defaultBody = body; continue; }
-      const cond = subj !== null ? `$.eq(__subj, (${this.expr(c.test)}))` : `(${this.expr(c.test)})`;
+      const cond = subj !== null ? `$.eq(__subj, (${this.expr(c.test)}))` : `$.toBool(${this.expr(c.test)})`;
       parts.push(`if (${cond}) {\n${body}\n}`);
     }
     const head = subj !== null ? `const __subj = (${subj});\n` : '';
@@ -280,15 +296,19 @@ class Emitter {
       const rt = nsRuntime(e.object.name) ?? e.object.name;
       return `$.${rt}.${e.property}`;
     }
-    return `(${this.expr(e.object)}).${e.property}`;
+    // `?.` matches the interpreter: field access on an na/undefined object yields
+    // undefined (na) rather than a raw TypeError (e.g. UDT tuple from an
+    // unconfirmed request.security).
+    return `(${this.expr(e.object)})?.${e.property}`;
   }
 
   private binary(e: Extract<Expr, { kind: 'Binary' }>): string {
     const l = this.expr(e.left);
     const r = this.expr(e.right);
     switch (e.op) {
-      case 'and': return `(${l} && ${r})`;
-      case 'or': return `(${l} || ${r})`;
+      // v6: bools cannot hold na — na coerces to false. Lazy RHS preserved by &&/||.
+      case 'and': return `($.toBool(${l}) && $.toBool(${r}))`;
+      case 'or': return `($.toBool(${l}) || $.toBool(${r}))`;
       case '==': return `$.eq(${l}, ${r})`;
       case '!=': return `$.ne(${l}, ${r})`;
       case '<': return `$.lt(${l}, ${r})`;

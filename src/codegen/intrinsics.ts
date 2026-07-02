@@ -110,7 +110,7 @@ export const BUILTIN_METHODS = new Set([
 export function normalizeTaArgs<T>(fn: string, args: T[], one: T, zero: T): T[] {
   switch (fn) {
     case 'tr':
-      return []; // no value args
+      return args.length ? [args[0]] : []; // optional handle_na (bare `ta.tr` ≡ tr(false))
     case 'change':
       return args.length >= 2 ? [args[0], args[1]] : [args[0] ?? one, one]; // src, len(default 1)
     case 'valuewhen':

@@ -85,11 +85,17 @@ const INT_LEAVES = new Set([
 ]);
 const DATE_FNS = new Set(['year', 'month', 'dayofmonth', 'dayofweek', 'hour', 'minute', 'second', 'weekofyear']);
 const RESERVED_MEMBER_NAMES = new Set(['__proto__', 'constructor', 'prototype']);
+// String-valued `syminfo.*` members (the runtime surface in src/runtime/context.ts);
+// the rest (mintick, pricescale, …) are numeric.
+const SYMINFO_STRING_MEMBERS = new Set([
+  'tickerid', 'ticker', 'prefix', 'root', 'description', 'currency', 'basecurrency',
+  'type', 'timezone', 'session', 'volumetype', 'country',
+]);
 // `dayofweek.<day>` constants (Pine: Sunday = 1 … Saturday = 7).
 const DAYOFWEEK_CONST: Record<string, number> = {
   sunday: 1, monday: 2, tuesday: 3, wednesday: 4, thursday: 5, friday: 6, saturday: 7,
 };
-const NAMESPACES = new Set([
+export const NAMESPACES = new Set([
   'ta', 'math', 'str', 'color', 'input', 'request', 'strategy', 'array', 'matrix',
   'map', 'syminfo', 'timeframe', 'barstate', 'plot', 'shape', 'location', 'hline',
   'display', 'chart', 'session', 'ticker', 'line', 'label', 'box', 'table',
@@ -411,6 +417,24 @@ class Analyzer {
           const ns = e.object.name;
           if (ns === 'barstate') return (e.type = tBool);
           if (ns === 'color') return (e.type = tColor);
+          if (ns === 'syminfo') {
+            return (e.type = SYMINFO_STRING_MEMBERS.has(e.property) ? tString : tFloat);
+          }
+          if (ns === 'timeframe') {
+            if (e.property === 'period' || e.property === 'main_period') return (e.type = tString);
+            if (e.property === 'multiplier') return (e.type = tInt);
+            if (e.property.startsWith('is')) return (e.type = tBool);
+          }
+          if (ns === 'chart') {
+            if (e.property === 'bg_color' || e.property === 'fg_color') return (e.type = tColor);
+            if (e.property.startsWith('is_')) return (e.type = tBool);
+          }
+          if (ns === 'session' && e.property.startsWith('is')) return (e.type = tBool);
+          // namespace tag constants (size.tiny, session.regular, format.volume, …):
+          // type by the runtime tag's JS type so string tags concatenate correctly.
+          const tag = NS_CONST[ns]?.[e.property];
+          if (typeof tag === 'string') return (e.type = tString);
+          if (typeof tag === 'boolean') return (e.type = tBool);
           if (DEFERRED_NAMESPACES.has(ns)) this.error(e, `'${ns}.*' is not yet supported`);
         }
         return (e.type = tFloat);
@@ -560,7 +584,8 @@ class Analyzer {
       && callee.property === 'new' && this.userTypes.has(callee.object.name)) {
       const fields = this.userTypes.get(callee.object.name)!;
       e.udtFields = fields.map((f) => ({ name: f.name, default: f.default }));
-      for (const a of e.args) this.expr(a.value);
+      // args were already analyzed above — re-analyzing would duplicate input
+      // declarations and leak state/history slots.
       return (e.type = tFloat); // UDT instance (coarse type)
     }
 
@@ -639,7 +664,13 @@ class Analyzer {
     // drawing objects: .new() returns an id; getters return numbers; setters void.
     if (ns === 'line' || ns === 'label' || ns === 'box' || ns === 'table' || ns === 'linefill' || ns === 'polyline') return tFloat;
     if (ns === 'math') return tFloat;
-    if (ns === 'str') return fn === 'length' ? tInt : tString;
+    if (ns === 'str') {
+      if (fn === 'tonumber') return tFloat;
+      if (fn === 'length' || fn === 'pos') return tInt; // pos → na-able int index
+      if (fn === 'contains' || fn === 'startswith' || fn === 'endswith') return tBool;
+      if (fn === 'split') return tFloat; // array reference (coarse), matching array.new_*
+      return tString; // tostring/format/replace/substring/upper/lower/trim/repeat/match/format_time
+    }
     if (ns === 'color') return tColor;
     if (ns === 'input') {
       if (fn === 'int' || fn === 'time') return tInt;
@@ -647,6 +678,13 @@ class Analyzer {
       if (fn === 'string' || fn === 'symbol' || fn === 'session' || fn === 'text_area' || fn === 'enum') return tString;
       if (fn === 'color') return tColor;
       return tFloat;
+    }
+    if (ns === 'syminfo') return tString; // syminfo.prefix(tid) / syminfo.ticker(tid)
+    if (ns === 'ticker') return tString; // ticker.new/heikinashi/… build ticker-id strings
+    if (ns === 'timeframe') {
+      if (fn === 'change') return tBool;
+      if (fn === 'in_seconds') return tInt;
+      return tString; // from_seconds
     }
     if (fn && DATE_FNS.has(fn)) return tInt;
     switch (fn) {

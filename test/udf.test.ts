@@ -72,6 +72,13 @@ plot(close)
     const eng = await bothBackends('//@version=6\nindicator("u")\nadd1(x) => x + 1.0\ndbl(x) => x * 2.0\nplot(dbl(add1(close)))\n');
     expect(eng.outputs.plots.get(0)!.data[5]).toBe((bars[5].close + 1) * 2);
   });
+  it('an argument referencing a caller variable named like an earlier parameter does not capture it', async () => {
+    // Regression: params were bound as same-named sequential decls, so in f(1, a) the
+    // second argument `a` read the freshly-bound parameter `a` (1) instead of the
+    // caller's `a` (100) → 0 instead of -99. Args now bind to fresh temps first.
+    const eng = await bothBackends('//@version=6\nindicator("u")\nf(a, b) => a - b\na = 100.0\nplot(f(1, a))\n');
+    for (let i = 0; i < bars.length; i++) expect(eng.outputs.plots.get(0)!.data[i]).toBe(-99);
+  });
   it('multi-return tuple destructuring', async () => {
     const eng = await bothBackends('//@version=6\nindicator("u")\nmm(src, len) => [ta.sma(src, len), ta.stdev(src, len)]\n[m, s] = mm(close, 5)\nplot(m)\nplot(s)\n');
     expect(Number.isNaN(eng.outputs.plots.get(0)!.data[8])).toBe(false);
@@ -152,6 +159,15 @@ describe('user-defined methods (dot-call dispatch)', () => {
     const eng = await bothBackends(`${HEAD}method smooth(Rect this) => ta.sma(this.w, 3)\nr = Rect.new(close, 0.0)\nplot(r.smooth())\nplot(r.smooth())\n`);
     const a = eng.outputs.plots.get(0)!.data, b = eng.outputs.plots.get(1)!.data;
     for (let i = 0; i < bars.length; i++) expect(a[i]).toBe(b[i]); // identical yet independent state
+  });
+  it('a user method named like a str.* function does not hijack the namespace call', async () => {
+    // Regression: `str.tonumber("2")` was rewritten to `tonumber(str, "2")` whenever a
+    // user `method tonumber` existed (`tonumber` is not in BUILTIN_METHODS). A bare
+    // builtin-namespace receiver must never get method sugar; the dot-call on a real
+    // receiver still dispatches to the user method.
+    const eng = await bothBackends(`${HEAD}method tonumber(Rect this) => this.w * 10.0\nr = Rect.new(2.0, 0.0)\nplot(str.tonumber("2") + 1)\nplot(r.tonumber())\n`);
+    expect(eng.outputs.plots.get(0)!.data[5]).toBe(3); // builtin: numeric add, not concat
+    expect(eng.outputs.plots.get(1)!.data[5]).toBe(20); // user method via dot-call
   });
   it('a user method named like a built-in does not shadow the built-in (arr.push stays built-in)', async () => {
     const eng = await bothBackends(`${HEAD}method push(Rect this, float x) => this.w + x\nvar a = array.new<float>(0)\narray.push(a, close)\nr = Rect.new(10.0, 0.0)\nplot(array.size(a))\nplot(na(r.push(close)) ? -1.0 : r.push(close))\n`);

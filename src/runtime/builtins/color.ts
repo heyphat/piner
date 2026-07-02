@@ -32,12 +32,16 @@ function parse(c: unknown): { r: number; g: number; b: number; a: number } | nul
 const base = (rgb: string) => `#${rgb}FF`;
 
 export const ColorNs = {
-  new(col: string, transp: number): string | typeof NA {
+  new(col: string, transp?: number): string | typeof NA {
     // color.new(na, …) is na in Pine. from_gradient and others yield the NA sentinel
     // (not null), so guard on isNa/non-string rather than `??` to avoid a .slice crash.
     if (isNa(col) || typeof col !== 'string') return NA;
     const rgb = col.slice(1, 7);
-    return `#${rgb}${alphaFromTransp(transp)}`;
+    // Omitted/na transp keeps the input's alpha (opaque when it has none) — never "NaN".
+    const alpha = transp == null || isNa(transp)
+      ? (col.length >= 9 ? col.slice(7, 9) : 'FF')
+      : alphaFromTransp(transp);
+    return `#${rgb}${alpha}`;
   },
   rgb(r: number, g: number, b: number, transp = 0): string {
     return `#${hex2(r)}${hex2(g)}${hex2(b)}${alphaFromTransp(transp)}`;

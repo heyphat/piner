@@ -149,6 +149,10 @@ export interface RollbackSnapshot {
   vars: Map<number, unknown>;
   misc: Map<number, unknown>;
   draw: ReturnType<DrawingPool['snapshot']>;
+  /** Broker state (pending orders, position, trades) — mutated by strategy.* calls. */
+  strategy: unknown;
+  /** Alerts are append-only; a rolled-back tick's alerts must be discarded. */
+  alertCount: number;
 }
 
 /** na (NaN) propagates; comparisons with na yield false (v6, §4.5). */
@@ -334,7 +338,7 @@ export class ExecutionContext {
   get close() { return this.series.get(BuiltinSlot.Close, 0); }
   get volume() { return this.series.get(BuiltinSlot.Volume, 0); }
   get time() { return this.series.get(BuiltinSlot.Time, 0); }
-  get time_close() { return this.series.get(BuiltinSlot.Time, 0); }
+  get time_close() { const t = this.series.get(BuiltinSlot.Time, 0); return Number.isNaN(t) ? NaN : t + tfSeconds(this.tfStr) * 1000; }
   get hl2() { return (this.high + this.low) / 2; }
   get hlc3() { return (this.high + this.low + this.close) / 3; }
   get ohlc4() { return (this.open + this.high + this.low + this.close) / 4; }
@@ -596,8 +600,10 @@ export class ExecutionContext {
   private computeSecurity(symbol: string, tf: string, lookahead: boolean, evalFn: (sub: ExecutionContext) => unknown): unknown[] {
     const sym = this.symbol;
     this.out.recordSecurityRequest(symbol || sym, tf, false); // declare the dependency (P0)
+    // Same-symbol only on exact match or an exchange-prefix boundary ("BINANCE:BTCUSDT"
+    // vs "BTCUSDT") — a bare endsWith would misclassify e.g. WETHUSDT as ETHUSDT.
     const sameSymbol =
-      !symbol || (!!sym && (symbol === sym || symbol.endsWith(sym) || symbol.endsWith(`:${sym}`) || sym.endsWith(symbol)));
+      !symbol || (!!sym && (symbol === sym || symbol.endsWith(`:${sym}`) || sym.endsWith(`:${symbol}`)));
     if (!sameSymbol) {
       // CROSS-symbol: resolve against host-injected bars; absent → all-na (no feed → Pine's
       // own behavior). Aligned to the chart bars by TIME (the other symbol has its own bars).
@@ -770,7 +776,7 @@ export class ExecutionContext {
   ge(a: unknown, b: unknown): boolean { return isNa(a) || isNa(b) ? false : (a as number) >= (b as number); }
   eq(a: unknown, b: unknown): boolean { return isNa(a) || isNa(b) ? false : a === b; }
   ne(a: unknown, b: unknown): boolean { return isNa(a) || isNa(b) ? false : a !== b; }
-  not(a: boolean): boolean { return !a; }
+  not(a: unknown): boolean { return !this.toBool(a); } // v6: na bool coerces to false, so `not na` is true
 
   // ── outputs (the visual IR; per-bar color where applicable) ─
   plot(id: number, value: number, color?: unknown, title = `plot ${id}`, options: Record<string, unknown> = {}): number {
@@ -849,6 +855,8 @@ export class ExecutionContext {
       vars: structuredClone(this.vars),
       misc: structuredClone(this.misc),
       draw: this.drawPool.snapshot(),
+      strategy: this.strategyBroker.snapshot(),
+      alertCount: this.out.alerts.length,
     };
   }
   restoreMutable(snap: RollbackSnapshot): void {
@@ -856,7 +864,16 @@ export class ExecutionContext {
     this.vars = structuredClone(snap.vars);
     this.misc = structuredClone(snap.misc); // fixnan state is rolled back like ta state
     this.drawPool.restore(snap.draw); // drawing objects roll back on each realtime tick
+    this.strategyBroker.restore(snap.strategy); // pending orders/fills from a superseded tick are discarded
+    this.out.alerts.length = snap.alertCount; // ditto duplicate alert/log events
     // only varips intentionally escape rollback within the same realtime bar
+  }
+
+  /** Drop request.security caches — the driver calls this on each realtime tick so
+   *  cached per-bar columns (computed over `allBars`) pick up the developing bar. */
+  invalidateSecurityCaches(): void {
+    this.secCache.clear();
+    this.ltfCache.clear();
   }
 
   /** Live drawing objects (for rendering). */

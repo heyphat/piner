@@ -25,6 +25,20 @@ describe('type inference (drives + vs concat)', () => {
   it('string + anything → string (concat)', () => {
     expect(declType('y = "v=" + close\n')).toBe('string');
   });
+  it('str.* return types: tonumber float, pos/length int, contains bool, tostring string', () => {
+    expect(declType('y = str.tonumber("2") + 1\n')).toBe('float'); // numeric add, not concat
+    expect(declType('y = str.pos("abc", "b") + 1\n')).toBe('int');
+    expect(declType('y = str.length("abc") + 1\n')).toBe('int');
+    const r = an(HEAD + 'y = str.contains("abc", "b")\n');
+    expect((r.program.body[1] as VarDecl).init.type?.kind).toBe('bool');
+    expect(declType('y = str.tostring(close) + "!"\n')).toBe('string');
+  });
+  it('builtin string members type as string (drives concat)', () => {
+    expect(declType('y = syminfo.prefix + syminfo.ticker\n')).toBe('string');
+    expect(declType('y = timeframe.period + "!"\n')).toBe('string');
+    const r = an(HEAD + 'y = syminfo.mintick + 1\n');
+    expect((r.program.body[1] as VarDecl).init.type?.kind).not.toBe('string');
+  });
 });
 
 describe('diagnostics', () => {
@@ -69,6 +83,13 @@ describe('slot allocation', () => {
   it('builtin OHLCV history reuses the fixed builtin slot (no new column)', () => {
     const r = an(HEAD + 'd = close - close[1]\n');
     expect(r.historySlotCount).toBe(6); // no extra history column allocated
+  });
+
+  it('UDT constructor args are analyzed exactly once (no duplicate inputs / state slots)', () => {
+    const r = an(HEAD + 'type P\n    float v\n    float w\np = P.new(input.float(1.0, "Length"), ta.sma(close, 5))\n');
+    expect(r.inputs.length).toBe(1);
+    expect(r.inputs[0].key).toBe('Length'); // no phantom "Length (2)" key
+    expect(r.stateSiteCount).toBe(1); // the ta.sma arg got ONE site, not two
   });
 });
 

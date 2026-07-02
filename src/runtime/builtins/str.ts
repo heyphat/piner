@@ -66,7 +66,7 @@ function formatNumberSpec(value: number, spec: string): string {
   if (isNa(value)) return 'NaN';
   const s = spec.trim();
   switch (s) {
-    case 'integer': return formatNumberPattern(value, '#');
+    case 'integer': return formatNumberPattern(value, '#,##0'); // integer instance groups digits
     case 'percent': return formatNumberPattern(value * 100, '#.###') + '%';
     case 'currency': return '$' + formatNumberPattern(value, '#,##0.00');
     default: return formatNumberPattern(value, s);
@@ -76,6 +76,15 @@ function formatNumberSpec(value: number, spec: string): string {
 /** True when a `str.tostring` second argument is a numeric-format pattern. */
 function isNumberPattern(fmt: string): boolean {
   return /[#0]/.test(fmt);
+}
+
+/** MessageFormat default number rendering: digit grouping, up to 3 fraction digits
+ *  (Java's `NumberFormat.getInstance` — `{0}`/`{0,number}` with 1340000 → "1,340,000"). */
+const GROUPED_NUMBER = new Intl.NumberFormat('en-US', { maximumFractionDigits: 3 });
+function formatNumberDefault(value: number): string {
+  if (Number.isNaN(value)) return 'NaN';
+  if (!Number.isFinite(value)) return value > 0 ? '∞' : '-∞';
+  return GROUPED_NUMBER.format(value);
 }
 
 /**
@@ -153,8 +162,11 @@ export const StrNs = {
         const arg = args[idx];
         if (parts.length >= 3 && parts[1].trim() === 'number' && typeof arg === 'number') {
           out += formatNumberSpec(arg, parts.slice(2).join(',').trim());
+        } else if (parts.length === 2 && parts[1].trim() === 'number' && typeof arg === 'number') {
+          out += formatNumberDefault(arg); // {n,number} → default grouped format
         } else if (parts.length === 1 && Number.isInteger(idx)) {
-          out += isNa(arg) ? 'NaN' : String(arg);
+          // Plain {n}: numbers get MessageFormat's default grouped rendering.
+          out += isNa(arg) ? 'NaN' : typeof arg === 'number' ? formatNumberDefault(arg) : String(arg);
         } else {
           // Unrecognized specifier: fall back to the plain argument value.
           out += isNa(arg) ? 'NaN' : String(arg ?? '');
@@ -202,12 +214,14 @@ export const StrNs = {
   },
   /**
    * Substring from `begin_pos` to `end_pos - 1` (0-based). When `end_pos`
-   * is omitted the substring extends to the end of the source.
+   * is omitted the substring extends to the end of the source. Negative
+   * positions clamp to 0 (Pine errors; soft-fail, never JS slice-wrap).
    */
   substring(s: string, begin_pos: number, end_pos?: number): string {
     if (isNa(s)) return NA as unknown as string;
     const src = String(s);
-    return end_pos === undefined ? src.slice(begin_pos) : src.slice(begin_pos, end_pos);
+    const b = Math.max(0, begin_pos);
+    return end_pos === undefined ? src.slice(b) : src.slice(b, Math.max(0, end_pos));
   },
   upper(s: string): string {
     return isNa(s) ? (NA as unknown as string) : String(s).toUpperCase();
@@ -236,11 +250,13 @@ export const StrNs = {
     if (isNa(s)) return '';
     return String(s).replace(/^[\s\x00-\x20]+|[\s\x00-\x20]+$/g, '');
   },
-  /** Repeat `s` `count` times, injecting `separator` between copies. */
+  /** Repeat `s` `count` times, injecting `separator` between copies.
+   *  Fractional counts truncate; na/negative/zero counts yield "" (soft-fail, no throw). */
   repeat(s: string, count: number, separator = ''): string {
     if (isNa(s)) return NA as unknown as string;
-    if (count <= 0) return '';
-    return new Array(count).fill(String(s)).join(separator);
+    const n = Math.trunc(count);
+    if (isNa(count) || n <= 0) return '';
+    return new Array(n).fill(String(s)).join(separator);
   },
   /**
    * First substring of `s` matching the regex `regex`, or "" if none.
@@ -251,14 +267,13 @@ export const StrNs = {
     const m = String(s).match(new RegExp(regex));
     return m ? m[0] : '';
   },
-  /** Parse `s` to a float; na when it is not a valid number. */
+  /** Parse `s` to a float; na when it is not a plain decimal/float literal
+   *  (Pine rejects JS-isms like "0x10", "Infinity" and the empty string). */
   tonumber(s: unknown): number {
     if (isNa(s)) return NaN;
     if (typeof s === 'number') return s;
     const str = String(s).trim();
-    if (str === '') return NaN;
-    const n = Number(str);
-    return Number.isNaN(n) ? NaN : n;
+    return /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(str) ? Number(str) : NaN;
   },
   /**
    * Format an epoch-ms timestamp using Java/Pine-style tokens.

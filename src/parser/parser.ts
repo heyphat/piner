@@ -373,12 +373,14 @@ class Parser {
       const varip = this.eat(TokenKind.Keyword, 'varip');
       let declType: PineType | undefined;
       // A field is `[type] name`. A type prefix is present when the type-start
-      // token is followed by a name, a `<` template, or a `[` (legacy `T[]` array).
+      // token is followed by a name, a `<` template, a `[` (legacy `T[]` array), or a
+      // `.` (qualified built-in type — `chart.point p` / `chart.point[] ps`; for the
+      // dotted case isTypeStart() already verified the chain ends in a declared name).
       const n1 = this.peek(1);
       if (this.isTypeStart() &&
           (this.isNameToken(1) ||
            (n1.kind === TokenKind.Op && n1.value === '<') ||
-           (n1.kind === TokenKind.Punct && n1.value === '['))) {
+           (n1.kind === TokenKind.Punct && (n1.value === '[' || n1.value === '.')))) {
         declType = this.parseType();
       }
       const fname = this.expectNameToken();
@@ -562,6 +564,12 @@ class Parser {
 
   private parsePostfix(): Expr {
     let e = this.parsePrimary();
+    // A block-form `if`/`switch` expression ends at its block's DEDENT and takes no
+    // postfix operators in Pine. parseBlock consumed the NL+DEDENT, so the next token
+    // is the FIRST TOKEN OF THE NEXT STATEMENT — a leading `[` (tuple decl), `(`
+    // (parenthesized statement), or `.` must not be misread as postfix on the
+    // if-expression (spurious "expected ]" etc.).
+    if (e.kind === 'If' || e.kind === 'Switch') return e;
     let typeArgs: PineType[] | undefined;
     for (;;) {
       if (this.at(TokenKind.Punct, '.')) {

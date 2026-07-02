@@ -57,7 +57,13 @@ export const MatrixNs = {
   /** Insert a column at `colIndex` (default = append) from `values` (default na-filled). */
   add_col(m: Matrix, colIndex?: number, values?: number[]): void {
     const idx = colIndex == null || Number.isNaN(colIndex) ? m.columns : Math.trunc(colIndex);
-    for (let r = 0; r < m.rows; r++) m.data[r].splice(idx, 0, values ? values[r] : NaN);
+    if (m.rows === 0 && values) { // empty matrix adopts the vector's shape (mirrors add_row)
+      for (const v of values) m.data.push([v]);
+      m.rows = values.length;
+      m.columns = 1;
+      return;
+    }
+    for (let r = 0; r < m.rows; r++) m.data[r].splice(idx, 0, values ? values[r] ?? NaN : NaN);
     m.columns++;
   },
   /** Average of all non-na elements; na (NaN) when the matrix is empty. */
@@ -102,7 +108,8 @@ export const MatrixNs = {
     const c0 = Math.max(0, from_column), c1 = Math.min(m.columns, to_column);
     for (let r = r0; r < r1; r++) for (let c = c0; c < c1; c++) m.data[r][c] = value;
   },
-  /** Appends the rows of m2 to m1 in place (both must have the same column count); returns m1. */
+  /** Appends the rows of m2 to m1 in place (both must have the same column count);
+   *  returns m1. A column-count mismatch is a no-op (Pine errors; soft-fail). */
   concat(m1: Matrix, m2: Matrix): Matrix {
     if (m1.columns !== m2.columns) return m1;
     for (const row of m2.data) { m1.data.push(row.slice()); m1.rows++; }
@@ -141,10 +148,12 @@ export const MatrixNs = {
       row[column2] = tmp;
     }
   },
-  /** Rebuilds the matrix to `rows` x `columns` in place, preserving elements in row-major order. */
+  /** Rebuilds the matrix to `rows` x `columns` in place, preserving elements in row-major order.
+   *  A mismatched element count is a no-op (Pine errors; soft-fail keeps the matrix intact). */
   reshape(m: Matrix, rows: number, columns: number): void {
     const flat: number[] = [];
     for (const row of m.data) for (const v of row) flat.push(v);
+    if (rows * columns !== flat.length) return;
     const data: number[][] = [];
     let k = 0;
     for (let r = 0; r < rows; r++) {
@@ -177,9 +186,10 @@ export const MatrixNs = {
   /**
    * Product of m1 with a matrix, a scalar, or an array (vector).
    * matrix*matrix requires m1.columns === m2.rows; matrix*array treats the array as a
-   * single-column matrix. Returns na on a shape mismatch.
+   * single-column matrix and returns a plain array of length m1.rows (per Pine).
+   * Returns na on a shape mismatch.
    */
-  mult(m1: Matrix, other: Matrix | number | number[]): Matrix | typeof NA {
+  mult(m1: Matrix, other: Matrix | number | number[]): Matrix | number[] | typeof NA {
     if (typeof other === 'number') {
       return { rows: m1.rows, columns: m1.columns, data: m1.data.map((r) => r.map((v) => v * other)) };
     }
@@ -197,7 +207,7 @@ export const MatrixNs = {
       }
       data.push(row);
     }
-    return { rows: m1.rows, columns: m2.columns, data };
+    return Array.isArray(other) ? data.map((r) => r[0]) : { rows: m1.rows, columns: m2.columns, data };
   },
   /** Determinant of a square matrix via Gaussian elimination with partial pivoting; na if not square. */
   det(m: Matrix): number {
@@ -210,11 +220,11 @@ export const MatrixNs = {
     const inverse = invert(m.data.map((r) => r.slice()));
     return inverse ? { rows: m.rows, columns: m.columns, data: inverse } : NA;
   },
-  /** Trace: sum of the main-diagonal elements (na propagates, per Pine arithmetic). */
+  /** Trace: sum of the main-diagonal elements (na propagates, per Pine arithmetic); na if not square. */
   trace(m: Matrix): number {
+    if (m.rows !== m.columns) return NaN;
     let s = 0;
-    const n = Math.min(m.rows, m.columns);
-    for (let i = 0; i < n; i++) s += m.data[i][i];
+    for (let i = 0; i < m.rows; i++) s += m.data[i][i];
     return s;
   },
   /** Rank computed by Gaussian elimination with partial pivoting. */
@@ -237,12 +247,13 @@ export const MatrixNs = {
     }
     return rank;
   },
-  /** Raises a square matrix to the integer `power` (power 0 yields the identity). */
+  /** Raises a square matrix to a non-negative integer `power` (power 0 yields the
+   *  identity); na for negative/fractional/na powers, which Pine does not support. */
   pow(m: Matrix, power: number): Matrix | typeof NA {
     if (m.rows !== m.columns) return NA;
-    const n = m.rows;
-    let result: Matrix = identity(n);
     const p = Math.trunc(power);
+    if (p !== power || p < 0) return NA; // NaN power fails p !== power too
+    let result: Matrix = identity(m.rows);
     for (let i = 0; i < p; i++) {
       const next = MatrixNs.mult(result, m);
       if (next === NA) return NA;

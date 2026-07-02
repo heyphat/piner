@@ -32,12 +32,13 @@ export const MathNs = {
   abs(x: number): number {
     return Math.abs(x);
   },
+  // Pine rounds ties AWAY FROM ZERO (JS Math.round rounds toward +∞).
   round(x: number, precision = 0): number {
     const f = 10 ** precision;
-    return Math.round(x * f) / f;
+    return (Math.sign(x) * Math.round(Math.abs(x) * f)) / f;
   },
   pow(b: number, e: number): number {
-    return b ** e;
+    return na(b) || na(e) ? NaN : b ** e; // guard: JS NaN ** 0 === 1, Pine says na
   },
   sqrt(x: number): number {
     return Math.sqrt(x);
@@ -121,9 +122,9 @@ export const MathNs = {
     return x;
   },
 
-  // Round to the symbol's mintick (piner's fixed syminfo.mintick = 0.01); ties up.
+  // Round to the symbol's mintick (piner's fixed syminfo.mintick = 0.01); ties away from zero.
   round_to_mintick(x: number): number {
-    return na(x) ? NaN : Math.round(x * 100) / 100;
+    return na(x) ? NaN : (Math.sign(x) * Math.round(Math.abs(x) * 100)) / 100;
   },
 
   // n! — returns na for negative n
