@@ -60,6 +60,25 @@ plot(p.isHi ? 1.0 : 0.0, "isHi")
 `,
   },
   {
+    file: 'tradingview-zigzag-7.pine',
+    identity: 'TradingView/ZigZag/7',
+    // Exercises: UDTs with field defaults, exported + private methods, methods called in
+    // FUNCTION form inside the library, defaulted method params, chart.point, array<Pivot>,
+    // and drawing objects held in UDT fields. `draw = false` keeps the run drawing-free so
+    // the plot comparison carries the signal.
+    exercise: `//@version=6
+indicator("uses ZigZag")
+import TradingView/ZigZag/7 as zigzag
+var zigzag.ZigZag zz = zigzag.newInstance(zigzag.Settings.new(0, 10, color(na), false, false, false, false, "Absolute", false))
+changed = zz.update()
+last = zz.lastPivot()
+plot(array.size(zz.pivots), "pivot count")
+plot(changed ? 1 : 0, "changed")
+plot(na(last) ? na : last.end.price, "last pivot price")
+plot(na(last) ? na : (last.isHigh ? 1 : 0), "last pivot side")
+`,
+  },
+  {
     file: 'tvdocs-signal.pine',
     identity: 'TradingViewDocs/Signal/1',
     exercise: `//@version=6

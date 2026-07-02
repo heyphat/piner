@@ -267,6 +267,9 @@ export interface ExportedMethod {
   receiverType: string;
   /** Total parameter count (including the receiver). */
   arity: number;
+  /** Parameters WITHOUT a default value (including the receiver) — the fewest
+   *  arguments a call may pass; the inliner fills the defaulted tail. */
+  minArity: number;
   /** True when the receiver is a user-defined type; false for a builtin type
    *  (array/matrix/map/float/…) whose value cannot be traced to a library identity. */
   receiverIsUdt: boolean;
@@ -326,6 +329,7 @@ function methodInfo(fd: FuncDef): ExportedMethod {
     def: fd,
     receiverType,
     arity: fd.params.length,
+    minArity: fd.params.filter((p) => !p.default).length,
     receiverIsUdt: fd.params[0]?.declType?.kind === 'udt',
     receiverKey: receiverType, // upgraded to the absolute key once the library resolves
   };
@@ -1027,6 +1031,25 @@ export class RefRewriter {
       this.rewriteArgs(e);
       return e;
     }
+    // self method called in FUNCTION form (`newPivotFound(zz, p)` — Pine methods "can be
+    // used as a function or method", receiver as arg 0). Must bind through the METHOD
+    // mangler: the bare ident() rewrite would produce the plain-function mangled name,
+    // which no declaration carries — the call would silently evaluate to na.
+    if (this.self && callee.kind === 'Ident' && !this.localNames?.has(callee.name)) {
+      const pool = this.self.methods.get(callee.name);
+      if (pool) {
+        const chosen = this.resolveOverload(pool, e.args);
+        if (chosen) {
+          e.callee = { kind: 'Ident', name: mangleMethod(this.self.identity, callee.name, chosen.receiverKey, chosen.arity), loc: callee.loc };
+        } else {
+          this.emit(mkDiag(
+            `no overload of method '${callee.name}' in library ${this.self.identity.canonical} matches a call with ${e.args.length} argument(s)`,
+            callee.loc, this.self.identity, this.self.chain));
+        }
+        this.rewriteArgs(e);
+        return e;
+      }
+    }
     // default: rewrite callee + args, then attempt receiver-dispatched method call.
     e.callee = this.expr(callee);
     this.rewriteArgs(e);
@@ -1061,10 +1084,11 @@ export class RefRewriter {
     return undefined;
   }
 
-  /** Pick the overload of a same-named method matching the call: by arity, then (if
-   *  several share that arity) by the receiver/first-argument's absolute UDT type. */
+  /** Pick the overload of a same-named method matching the call: by arity (a defaulted
+   *  tail makes it a range), then (if several match) by the receiver/first-argument's
+   *  absolute UDT type. */
   private resolveOverload(cands: ExportedMethod[], args: Arg[]): ExportedMethod | undefined {
-    const byArity = cands.filter((m) => m.arity === args.length);
+    const byArity = cands.filter((m) => args.length >= m.minArity && args.length <= m.arity);
     if (byArity.length <= 1) return byArity[0];
     const origin = args.length ? this.exprOrigin(args[0].value) : undefined;
     if (!origin) return undefined;
@@ -1127,7 +1151,7 @@ export class RefRewriter {
           if (RefRewriter.receiverMatches(m, origin)) cands.push({ id, m });
         }
       }
-      const matches = cands.filter(({ m }) => m.arity === arity);
+      const matches = cands.filter(({ m }) => arity >= m.minArity && arity <= m.arity);
       if (matches.length === 1) { this.bindMethodCall(e, matches[0].id, matches[0].m); return; }
       if (matches.length > 1) {
         // Two libraries export a same-name method on the same type: the current library's
@@ -1167,7 +1191,7 @@ export class RefRewriter {
     const hits: { id: LibraryIdentity; m: ExportedMethod }[] = [];
     for (const [id, pool] of this.methodPools()) {
       for (const m of pool.get(method) ?? []) {
-        if (!m.receiverIsUdt && m.arity === arity) hits.push({ id, m });
+        if (!m.receiverIsUdt && arity >= m.minArity && arity <= m.arity) hits.push({ id, m });
       }
     }
     if (hits.length === 1) { this.bindMethodCall(e, hits[0].id, hits[0].m); return; }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { compile, Engine, ArrayFeed, type Bar } from '../src/index.js';
+import { compile, Engine, ArrayFeed, type Bar, type LibraryRegistry } from '../src/index.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -30,11 +30,11 @@ const eqNaN = (a: unknown, b: unknown) =>
 
 const bars = makeBars(200);
 
-/** Compile a real script, run both backends, and assert byte-for-byte plot parity. */
-function runReal(file: string, opts: { bars?: Bar[]; inputs?: Record<string, unknown> } = {}) {
+/** Compile a real script, run both backends, and assert byte-for-byte plot + drawing parity. */
+function runReal(file: string, opts: { bars?: Bar[]; inputs?: Record<string, unknown>; libraries?: LibraryRegistry } = {}) {
   const data = opts.bars ?? bars;
   const src = readFileSync(join(HERE, 'pinescripts', file), 'utf8');
-  const c = compile(src);
+  const c = compile(src, opts.libraries ? { libraries: opts.libraries } : undefined);
   const js = new Engine(c, new ArrayFeed(data), { backend: 'js' });
   const ip = new Engine(c, new ArrayFeed(data), { backend: 'interp' });
   const run = { symbol: 'BTCUSD', timeframe: '60', inputs: opts.inputs };
@@ -48,6 +48,9 @@ function runReal(file: string, opts: { bars?: Bar[]; inputs?: Record<string, unk
           throw new Error(`backend divergence in plot ${id} ("${jp.title}") at bar ${i}: js=${jp.data[i]} interp=${ipp.data[i]}`);
         }
       }
+    }
+    if (JSON.stringify(js.drawings) !== JSON.stringify(ip.drawings)) {
+      throw new Error(`backend divergence in drawings (${js.drawings.length} js vs ${ip.drawings.length} interp)`);
     }
     return { c, js };
   });
@@ -100,6 +103,23 @@ describe('real published TradingView scripts', () => {
     expect(byType.box).toBeGreaterThan(0);
     expect(byType.line).toBeGreaterThan(0);
     expect(byType.label).toBeGreaterThan(0);
+  });
+
+  it('TradingView Auto Pitchfork (v6): `import TradingView/ZigZag/7` end-to-end (library-import-export)', async () => {
+    // The motivating script for library imports: it delegates swing detection to the
+    // vendored TradingView/ZigZag/7 library (UDTs + methods + chart.point), then draws
+    // the pitchfork median/levels + linefills from the last three pivots. Its output is
+    // exclusively drawings — runReal asserts they are byte-for-byte identical across
+    // backends.
+    const zigzag: LibraryRegistry = [{
+      key: 'TradingView/ZigZag/7',
+      source: readFileSync(join(HERE, 'pinescripts/libraries/tradingview-zigzag-7.pine'), 'utf8'),
+    }];
+    const { c, js } = await runReal('auto-pitchfork.pine', { libraries: zigzag });
+    expect(c.metadata.title).toBe('Auto Pitchfork');
+    const byType = drawCounts(js);
+    expect(byType.line).toBeGreaterThan(0);     // median + tines
+    expect(byType.linefill).toBeGreaterThan(0); // level bands
   });
 });
 

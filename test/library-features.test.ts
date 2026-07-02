@@ -701,3 +701,82 @@ describe('identity normalization (Req 2.2, 2.3)', () => {
     expect(() => normalizeIdentity({ user: '', lib: 'b', version: '1' })).toThrow(CompileError);
   });
 });
+
+// ───────────────────────── method call forms (ZigZag/7 fixes) ─────────────────────────
+// Regressions found by vendoring TradingView/ZigZag/7 (the auto-pitchfork dependency):
+// 1. a library body calling its OWN method in FUNCTION form (`f(recv, …)`) bound to the
+//    plain-function mangled name — which no declaration carries — and silently evaluated
+//    to na (no push, no diagnostic);
+// 2. methods with a defaulted trailing parameter were dispatched by EXACT arity, so any
+//    call omitting the tail reported "no method … with N argument(s)".
+describe('library import — methods in function form + defaulted parameters', () => {
+  const LIB = `//@version=5
+library("Acc")
+export type Acc
+    array<float> xs
+
+// a defaulted tail: callable with 1 value or 2
+export method add(series Acc this, float value, float scale = 2.0) =>
+    this.xs.push(value * scale)
+    this.xs.size()
+
+// non-exported method, called below in FUNCTION form (receiver as arg 0)
+method bump(series Acc this, float value) =>
+    this.xs.push(value)
+
+export method total(series Acc this) =>
+    float s = 0.0
+    if this.xs.size() > 0
+        for i = 0 to this.xs.size() - 1
+            s += this.xs.get(i)
+    s
+
+// exercises the function-form call path inside the library body
+export addTwice(series Acc acc, float value) =>
+    bump(acc, value)
+    bump(acc, value)
+    acc.xs.size()
+`;
+  const reg: LibraryRegistry = [{ key: 'u/Acc/1', source: LIB }];
+
+  it('a library method called in FUNCTION form inside its own body mutates the receiver', async () => {
+    const src = `//@version=6
+indicator("c")
+import u/Acc/1 as a
+var a.Acc acc = a.Acc.new(array.new<float>())
+n = bar_index == 0 ? a.addTwice(acc, 5.0) : array.size(acc.xs)
+plot(n, "count")
+plot(acc.total(), "total")
+`;
+    const eng = await bothBackends(compile(src, { libraries: reg }));
+    expect(eng.outputs.plots.get(0)!.data.at(-1)).toBe(2); // both bump() calls landed
+    expect(eng.outputs.plots.get(1)!.data.at(-1)).toBe(10); // 5 + 5
+  });
+
+  it('a defaulted trailing parameter lets calls omit the tail (method, function, and alias form)', async () => {
+    const src = `//@version=6
+indicator("c")
+import u/Acc/1 as a
+var a.Acc acc = a.Acc.new(array.new<float>())
+if bar_index == 0
+    acc.add(3.0)          // method form, default scale 2 → 6
+    acc.add(3.0, 3.0)     // method form, explicit → 9
+    a.add(acc, 1.0)       // alias/function form, default → 2
+plot(acc.total(), "total")
+`;
+    const eng = await bothBackends(compile(src, { libraries: reg }));
+    expect(eng.outputs.plots.get(0)!.data.at(-1)).toBe(17); // 6 + 9 + 2
+  });
+
+  it('a call below the minimum arity still reports a clean diagnostic', () => {
+    const src = `//@version=6
+indicator("c")
+import u/Acc/1 as a
+var a.Acc acc = a.Acc.new(array.new<float>())
+acc.add()
+plot(1)
+`;
+    const err = throwsCompile(() => compile(src, { libraries: reg }));
+    expect(err.message).toContain('add');
+  });
+});
