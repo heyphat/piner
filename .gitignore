@@ -18,3 +18,4 @@ src/*.js
 .kiro
 .claude
 .gemini
+dev-docs
