@@ -3,11 +3,14 @@
  *
  * Execution model (Pine default): the script runs on each bar's close and queues
  * orders; the broker fills market orders at the NEXT bar's open, and checks
- * stop/limit/exit brackets against each bar's range. Position, realized/open PnL,
- * an equity curve, and a closed-trade list are tracked. v1 covers the common
- * surface (market entry/order/close/exit with reverse + pyramiding, stop/limit
- * entries, exit stop/limit/profit/loss); trailing stops and per-trade
- * introspection (`strategy.closedtrades.profit(i)`) are follow-ups.
+ * stop/limit/exit brackets against each bar's range. The position is kept as
+ * per-entry LOTS (id, qty, fill price, fill bar, entry commission) so closes are
+ * FIFO and every entry→exit pair books its own closed-trade row, TradingView-style.
+ * Position, realized/open PnL, an equity curve (with intrabar drawdown/run-up
+ * extremes), and the closed-trade list are tracked. Covers market/stop/limit
+ * entries, close/close_all, exit brackets (per-entry profit/loss ticks, absolute
+ * stop/limit, trailing stops walked along the assumed intrabar path), pyramiding,
+ * slippage, commission, and process_orders_on_close.
  */
 import { isNa } from '../series.js';
 
@@ -43,8 +46,9 @@ export interface StrategySettings {
   commissionValue: number;
   pyramiding: number;
   slippage: number; // in ticks
-  /** When true, market orders fill at the CLOSE of the bar they were created on (Pine's
-   *  process_orders_on_close) instead of the next bar's open. Default false. */
+  /** When true, the broker runs an extra fill pass on each bar's CLOSE tick (Pine's
+   *  process_orders_on_close) so market orders fill at the same bar's close instead
+   *  of the next bar's open. Default false. */
   processOrdersOnClose: boolean;
 }
 
@@ -61,16 +65,26 @@ interface Order {
 
 interface ExitBracket {
   id: string;
-  fromEntry: string;
+  fromEntry: string; // '' → applies to every open entry (and future ones, per Pine)
   qty?: number;
-  profit?: number; // ticks
-  loss?: number; // ticks
+  profit?: number; // ticks (measured from each entry lot's own fill price)
+  loss?: number; // ticks (measured from each entry lot's own fill price)
   stop?: number; // price
   limit?: number; // price
   trailPrice?: number; // activation price
   trailPoints?: number; // activation distance from entry (ticks)
   trailOffset?: number; // trail distance behind the extreme (ticks)
   trailStop?: number; // current ratcheting trailing-stop level (price), NaN until armed
+  filled?: number; // contracts this bracket has closed (caps at `qty` when set)
+}
+
+/** One open entry: `strategy.entry`/`order` fills append these; closes consume them FIFO. */
+interface Lot {
+  id: string;
+  qty: number; // unsigned contracts remaining
+  price: number; // this entry's fill price
+  bar: number; // bar index of the fill
+  fee: number; // entry-side commission still carried (pro-rated out as the lot closes)
 }
 
 export interface ClosedTrade {
@@ -99,22 +113,19 @@ export class StrategyBroker {
     processOrdersOnClose: false,
   };
 
-  // position (aggregate)
+  // position (aggregate size; per-entry detail lives in entryLots)
   size = 0; // signed
-  avgPrice = NaN;
+  /** The entry id that INITIALLY opened the live position (survives partial closes). */
   private entryId = '';
-  private entryBar = 0;
-  // Per-entry-id open lots making up the current position (unsigned contracts, in add order).
-  // The aggregate size/avgPrice model above can't isolate a single entry's quantity, so this
-  // lets `strategy.close(id)` close exactly the part opened under `id` (TradingView keys close
-  // orders by entry id). Without it, closing anything but the FIRST entry's id was a no-op.
-  private entryLots: { id: string; qty: number }[] = [];
-  // Number of same-direction entry/order adds making up the current position. Drives the
-  // pyramiding cap (TradingView allows `pyramiding` same-side entries); reset to 0 when the
-  // position is fully closed. v1 used a 0/1 stub which let pyramiding ≥ 2 add without bound.
+  // Per-entry open lots making up the current position, in fill order (FIFO).
+  // Each lot carries its own fill price/bar/commission so `strategy.close(id)`,
+  // `strategy.exit(from_entry=…)`, per-entry profit/loss tick levels, and the
+  // one-trade-row-per-entry ledger all resolve against the right entry.
+  private entryLots: Lot[] = [];
+  // Number of same-direction entry adds making up the current position. Drives the
+  // pyramiding cap (TradingView allows `pyramiding` same-side entries); reset to 0
+  // when the position is fully closed.
   private entryCount = 0;
-  // entry-side commission carried on the open position (pro-rated into trade profit on close)
-  private entryCommission = 0;
 
   realized = 0;
   grossProfit = 0;
@@ -141,7 +152,8 @@ export class StrategyBroker {
   // Fields captured/restored around every speculative tick, split by copy strategy so
   // rollback stays correct without deep-cloning the ever-growing history arrays each tick:
   //  DEEP    — arrays whose element objects mutate in place (orders gain `triggered`,
-  //            brackets ratchet `trailStop`, lots shed `qty`): must be structuredClone'd.
+  //            brackets ratchet `trailStop`/`filled`, lots shed `qty`/`fee`): must be
+  //            structuredClone'd.
   //  APPEND  — arrays only appended, with entries never mutated after (closed trades,
   //            per-bar equity): a shallow slice suffices (a later push/assign replaces the
   //            array, leaving the snapshot's copy untouched).
@@ -149,7 +161,7 @@ export class StrategyBroker {
   private static readonly SNAP_DEEP = ['pending', 'exits', 'entryLots'] as const;
   private static readonly SNAP_APPEND = ['closedTrades', 'equityCurve'] as const;
   private static readonly SNAP_SCALARS = [
-    'size', 'avgPrice', 'entryId', 'entryBar', 'entryCount', 'entryCommission',
+    'size', 'entryId', 'entryCount',
     'realized', 'grossProfit', 'grossLoss', 'wins', 'losses', 'evens',
     'peakEquity', 'valleyEquity', 'maxDrawdown', 'maxDrawdownPercent', 'maxRunup', 'maxRunupPercent',
     'maxContractsAll', 'maxContractsLong', 'maxContractsShort',
@@ -180,7 +192,16 @@ export class StrategyBroker {
   get equity(): number { return this.settings.initialCapital + this.realized + this.openProfit; }
   get openProfit(): number { return this.size === 0 ? 0 : this.size * (this.host.close - this.avgPrice); }
   get netProfit(): number { return this.realized; }
-  /** The entry id of the live position (empty while flat). */
+  /** Weighted average fill price of the OPEN lots (NaN while flat). Derived from the
+   *  lots so a partial FIFO close re-prices the remainder, as TradingView does. */
+  get avgPrice(): number {
+    let q = 0, pq = 0;
+    for (const lt of this.entryLots) { q += lt.qty; pq += lt.qty * lt.price; }
+    return q > 0 ? pq / q : NaN;
+  }
+  /** Open-trade count: one per open entry lot (TradingView's strategy.opentrades). */
+  get openTradeCount(): number { return this.entryLots.length; }
+  /** The entry id that opened the live position (empty while flat). */
   get positionEntryName(): string { return this.size === 0 ? '' : this.entryId; }
 
   // ── trade-return statistics (computed from the closed-trade list) ─
@@ -267,7 +288,7 @@ export class StrategyBroker {
     if (i >= 0) { bracket.trailStop = this.exits[i].trailStop; this.exits[i] = bracket; } else this.exits.push(bracket); // keep the trailing ratchet
   }
 
-  /** A closed trade's field (or the open position as trade 0 for `opentrades`). */
+  /** A closed trade's field, or an open entry lot's (one open trade per lot). */
   tradeField(scope: string, field: string, i: number): number | string {
     const k = Math.trunc(i);
     if (scope === 'closedtrades') {
@@ -285,146 +306,217 @@ export class StrategyBroker {
         default: return NaN; // commission / max_runup / *_comment etc. not tracked in v1
       }
     }
-    if (this.size === 0 || k !== 0) return NaN; // opentrades: single aggregate position
+    const lot = this.entryLots[k];
+    if (!lot) return NaN;
+    const dir = sign(this.size);
     switch (field) {
-      case 'profit': return this.openProfit;
-      case 'entry_price': return this.avgPrice;
-      case 'entry_bar_index': return this.entryBar;
-      case 'size': return this.size;
-      case 'entry_id': return this.entryId;
+      case 'profit': return dir * (this.host.close - lot.price) * lot.qty;
+      case 'entry_price': return lot.price;
+      case 'entry_bar_index': return lot.bar;
+      case 'size': return dir * lot.qty;
+      case 'entry_id': return lot.id;
       default: return NaN;
     }
   }
-  cancel(id: string): void { this.pending = this.pending.filter((o) => o.id !== id || o.otype === 'market'); }
-  cancel_all(): void { this.pending = this.pending.filter((o) => o.otype === 'market'); }
+  /** Market orders can't be canceled (they execute on the next tick regardless);
+   *  everything else keyed by the id goes — including exit brackets, per Pine. */
+  cancel(id: string): void {
+    this.pending = this.pending.filter((o) => o.id !== id || o.otype === 'market');
+    this.exits = this.exits.filter((e) => e.id !== id);
+  }
+  cancel_all(): void {
+    this.pending = this.pending.filter((o) => o.otype === 'market');
+    this.exits = [];
+  }
 
-  // ── per-bar processing (called by the driver at bar open) ─
+  // ── per-bar processing (driver hooks) ─────────────────────
+  /** Bar open (before the script body): fill against the bar's full range. */
   onBar(): void {
     if (!this.active) return;
     const { open, high, low } = this.host;
-    const slip = this.settings.slippage * this.host.mintick;
-
-    // 1. market orders fill at the open
-    const stillPending: Order[] = [];
-    for (const o of this.pending) {
-      if (o.otype === 'market') {
-        this.fill(o, open + sign(o.dir || -sign(this.size)) * slip);
-      } else if (o.otype === 'limit') {
-        // buy limit: gap through the price fills at the (better) open, else at the price if low <= it
-        const p = o.price!;
-        if (o.dir === DIR_LONG ? open <= p : open >= p) this.fill(o, open);
-        else if (o.dir === DIR_LONG ? low <= p : high >= p) this.fill(o, p);
-        else stillPending.push(o);
-      } else if (o.otype === 'stop') {
-        // buy stop: gap through the price fills at the open; slippage applies (adverse)
-        const p = o.price!;
-        if (o.dir === DIR_LONG ? open >= p : open <= p) this.fill(o, open + o.dir * slip);
-        else if (o.dir === DIR_LONG ? high >= p : low <= p) this.fill(o, p + o.dir * slip);
-        else stillPending.push(o);
-      } else { // stoplimit: the stop arms a resting limit, which then fills at the limit price
-        const wasTriggered = o.triggered;
-        if (!o.triggered) {
-          const stopHit = o.dir === DIR_LONG ? high >= o.price! : low <= o.price!;
-          if (stopHit) o.triggered = true; // armed — may still fill this same bar below
-        }
-        if (o.triggered) {
-          const p = o.limit!;
-          // a limit resting since a PRIOR bar is open-bounded like any limit order
-          if (wasTriggered && (o.dir === DIR_LONG ? open <= p : open >= p)) this.fill(o, open);
-          else if (o.dir === DIR_LONG ? low <= p : high >= p) this.fill(o, p);
-          else stillPending.push(o); // keep `triggered`
-        } else {
-          stillPending.push(o);
-        }
-      }
-    }
-    this.pending = stillPending;
-
-    // 2. exit brackets against the bar range
-    if (this.size !== 0 && this.exits.length) this.processExits();
-
-    // 3. mark-to-market at close
-    this.markToMarket();
+    this.processTick(open, high, low, open);
   }
 
   /**
-   * Fill orders created on THIS bar at the bar's CLOSE — Pine's process_orders_on_close.
-   * Called by the driver AFTER the script body runs. Only MARKET orders fill here (the
-   * next-bar-open path in onBar() therefore finds nothing left for them); resting
-   * limit/stop orders still trigger intrabar on later bars. Re-marks this bar's equity.
+   * process_orders_on_close — an extra fill pass AFTER the script body runs, on the
+   * bar's CLOSE treated as a one-price tick (o=h=l=close). Market orders created this
+   * bar fill here at the close; limit/stop orders and exit brackets are checked against
+   * the close price ONLY — never the bar's earlier range, which predates the orders.
    */
   onBarClose(): void {
     if (!this.active || !this.settings.processOrdersOnClose) return;
     const { close } = this.host;
-    const slip = this.settings.slippage * this.host.mintick;
-    const stillPending: Order[] = [];
-    for (const o of this.pending) {
-      if (o.otype === 'market') this.fill(o, close + sign(o.dir || -sign(this.size)) * slip);
-      else stillPending.push(o);
-    }
-    this.pending = stillPending;
-    if (this.size !== 0 && this.exits.length) this.processExits();
-    this.markToMarket();
+    this.processTick(close, close, close, close);
   }
 
-  private markToMarket(): void {
+  /** One fill pass over the tick's assumed range [l, h] starting at `o`;
+   *  market orders fill at `marketPx`. Re-marks this bar's equity. */
+  private processTick(o: number, h: number, l: number, marketPx: number): void {
+    const slip = this.settings.slippage * this.host.mintick;
+
+    // 1. pending orders
+    const stillPending: Order[] = [];
+    for (const or of this.pending) {
+      if (or.otype === 'market') {
+        this.fill(or, marketPx + sign(or.dir || -sign(this.size)) * slip);
+      } else if (or.otype === 'limit') {
+        // buy limit: gap through the price fills at the (better) open, else at the price if low <= it
+        const p = or.price!;
+        if (or.dir === DIR_LONG ? o <= p : o >= p) this.fill(or, o);
+        else if (or.dir === DIR_LONG ? l <= p : h >= p) this.fill(or, p);
+        else stillPending.push(or);
+      } else if (or.otype === 'stop') {
+        // buy stop: gap through the price fills at the open; slippage applies (adverse)
+        const p = or.price!;
+        if (or.dir === DIR_LONG ? o >= p : o <= p) this.fill(or, o + or.dir * slip);
+        else if (or.dir === DIR_LONG ? h >= p : l <= p) this.fill(or, p + or.dir * slip);
+        else stillPending.push(or);
+      } else { // stoplimit: the stop arms a resting limit, which then fills at the limit price
+        const wasTriggered = or.triggered;
+        if (!or.triggered) {
+          const stopHit = or.dir === DIR_LONG ? h >= or.price! : l <= or.price!;
+          if (stopHit) or.triggered = true; // armed — may still fill this same tick below
+        }
+        if (or.triggered) {
+          const p = or.limit!;
+          // a limit resting since a PRIOR tick is open-bounded like any limit order
+          if (wasTriggered && (or.dir === DIR_LONG ? o <= p : o >= p)) this.fill(or, o);
+          else if (or.dir === DIR_LONG ? l <= p : h >= p) this.fill(or, p);
+          else stillPending.push(or); // keep `triggered`
+        } else {
+          stillPending.push(or);
+        }
+      }
+    }
+    this.pending = stillPending;
+
+    // 2. exit brackets against the tick's range
+    if (this.size !== 0 && this.exits.length) this.processExits(o, h, l);
+
+    // 3. mark-to-market
+    this.markToMarket(o, h, l);
+  }
+
+  /** Update the equity curve and drawdown/run-up extremes. TradingView computes the
+   *  extremes from INTRABAR equity, so walk the bar's assumed price path
+   *  (open → nearer extreme → farther extreme → close), not just the close. */
+  private markToMarket(o: number, h: number, l: number): void {
     const eq = this.equity;
     this.equityCurve[this.host.idx] = eq;
-    if (eq > this.peakEquity) this.peakEquity = eq;
-    if (eq < this.valleyEquity) this.valleyEquity = eq;
-    const dd = this.peakEquity - eq;
-    this.maxDrawdown = Math.max(this.maxDrawdown, dd);
-    if (this.peakEquity > 0) this.maxDrawdownPercent = Math.max(this.maxDrawdownPercent, (dd / this.peakEquity) * 100);
-    const ru = eq - this.valleyEquity;
-    this.maxRunup = Math.max(this.maxRunup, ru);
-    if (this.valleyEquity > 0) this.maxRunupPercent = Math.max(this.maxRunupPercent, (ru / this.valleyEquity) * 100);
+    let pts: number[];
+    if (this.size === 0) {
+      pts = [eq];
+    } else {
+      const base = this.settings.initialCapital + this.realized;
+      const path = h - o < o - l ? [o, h, l, this.host.close] : [o, l, h, this.host.close];
+      pts = path.map((px) => base + this.size * (px - this.avgPrice));
+    }
+    for (const v of pts) {
+      if (v > this.peakEquity) this.peakEquity = v;
+      if (v < this.valleyEquity) this.valleyEquity = v;
+      const dd = this.peakEquity - v;
+      if (dd > this.maxDrawdown) this.maxDrawdown = dd;
+      if (this.peakEquity > 0) this.maxDrawdownPercent = Math.max(this.maxDrawdownPercent, (dd / this.peakEquity) * 100);
+      const ru = v - this.valleyEquity;
+      if (ru > this.maxRunup) this.maxRunup = ru;
+      if (this.valleyEquity > 0) this.maxRunupPercent = Math.max(this.maxRunupPercent, (ru / this.valleyEquity) * 100);
+    }
     this.recordExposure();
   }
 
-  private processExits(): void {
-    const { open, high, low } = this.host;
-    const dir = sign(this.size);
-    const slip = this.settings.slippage * this.host.mintick;
+  private processExits(o: number, h: number, l: number): void {
+    const mt = this.host.mintick;
+    const slip = this.settings.slippage * mt;
     // intrabar path heuristic: the extreme nearer the open is assumed hit first
-    const highFirst = high - open < open - low;
+    const highFirst = h - o < o - l;
+    // Pine: when BOTH an absolute price and a tick-distance resolve the same side
+    // (stop+loss, limit+profit), the level expected to trigger FIRST wins — i.e. the
+    // one nearer the market (long stop: the higher; long limit: the lower).
+    const firstOf = (a: number | undefined, b: number | undefined, wantHigh: boolean): number | undefined =>
+      a == null ? b : b == null ? a : wantHigh ? Math.max(a, b) : Math.min(a, b);
     const keep: ExitBracket[] = [];
     for (const ex of this.exits) {
       if (this.size === 0) break;
-      // resolve stop/loss and limit/profit to prices
-      let stopPx = ex.stop;
-      let limitPx = ex.limit;
-      if (ex.loss != null) stopPx = this.avgPrice - dir * ex.loss * this.host.mintick;
-      if (ex.profit != null) limitPx = this.avgPrice + dir * ex.profit * this.host.mintick;
-      // the exit order's direction is -dir: stops take adverse slippage, limits don't
-      const fillStop = (px: number) => this.closePosition(px - dir * slip, ex.qty);
-      const fillLimit = (px: number) => this.closePosition(px, ex.qty);
-      // open-gap fills happen on the bar's first tick and pre-empt the intrabar path;
-      // a gap through the level fills at the open (stop: worse, limit: better)
-      if (stopPx != null && (dir === DIR_LONG ? open <= stopPx : open >= stopPx)) { fillStop(open); continue; }
-      if (limitPx != null && (dir === DIR_LONG ? open >= limitPx : open <= limitPx)) { fillLimit(open); continue; }
-      const stopHit = stopPx != null && (dir === DIR_LONG ? low <= stopPx : high >= stopPx);
-      const limitHit = limitPx != null && (dir === DIR_LONG ? high >= limitPx : low <= limitPx);
-      // for a long the stop sits on the low side, the limit on the high side (short: swapped)
-      const stopFirst = dir === DIR_LONG ? !highFirst : highFirst;
-      if (stopHit && (stopFirst || !limitHit)) { fillStop(stopPx!); continue; }
-      if (limitHit) { fillLimit(limitPx!); continue; }
-      // trailing stop: arm at trail_price (or entry ± trail_points·tick), then
-      // ratchet a stop trail_offset ticks behind the favorable extreme.
-      if (ex.trailOffset != null && (ex.trailPoints != null || ex.trailPrice != null)) {
-        const mt = this.host.mintick;
-        const activation = ex.trailPrice != null ? ex.trailPrice : this.avgPrice + dir * (ex.trailPoints ?? 0) * mt;
-        const armed = !Number.isNaN(ex.trailStop!) || (dir === DIR_LONG ? high >= activation : low <= activation);
-        if (armed) {
-          const candidate = dir === DIR_LONG ? high - ex.trailOffset * mt : low + ex.trailOffset * mt;
-          ex.trailStop = Number.isNaN(ex.trailStop!) ? candidate
-            : dir === DIR_LONG ? Math.max(ex.trailStop!, candidate) : Math.min(ex.trailStop!, candidate);
-          const hit = dir === DIR_LONG ? low <= ex.trailStop! : high >= ex.trailStop!;
-          if (hit) { fillStop(ex.trailStop!); continue; }
+      const dir = sign(this.size);
+      let remaining = ex.qty != null ? ex.qty - (ex.filled ?? 0) : Infinity;
+      const book = (lot: Lot, take: number, px: number, fee?: number) => {
+        this.closeLot(lot, take, px, fee);
+        ex.filled = (ex.filled ?? 0) + take;
+        remaining -= take;
+      };
+      // Each eligible entry lot gets its OWN exit order: profit/loss tick levels are
+      // measured from that lot's fill price (absolute stop/limit prices are shared).
+      for (const lot of this.entryLots.filter((lt) => !ex.fromEntry || lt.id === ex.fromEntry)) {
+        if (remaining <= 0 || this.size === 0) break;
+        const stopPx = firstOf(ex.stop, ex.loss != null ? lot.price - dir * ex.loss * mt : undefined, dir === DIR_LONG);
+        const limitPx = firstOf(ex.limit, ex.profit != null ? lot.price + dir * ex.profit * mt : undefined, dir === DIR_SHORT);
+        const take = Math.min(lot.qty, remaining);
+        // open-gap fills happen on the tick's first price and pre-empt the intrabar path;
+        // a gap through the level fills at the open (stop: worse + slippage, limit: better)
+        if (stopPx != null && (dir === DIR_LONG ? o <= stopPx : o >= stopPx)) { book(lot, take, o - dir * slip); continue; }
+        if (limitPx != null && (dir === DIR_LONG ? o >= limitPx : o <= limitPx)) { book(lot, take, o); continue; }
+        const stopHit = stopPx != null && (dir === DIR_LONG ? l <= stopPx : h >= stopPx);
+        const limitHit = limitPx != null && (dir === DIR_LONG ? h >= limitPx : l <= limitPx);
+        // for a long the stop sits on the low side, the limit on the high side (short: swapped)
+        const stopFirst = dir === DIR_LONG ? !highFirst : highFirst;
+        if (stopHit && (stopFirst || !limitHit)) { book(lot, take, stopPx! - dir * slip); continue; }
+        if (limitHit) book(lot, take, limitPx!);
+      }
+      // trailing stop (position-aggregate): arm at trail_price (or entry ± trail_points·tick),
+      // ratchet trail_offset ticks behind the favorable extreme, fill where the path crosses it.
+      if (this.size !== 0 && remaining > 0 && ex.trailOffset != null && (ex.trailPoints != null || ex.trailPrice != null)) {
+        const fillPx = this.trailFill(ex, sign(this.size), o, h, l);
+        if (fillPx != null) {
+          const px = fillPx - sign(this.size) * slip; // a stop order → adverse slippage
+          const lots = this.entryLots.filter((lt) => !ex.fromEntry || lt.id === ex.fromEntry);
+          const group = Math.min(remaining, lots.reduce((a, lt) => a + lt.qty, 0));
+          for (const lot of lots) { // one stop order → one order-level fee, pro-rated
+            if (remaining <= 0) break;
+            const take = Math.min(lot.qty, remaining);
+            book(lot, take, px, this.commission(group, px) * (take / group));
+          }
         }
       }
-      keep.push(ex); // unfilled — a bracket is spent once it fills
+      // A bracket is spent once it has filled its qty cap or exhausted its eligible lots;
+      // an unfilled one — or one still holding eligible lots — stays armed. A bracket with
+      // no matching lots yet (its from_entry hasn't filled) waits for the entry.
+      const anyLeft = this.entryLots.some((lt) => !ex.fromEntry || lt.id === ex.fromEntry);
+      const spent = (ex.filled ?? 0) > 0 && (!anyLeft || (ex.qty != null && (ex.filled ?? 0) >= ex.qty - 1e-9));
+      if (!spent) keep.push(ex);
     }
     this.exits = this.size === 0 ? [] : keep;
+  }
+
+  /**
+   * Advance a trailing stop across this tick's assumed intrabar path
+   * (open → nearer extreme → farther extreme → close): arm when the path reaches the
+   * activation level, ratchet `trail_offset` ticks behind each favorable price, and
+   * report a hit the moment the path crosses the ratcheted level — so a low that
+   * occurs BEFORE arming can no longer trigger, and the ratchet can't use an extreme
+   * the path hasn't reached yet. Mutates `ex.trailStop`. Returns the fill price
+   * (the stop level, or the open on a gap-through), else undefined.
+   */
+  private trailFill(ex: ExitBracket, dir: number, o: number, h: number, l: number): number | undefined {
+    const mt = this.host.mintick;
+    const off = ex.trailOffset! * mt;
+    const act = ex.trailPrice != null ? ex.trailPrice : this.avgPrice + dir * (ex.trailPoints ?? 0) * mt;
+    const path = h - o < o - l ? [o, h, l, this.host.close] : [o, l, h, this.host.close];
+    let stop = ex.trailStop!; // NaN until armed
+    for (let i = 0; i < path.length; i++) {
+      const p = path[i];
+      if (!Number.isNaN(stop) && (dir === DIR_LONG ? p <= stop : p >= stop)) {
+        ex.trailStop = stop;
+        return i === 0 ? p : stop; // an opening gap through the stop fills at the open
+      }
+      const cand = p - dir * off;
+      if (Number.isNaN(stop)) {
+        if (dir === DIR_LONG ? p >= act : p <= act) stop = cand; // armed
+      } else {
+        stop = dir === DIR_LONG ? Math.max(stop, cand) : Math.min(stop, cand);
+      }
+    }
+    ex.trailStop = stop;
+    return undefined;
   }
 
   private fill(o: Order, price: number): void {
@@ -463,27 +555,21 @@ export class StrategyBroker {
     this.openOrAdd(o, dir, qty, price);
   }
 
-  /** Open a new position (or add to the same-direction one) and book the entry commission. */
+  /** Open a new position (or add a lot to the same-direction one) and book the entry commission. */
   private openOrAdd(o: Order, dir: number, qty: number, price: number): void {
+    const fee = this.commission(qty, price);
     if (this.size === 0) {
       this.size = dir * qty;
-      this.avgPrice = price;
       this.entryId = o.id;
-      this.entryBar = this.host.idx;
       this.entryCount = 1;
-      this.entryCommission = 0;
-      this.entryLots = [{ id: o.id, qty }];
+      this.entryLots = [{ id: o.id, qty, price, bar: this.host.idx, fee }];
     } else {
-      const newSize = this.size + dir * qty;
-      this.avgPrice = (this.avgPrice * Math.abs(this.size) + price * qty) / Math.abs(newSize);
-      this.size = newSize;
+      this.size += dir * qty;
       this.entryCount += 1;
-      this.entryLots.push({ id: o.id, qty });
+      this.entryLots.push({ id: o.id, qty, price, bar: this.host.idx, fee });
     }
-    const fee = this.commission(qty, price);
-    this.entryCommission += fee; // carried on the open position; pro-rated into trade profit
     this.recordExposure();
-    this.realized -= fee;
+    this.realized -= fee; // carried per-lot; pro-rated into each trade's profit on close
   }
 
   /** Live closed-trade list + equity curve for the engine's strategy report. */
@@ -503,50 +589,56 @@ export class StrategyBroker {
   }
 
   /**
-   * Close some (or all) of the open position at `price`.
+   * Close some (or all) of the open position at `price`, consuming lots FIFO and
+   * booking one closed-trade row per entry lot touched (TradingView's ledger shape).
    * @param qty      max contracts to close (default: the whole eligible quantity).
    * @param entryId  when set, restrict the close to the lots opened under this entry id
    *                 (`strategy.close(id)`), a no-op if that id holds nothing open.
    */
   private closePosition(price: number, qty?: number, entryId?: string): void {
     if (this.size === 0) return;
-    const dir = sign(this.size);
-    // Quantity eligible to close: the whole position, or just the named entry's open lots.
-    const eligible = entryId != null
-      ? this.entryLots.reduce((a, l) => a + (l.id === entryId ? l.qty : 0), 0)
-      : Math.abs(this.size);
+    const lots = this.entryLots.filter((lt) => entryId == null || lt.id === entryId);
+    const eligible = lots.reduce((a, lt) => a + lt.qty, 0);
     if (eligible <= 0) return; // named entry id has no open quantity → no-op
     const closeQty = qty != null && !Number.isNaN(qty) ? Math.min(qty, eligible) : eligible;
     if (closeQty <= 0) return;
-    // trade profit nets BOTH sides' commission; the entry side was already charged to
-    // `realized` at fill time, so only the exit side moves realized here.
-    const entryFee = this.entryCommission * (closeQty / Math.abs(this.size));
-    const profit = dir * (price - this.avgPrice) * closeQty - this.commission(closeQty, price) - entryFee;
-    this.entryCommission -= entryFee;
+    // one market order → one order-level exit fee, pro-rated across the trade rows
+    const totalFee = this.commission(closeQty, price);
+    let rem = closeQty;
+    for (const lot of lots) {
+      if (rem <= 0) break;
+      const take = Math.min(lot.qty, rem);
+      this.closeLot(lot, take, price, totalFee * (take / closeQty));
+      rem -= take;
+    }
+  }
+
+  /**
+   * Close `take` contracts of ONE entry lot at `price`, booking its closed-trade row.
+   * Trade profit nets both sides' commission: this fill's exit fee (`exitFee`, defaulting
+   * to a standalone order's commission — group fills pass a pro-rated share) plus the
+   * lot's carried entry fee. The entry side was already charged to `realized` at fill
+   * time, so only the exit side moves realized here.
+   */
+  private closeLot(lot: Lot, take: number, price: number, exitFee = this.commission(take, price)): void {
+    const dir = sign(this.size);
+    const entryFee = lot.fee * (take / lot.qty);
+    lot.fee -= entryFee;
+    const profit = dir * (price - lot.price) * take - exitFee - entryFee;
     this.realized += profit + entryFee;
     if (profit > 0) { this.grossProfit += profit; this.wins++; }
     else if (profit < 0) { this.grossLoss += -profit; this.losses++; }
     else this.evens++;
     this.closedTrades.push({
-      entryId: entryId ?? this.entryId, dir, qty: closeQty, entryPrice: this.avgPrice, exitPrice: price,
-      entryBar: this.entryBar, exitBar: this.host.idx, profit, cumProfit: this.realized,
+      entryId: lot.id, dir, qty: take, entryPrice: lot.price, exitPrice: price,
+      entryBar: lot.bar, exitBar: this.host.idx, profit, cumProfit: this.realized,
     });
-    this.size = dir * (Math.abs(this.size) - closeQty);
-    this.reduceLots(closeQty, entryId);
-    if (this.size === 0) { this.avgPrice = NaN; this.exits = []; this.entryCount = 0; this.entryCommission = 0; this.entryLots = []; }
-  }
-
-  /** Remove `qty` contracts from the open lots, oldest first; restricted to `entryId` when set. */
-  private reduceLots(qty: number, entryId?: string): void {
-    let rem = qty;
-    for (const lot of this.entryLots) {
-      if (rem <= 0) break;
-      if (entryId != null && lot.id !== entryId) continue;
-      const take = Math.min(lot.qty, rem);
-      lot.qty -= take;
-      rem -= take;
+    lot.qty -= take;
+    if (lot.qty <= 1e-9) this.entryLots.splice(this.entryLots.indexOf(lot), 1);
+    this.size = dir * (Math.abs(this.size) - take);
+    if (Math.abs(this.size) <= 1e-9 || this.entryLots.length === 0) {
+      this.size = 0; this.entryId = ''; this.entryCount = 0; this.entryLots = []; this.exits = [];
     }
-    this.entryLots = this.entryLots.filter((l) => l.qty > 1e-9);
   }
 }
 
@@ -596,7 +688,7 @@ export function makeStrategyNs(b: StrategyBroker) {
     get losstrades() { return b.losses; },
     get eventrades() { return b.evens; },
     get closedtrades() { return b.closedTrades.length; },
-    get opentrades() { return b.size === 0 ? 0 : 1; },
+    get opentrades() { return b.openTradeCount; },
     get initial_capital() { return b.settings.initialCapital; },
     get max_drawdown() { return b.maxDrawdown; },
     get account_currency() { return 'USD'; },
@@ -624,4 +716,3 @@ export function makeStrategyNs(b: StrategyBroker) {
     get margin_liquidation_price() { return NaN; },
   };
 }
-

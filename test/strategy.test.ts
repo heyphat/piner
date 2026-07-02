@@ -232,17 +232,112 @@ describe('strategy — broker simulator', () => {
   });
 
   it('trailing stop (trail_points/trail_offset) ratchets then closes on a reversal', async () => {
-    // entry @100; rise to peak high 116; trail (offset 3.0) ratchets to 113; the
-    // pullback's low pierces it → exit @113 (below the peak, above entry).
-    const tb: Bar[] = [100, 100, 110, 115, 112, 105].map((px, i) => ({ time: i * 60000, open: px, high: px + 1, low: px - 1, close: px, volume: 1 }));
-    const src = '//@version=6\nstrategy("s")\nif bar_index == 0\n    strategy.entry("L", strategy.long)\nstrategy.exit("X", "L", trail_points = 200, trail_offset = 300)\nplot(strategy.position_size)\n';
-    const c = compile(src);
-    const js = new Engine(c, new ArrayFeed(tb), { backend: 'js' });
-    const ip = new Engine(c, new ArrayFeed(tb), { backend: 'interp' });
-    await js.run({ symbol: 'T', timeframe: '1' });
-    await ip.run({ symbol: 'T', timeframe: '1' });
-    expect(ip.strategy.closedTrades.length).toBe(js.strategy.closedTrades.length);
-    expect(js.strategy.closedTrades.length).toBe(1);     // the trail closed the position
-    expect(js.strategy.closedTrades[0].exitPrice).toBeCloseTo(113, 9); // ratcheted level
+    const run = async (prices: number[]) => {
+      const tb: Bar[] = prices.map((px, i) => ({ time: i * 60000, open: px, high: px + 1, low: px - 1, close: px, volume: 1 }));
+      const src = '//@version=6\nstrategy("s")\nif bar_index == 0\n    strategy.entry("L", strategy.long)\nstrategy.exit("X", "L", trail_points = 200, trail_offset = 300)\nplot(strategy.position_size)\n';
+      const c = compile(src);
+      const js = new Engine(c, new ArrayFeed(tb), { backend: 'js' });
+      const ip = new Engine(c, new ArrayFeed(tb), { backend: 'interp' });
+      await js.run({ symbol: 'T', timeframe: '1' });
+      await ip.run({ symbol: 'T', timeframe: '1' });
+      expect(ip.strategy.closedTrades.length).toBe(js.strategy.closedTrades.length);
+      expect(js.strategy.closedTrades.length).toBe(1); // the trail closed the position
+      return js.strategy.closedTrades[0];
+    };
+    // entry @100; rise to peak high 116 ratchets the stop (offset 3.0) to 113; the
+    // pullback bar opens above it (113.5) and pierces it intrabar → exit @113.
+    expect((await run([100, 100, 110, 115, 113.5, 105])).exitPrice).toBeCloseTo(113, 9);
+    // same rally, but the pullback bar OPENS at 112 — through the 113 stop. A gap
+    // through a stop fills at the open, not at the (unreachable) stop level.
+    expect((await run([100, 100, 110, 115, 112, 105])).exitPrice).toBeCloseTo(112, 9);
+  });
+
+  it('closing a pyramided position books one trade row per entry (FIFO), not one blended row', async () => {
+    const eng = await bothBackends(
+      '//@version=6\nstrategy("s", pyramiding = 2)\nif bar_index == 0\n    strategy.entry("A", strategy.long)\nif bar_index == 1\n    strategy.entry("B", strategy.long)\nif bar_index == 5\n    strategy.close_all()\nplot(strategy.opentrades)\n',
+    );
+    // A fills bar1 @101, B fills bar2 @102; close_all fills bar6 @106 → TWO rows
+    expect(eng.strategy.closedTrades.length).toBe(2);
+    const [a, b] = eng.strategy.closedTrades;
+    expect(a.entryId).toBe('A');
+    expect(a.entryPrice).toBe(101);
+    expect(a.entryBar).toBe(1);
+    expect(a.profit).toBeCloseTo(5, 9);
+    expect(b.entryId).toBe('B');
+    expect(b.entryPrice).toBe(102);
+    expect(b.entryBar).toBe(2);
+    expect(b.profit).toBeCloseTo(4, 9);
+    // strategy.opentrades counts one open trade per entry lot
+    const ot = eng.outputs.plots.get(0)!.data;
+    expect(ot[1]).toBe(1);
+    expect(ot[3]).toBe(2);
+    expect(ot[9]).toBe(0);
+  });
+
+  it('strategy.exit from_entry targets only that entry\'s lots', async () => {
+    // A @101 (bar1), B @102 (bar2). The exit tied to "B" (profit 100 ticks → 103,
+    // hit by bar2's high 104) closes ONLY B; A stays open to the end.
+    const eng = await bothBackends(
+      '//@version=6\nstrategy("s", pyramiding = 2)\nif bar_index == 0\n    strategy.entry("A", strategy.long)\nif bar_index == 1\n    strategy.entry("B", strategy.long)\nstrategy.exit("X", from_entry = "B", profit = 100)\nplot(strategy.position_size)\n',
+    );
+    expect(eng.strategy.closedTrades.length).toBe(1);
+    expect(eng.strategy.closedTrades[0].entryId).toBe('B');
+    expect(eng.strategy.closedTrades[0].entryPrice).toBe(102);
+    expect(eng.strategy.closedTrades[0].exitPrice).toBe(103);
+    expect(eng.outputs.plots.get(0)!.data[9]).toBe(1); // A still open
+  });
+
+  it('exit profit ticks are measured from each entry\'s own fill price, not the position average', async () => {
+    // A @101 → target 105 (hit bar3, high 105); B @102 → target 106 (hit bar4).
+    // The position average (101.5) would have put both targets at 105.5.
+    const eng = await bothBackends(
+      '//@version=6\nstrategy("s", pyramiding = 2)\nif bar_index == 0\n    strategy.entry("A", strategy.long)\nif bar_index == 1\n    strategy.entry("B", strategy.long)\nstrategy.exit("X", profit = 400)\nplot(strategy.position_avg_price)\n',
+    );
+    expect(eng.strategy.closedTrades.length).toBe(2);
+    const [a, b] = eng.strategy.closedTrades;
+    expect(a.entryId).toBe('A');
+    expect(a.exitPrice).toBe(105);
+    expect(a.exitBar).toBe(3);
+    expect(b.entryId).toBe('B');
+    expect(b.exitPrice).toBe(106);
+    expect(b.exitBar).toBe(4);
+    // after the FIFO close of A, the remaining position re-prices to B's entry
+    const ap = eng.outputs.plots.get(0)!.data;
+    expect(ap[2]).toBeCloseTo(101.5, 9); // both lots open
+    expect(ap[3]).toBeCloseTo(102, 9);   // only B left
+  });
+
+  it('strategy.cancel(id) cancels exit brackets too', async () => {
+    const falling: Bar[] = Array.from({ length: 10 }, (_, i) => {
+      const px = 110 - i;
+      return { time: i * 60000, open: px, high: px + 2, low: px - 2, close: px, volume: 1 };
+    });
+    const src = (cancel: boolean) =>
+      `//@version=6\nstrategy("s")\nif bar_index == 0\n    strategy.entry("L", strategy.long)\n    strategy.exit("X", "L", stop = 104)\n${cancel ? 'if bar_index == 2\n    strategy.cancel("X")\n' : ''}plot(strategy.position_size)\n`;
+    const c = compile(src(true));
+    for (const backend of ['js', 'interp'] as const) {
+      const eng = new Engine(c, new ArrayFeed(falling), { backend });
+      await eng.run({ symbol: 'T', timeframe: '1' });
+      expect(eng.strategy.closedTrades.length).toBe(0); // stop canceled before the breach
+      expect(eng.outputs.plots.get(0)!.data[9]).toBe(1);
+    }
+    // control: without the cancel, the stop fills at 104 on bar 4
+    const ctrl = new Engine(compile(src(false)), new ArrayFeed(falling), { backend: 'js' });
+    await ctrl.run({ symbol: 'T', timeframe: '1' });
+    expect(ctrl.strategy.closedTrades.length).toBe(1);
+    expect(ctrl.strategy.closedTrades[0].exitPrice).toBe(104);
+  });
+
+  it('process_orders_on_close checks new exits against the close tick only (no pre-close lookahead)', async () => {
+    // Long from bar0 close @100 (POC). The exit stop 101 is created at bar2's close
+    // (close 102, but the bar's LOW was 100 ≤ 101). The pre-close range predates the
+    // order, so it must NOT fill on bar2 — it fills on bar3, whose low touches 101.
+    const eng = await bothBackends(
+      '//@version=6\nstrategy("s", process_orders_on_close = true)\nif bar_index == 0\n    strategy.entry("L", strategy.long)\nif bar_index == 2\n    strategy.exit("X", "L", stop = 101)\nplot(strategy.position_size)\n',
+    );
+    expect(eng.strategy.closedTrades.length).toBe(1);
+    const t = eng.strategy.closedTrades[0];
+    expect(t.exitBar).toBe(3); // NOT bar 2
+    expect(t.exitPrice).toBe(101);
   });
 });
