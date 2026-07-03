@@ -85,7 +85,9 @@ export interface SecurityDependency {
   self: boolean;
   /** Statically-resolved literal symbol (null when self or dynamic). */
   symbol: string | null;
-  /** Statically-resolved literal timeframe string (null when dynamic). */
+  /** true when the timeframe is a chart-timeframe self-reference (`timeframe.period`/empty). */
+  tfSelf: boolean;
+  /** Statically-resolved literal timeframe string (null when tfSelf or dynamic). */
   timeframe: string | null;
   /** true when the symbol or timeframe could not be resolved statically (a run is
    *  needed to know the concrete dependency). */
@@ -279,6 +281,11 @@ class Analyzer {
   private constEnv = new Map<string, Expr>();
   private securityCounter = 0;
   private securityDeps: SecurityDependency[] = [];
+  /** request.security[_lower_tf] call sites (with their lexical scope), collected during
+   *  the pass; dependency extraction is DEFERRED to the end of run() so that every `:=`
+   *  in the program has already invalidated its constEnv entry — a loop body can reassign
+   *  a global AFTER the call in source but BEFORE it in execution order. */
+  private pendingSecurityDeps: { e: Extract<Expr, { kind: 'Call' }>; lowerTf: boolean; scope: Scope }[] = [];
 
   constructor(private program: Program) {}
 
@@ -291,6 +298,14 @@ class Analyzer {
       } else if (s.kind === 'TypeDef') this.userTypes.set(s.name, s.fields);
     }
     for (const s of this.program.body) this.stmt(s);
+    // Deferred security-dep extraction: constEnv now reflects every reassignment in the
+    // program, so a fold can't report a value the runtime might not use (conservative:
+    // an arg reassigned anywhere — even after the call — comes back dynamic).
+    for (const p of this.pendingSecurityDeps) {
+      this.scope = p.scope;
+      this.securityDeps.push(this.extractSecurityDep(p.e, p.lowerTf));
+    }
+    this.scope = this.global;
     const c = this.slots.counts;
     return {
       program: this.program,
@@ -357,6 +372,9 @@ class Analyzer {
           s.target.sym = sym;
           s.sym = sym;
           if (sym.varSlot) s.varSlot = sym.varSlot;
+          // A reassigned global is no longer a constant: drop its recorded initializer
+          // so static folding (input metadata, security deps) can't use the stale value.
+          if (sym.global) this.constEnv.delete(s.target.name);
           // widen the symbol's type if the reassignment introduces a float
           if (isFloat(value) && sym.type?.kind === 'int') sym.type = tFloat;
         } else {
@@ -652,7 +670,7 @@ class Analyzer {
     // dependency recording); other request.* are deferred.
     if (nsName === 'request' && (fnName === 'security' || fnName === 'security_lower_tf')) {
       e.securitySite = this.securityCounter++;
-      this.securityDeps.push(this.extractSecurityDep(e, fnName === 'security_lower_tf'));
+      this.pendingSecurityDeps.push({ e, lowerTf: fnName === 'security_lower_tf', scope: this.scope });
     } else if (nsName && DEFERRED_NAMESPACES.has(nsName)) {
       this.error(e, `'${nsName}.${fnName}' is not yet supported`);
     }
@@ -704,20 +722,48 @@ class Analyzer {
     }
 
     const tfNode = this.deref(tfArg);
-    const timeframe = tfNode && tfNode.kind === 'String' ? tfNode.value : null;
-    const tfDynamic = timeframe === null;
+    let tfSelf = false;
+    let timeframe: string | null = null;
+    let tfDynamic = true;
+    if (tfNode) {
+      if (tfNode.kind === 'String') {
+        // Empty timeframe means "chart timeframe" (same rule as the empty symbol).
+        if (tfNode.value === '') tfSelf = true;
+        else timeframe = tfNode.value;
+        tfDynamic = false;
+      } else if (
+        tfNode.kind === 'Member' && tfNode.object.kind === 'Ident'
+        && tfNode.object.name === 'timeframe' && tfNode.property === 'period'
+      ) {
+        // `timeframe.period` evaluates to the chart's TF at runtime — a static
+        // self-reference (`request.security(tickerid, timeframe.period, close)` == close).
+        tfSelf = true;
+        tfDynamic = false;
+      }
+    }
 
-    return { lowerTf, self, symbol, timeframe, dynamic: symDynamic || tfDynamic };
+    return { lowerTf, self, symbol, tfSelf, timeframe, dynamic: symDynamic || tfDynamic };
   }
 
   /** Follow const-bound identifiers to their defining expression (bounded), for static folding. */
   private deref(node: Expr | undefined): Expr | undefined {
     let n = node;
     let guard = 0;
-    while (n && n.kind === 'Ident' && this.constEnv.has(n.name) && guard++ < 8) {
-      n = this.constEnv.get(n.name);
+    while (n && n.kind === 'Ident' && guard++ < 8) {
+      const next = this.constLookup(n.name);
+      if (!next) break;
+      n = next;
     }
     return n;
+  }
+
+  /** constEnv entry for `name`, but only when the name still binds to that global at the
+   *  current site — a local (or inlined-UDF-param) shadow must not fold to the global's
+   *  initializer. Unresolvable names stay unfolded, so consumers see them as dynamic. */
+  private constLookup(name: string): Expr | undefined {
+    const sym = this.scope.lookup(name);
+    if (sym && !sym.global) return undefined;
+    return this.constEnv.get(name);
   }
 
   private callReturnType(ns: string | undefined, fn: string | undefined): PineType {
@@ -793,7 +839,7 @@ class Analyzer {
     const KINDS = ['int', 'float', 'bool', 'string', 'color', 'source', 'price', 'timeframe',
       'symbol', 'session', 'time', 'text_area', 'enum'];
     const kind = (KINDS.includes(fn) ? fn : 'float') as InputDecl['kind'];
-    const resolve: ConstResolve = (n) => this.constEnv.get(n);
+    const resolve: ConstResolve = (n) => this.constLookup(n);
     const strArg = (e: Expr | undefined): string | undefined => {
       const v = literalValue(e, resolve);
       return typeof v === 'string' ? v : undefined;

@@ -103,3 +103,65 @@ describe('request.security — higher timeframe (same symbol)', () => {
     }
   });
 });
+
+describe('securityDependencies metadata (static extraction)', () => {
+  const deps = (src: string) => compile(`//@version=6\nindicator("x")\n${src}`).metadata.securityDependencies;
+
+  it('resolves literal symbol + timeframe (positional and named)', () => {
+    expect(deps('d = request.security("NASDAQ:AAPL", "D", close)\nplot(d)\n'))
+      .toEqual([{ lowerTf: false, self: false, symbol: 'NASDAQ:AAPL', tfSelf: false, timeframe: 'D', dynamic: false }]);
+    expect(deps('d = request.security(timeframe = "D", symbol = "NASDAQ:AAPL", expression = close)\nplot(d)\n'))
+      .toEqual([{ lowerTf: false, self: false, symbol: 'NASDAQ:AAPL', tfSelf: false, timeframe: 'D', dynamic: false }]);
+  });
+
+  it('classifies syminfo.tickerid as self, and flags security_lower_tf', () => {
+    expect(deps('a = request.security_lower_tf(syminfo.tickerid, "1", close)\nplot(close)\n'))
+      .toEqual([{ lowerTf: true, self: true, symbol: null, tfSelf: false, timeframe: '1', dynamic: false }]);
+  });
+
+  it('classifies timeframe.period (and "") as a chart-TF self-reference, NOT dynamic', () => {
+    // The idiomatic self-call must be statically resolvable or hosts (pinerun) pay a
+    // needless discovery run for a request that needs no fetch at all.
+    expect(deps('d = request.security(syminfo.tickerid, timeframe.period, close)\nplot(d)\n'))
+      .toEqual([{ lowerTf: false, self: true, symbol: null, tfSelf: true, timeframe: null, dynamic: false }]);
+    expect(deps('d = request.security("NASDAQ:AAPL", "", close)\nplot(d)\n'))
+      .toEqual([{ lowerTf: false, self: false, symbol: 'NASDAQ:AAPL', tfSelf: true, timeframe: null, dynamic: false }]);
+  });
+
+  it('folds identifiers bound to global const initializers', () => {
+    expect(deps('SYM = "NASDAQ:MSFT"\nTF = "240"\nd = request.security(SYM, TF, close)\nplot(d)\n'))
+      .toEqual([{ lowerTf: false, self: false, symbol: 'NASDAQ:MSFT', tfSelf: false, timeframe: '240', dynamic: false }]);
+  });
+
+  it('REGRESSION: a global reassigned via := before the call is dynamic, not the stale initializer', () => {
+    // Previously reported {timeframe: "D", dynamic: false} while the runtime could request "W".
+    const d = deps('tf = "D"\nif close > open\n    tf := "W"\nd = request.security(syminfo.tickerid, tf, close)\nplot(d)\n');
+    expect(d).toEqual([{ lowerTf: false, self: true, symbol: null, tfSelf: false, timeframe: null, dynamic: true }]);
+  });
+
+  it('a reassignment anywhere — even after the call — is conservatively dynamic', () => {
+    // Extraction is deferred to the end of analysis: an arg variable reassigned at ANY
+    // point is not `simple` (invalid Pine for security args, but piner is lenient and
+    // RUNS it), so a wrong confident fold would silently poison host fetch plans.
+    const d = deps('tf = "D"\nd = request.security(syminfo.tickerid, tf, close)\ntf := "W"\nplot(d)\n');
+    expect(d).toEqual([{ lowerTf: false, self: true, symbol: null, tfSelf: false, timeframe: null, dynamic: true }]);
+  });
+
+  it('REGRESSION: a := AFTER the call in a loop body (before it in execution order) is dynamic', () => {
+    // Iteration 1 requests "D", iteration 2 requests "W" — no single static value exists.
+    const d = deps('tf = "D"\nsum = 0.0\nfor i = 0 to 1\n    sum := sum + request.security(syminfo.tickerid, tf, close)\n    tf := "W"\nplot(sum)\n');
+    expect(d).toEqual([{ lowerTf: false, self: true, symbol: null, tfSelf: false, timeframe: null, dynamic: true }]);
+  });
+
+  it('REGRESSION: an inlined UDF parameter shadowing a global const is dynamic, not the global value', () => {
+    // Previously the param `tf` fell through to the global constEnv entry and
+    // reported {timeframe: "D", dynamic: false} while the runtime requests "60".
+    const d = deps('tf = "D"\nhtf(tf) => request.security(syminfo.tickerid, tf, close)\nplot(htf("60"))\n');
+    expect(d).toEqual([{ lowerTf: false, self: true, symbol: null, tfSelf: false, timeframe: null, dynamic: true }]);
+  });
+
+  it('REGRESSION: a block-local shadowing a global const is dynamic, not the outer value', () => {
+    const d = deps('tf = "D"\nv = 0.0\nif true\n    tf = "15"\n    v := request.security("NASDAQ:AAPL", tf, close)\nplot(v)\n');
+    expect(d).toEqual([{ lowerTf: false, self: false, symbol: 'NASDAQ:AAPL', tfSelf: false, timeframe: null, dynamic: true }]);
+  });
+});
