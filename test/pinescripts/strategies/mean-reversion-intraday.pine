@@ -1,0 +1,63 @@
+//@version=6
+strategy("Intraday Mean Reversion (Z-Score)", overlay=true,
+     initial_capital=25000,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=10,
+     commission_type=strategy.commission.percent, commission_value=0.02,
+     slippage=1, pyramiding=0)
+
+// ── Inputs ─────────────────────────────────────────────────────────────
+lenMean    = input.int(20,    "Mean length",          minval=2)
+zEntry     = input.float(2.0, "Entry z-score",        minval=0.5, step=0.25)
+zExit      = input.float(0.0, "Exit z-score (mean)",  step=0.25)
+rsiLen     = input.int(2,     "RSI length",           minval=1)
+rsiOS      = input.float(10,  "RSI oversold",         minval=0, maxval=50)
+rsiOB      = input.float(90,  "RSI overbought",       minval=50, maxval=100)
+atrLen     = input.int(14,    "ATR length",           minval=1)
+atrMult    = input.float(2.0, "Stop distance (ATR)",  minval=0.5, step=0.25)
+allowLong  = input.bool(true,  "Allow longs")
+allowShort = input.bool(true,  "Allow shorts")
+sess       = input.session("0930-1500", "Entry session")
+sessTz     = input.string("America/New_York", "Session timezone")
+
+// ── Mean & stretch ─────────────────────────────────────────────────────
+mean = ta.sma(close, lenMean)
+sd   = ta.stdev(close, lenMean)
+z    = sd > 0 ? (close - mean) / sd : 0.0
+rsi  = ta.rsi(close, rsiLen)
+atr  = ta.atr(atrLen)
+
+// na outside the session window → true only during tradable hours
+inSession = not na(time(timeframe.period, sess, sessTz))
+
+// ── Entries: fade a 2-sigma stretch confirmed by a washed-out RSI(2) ───
+longSetup  = allowLong  and inSession and z < -zEntry and rsi < rsiOS
+shortSetup = allowShort and inSession and z >  zEntry and rsi > rsiOB
+
+if longSetup and strategy.position_size <= 0
+    strategy.entry("MR long", strategy.long)
+if shortSetup and strategy.position_size >= 0
+    strategy.entry("MR short", strategy.short)
+
+// ── Exits: revert to the mean, ATR disaster stop, flat by session end ──
+if strategy.position_size > 0 and z >= zExit
+    strategy.close("MR long", comment="mean touch")
+if strategy.position_size < 0 and z <= -zExit
+    strategy.close("MR short", comment="mean touch")
+
+if strategy.position_size > 0
+    strategy.exit("stop L", from_entry="MR long",  stop=strategy.position_avg_price - atrMult * atr)
+if strategy.position_size < 0
+    strategy.exit("stop S", from_entry="MR short", stop=strategy.position_avg_price + atrMult * atr)
+
+if not inSession and strategy.position_size != 0
+    strategy.close_all(comment="session end")
+
+// ── Visuals ────────────────────────────────────────────────────────────
+upper = mean + zEntry * sd
+lower = mean - zEntry * sd
+plot(mean,  "Mean",       color=color.orange)
+plot(upper, "Upper band", color=color.new(color.red, 40))
+plot(lower, "Lower band", color=color.new(color.teal, 40))
+bgcolor(inSession ? na : color.new(color.gray, 92))
+plotshape(longSetup,  "Long setup",  style=shape.triangleup,   location=location.belowbar, color=color.teal, size=size.tiny)
+plotshape(shortSetup, "Short setup", style=shape.triangledown, location=location.abovebar, color=color.red,  size=size.tiny)
