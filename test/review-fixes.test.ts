@@ -12,7 +12,12 @@ import type { VarDecl, Binary } from '../src/parser/ast.js';
 
 const HEAD = '//@version=6\nindicator("x")\n';
 const bars: Bar[] = Array.from({ length: 10 }, (_, i) => ({
-  time: i * 60000, open: 100 + i, high: 105 + i, low: 95 + i, close: 100 + i * 2, volume: 1000,
+  time: i * 60000,
+  open: 100 + i,
+  high: 105 + i,
+  low: 95 + i,
+  close: 100 + i * 2,
+  volume: 1000,
 }));
 
 const eqNaN = (a: number, b: number) => (Number.isNaN(a) && Number.isNaN(b)) || a === b;
@@ -25,7 +30,8 @@ async function bothBackends(src: string, data = bars) {
   for (const [id, jp] of js.outputs.plots) {
     const ipp = ip.outputs.plots.get(id)!;
     for (let i = 0; i < jp.data.length; i++) {
-      if (!eqNaN(jp.data[i], ipp.data[i])) throw new Error(`diverge plot ${id} bar ${i}: js=${jp.data[i]} ip=${ipp.data[i]}`);
+      if (!eqNaN(jp.data[i], ipp.data[i]))
+        throw new Error(`diverge plot ${id} bar ${i}: js=${jp.data[i]} ip=${ipp.data[i]}`);
     }
   }
   return js;
@@ -39,7 +45,9 @@ describe('#1 lexer: bare exponent marker is not a NaN float', () => {
     expect(t.some((x) => x.kind === TokenKind.Ident && x.value === 'e')).toBe(true);
   });
   it('valid scientific notation still lexes', () => {
-    expect(tokenize('x = 1.6e-19\n').tokens.find((x) => x.kind === TokenKind.Float)!.literal).toBeCloseTo(1.6e-19, 30);
+    expect(
+      tokenize('x = 1.6e-19\n').tokens.find((x) => x.kind === TokenKind.Float)!.literal,
+    ).toBeCloseTo(1.6e-19, 30);
   });
 });
 
@@ -70,11 +78,16 @@ describe('#3 parser: UDT-typed declarations do not crash', () => {
 
 describe('#4/#6/#7 for-loop bound/step fixed at entry (both backends agree)', () => {
   it('mutating the `to` bound in the body does not change the iteration count', async () => {
-    const eng = await bothBackends(HEAD + 'n = 3\nacc = 0.0\nfor i = 1 to n\n    acc := acc + 1.0\n    n := 1\nplot(acc)\n');
+    const eng = await bothBackends(
+      HEAD + 'n = 3\nacc = 0.0\nfor i = 1 to n\n    acc := acc + 1.0\n    n := 1\nplot(acc)\n',
+    );
     expect(eng.outputs.plots.get(0)!.data[5]).toBe(3); // bound was 3 at entry
   });
   it('mutating the `step` in the body does not change the iteration count', async () => {
-    const eng = await bothBackends(HEAD + 'st = 1\nacc = 0.0\nfor i = 0 to 6 by st\n    acc := acc + 1.0\n    st := st + 1\nplot(acc)\n');
+    const eng = await bothBackends(
+      HEAD +
+        'st = 1\nacc = 0.0\nfor i = 0 to 6 by st\n    acc := acc + 1.0\n    st := st + 1\nplot(acc)\n',
+    );
     expect(eng.outputs.plots.get(0)!.data[5]).toBe(7); // i = 0..6 with step fixed at 1
   });
 });
@@ -95,7 +108,9 @@ describe('#8 fixnan state is rolled back on realtime ticks', () => {
       { time: 0, open: 100, high: 110, low: 99, close: 105, volume: 1 }, // src=105 → f=105
       { time: 60000, open: 90, high: 95, low: 88, close: 90, volume: 1 }, // src=na → f=105
     ];
-    const c = compile('//@version=6\nindicator("fx")\nsrc = close > 100.0 ? close : na\nf = fixnan(src)\nplot(f)\n');
+    const c = compile(
+      '//@version=6\nindicator("fx")\nsrc = close > 100.0 ? close : na\nf = fixnan(src)\nplot(f)\n',
+    );
     const eng = new Engine(c, new ArrayFeed(data));
     await eng.run({ symbol: 'T', timeframe: '1' });
     eng.tick({ time: 120000, open: 100, high: 125, low: 100, close: 120, volume: 1 }, false); // src=120 → f=120
@@ -135,7 +150,9 @@ describe('#11 parser: `a < b` is a comparison expression statement', () => {
 
 describe('#12 sema: if/switch expression type unifies branches (string → concat)', () => {
   it('an if-expression with string branches makes `+` concatenate', () => {
-    const r = analyze(parse(tokenize(HEAD + 'a = if close > open\n    "up"\nelse\n    "down"\nm = a + "!"\n')));
+    const r = analyze(
+      parse(tokenize(HEAD + 'a = if close > open\n    "up"\nelse\n    "down"\nm = a + "!"\n')),
+    );
     const m = r.program.body[2] as VarDecl;
     expect((m.init as Binary).type?.kind).toBe('string');
   });
@@ -143,7 +160,9 @@ describe('#12 sema: if/switch expression type unifies branches (string → conca
 
 describe('#13 sema: stateful call in and/or RHS warns', () => {
   it('warns for `... and ta.rsi(...) > 50`', () => {
-    const d = analyze(parse(tokenize(HEAD + 'c = close > open and ta.rsi(close, 14) > 50.0\n'))).diagnostics;
+    const d = analyze(
+      parse(tokenize(HEAD + 'c = close > open and ta.rsi(close, 14) > 50.0\n')),
+    ).diagnostics;
     expect(d.some((x) => x.severity === 'warning' && /stateful/.test(x.message))).toBe(true);
   });
 });
@@ -160,13 +179,21 @@ describe('#14 runtime: ta.highest/lowest/change skip na inputs', () => {
 
 describe('#17 sema: [] on a local-scope variable warns', () => {
   it('warns for history of a block-local variable', () => {
-    const d = analyze(parse(tokenize(HEAD + 'out = 0.0\nif close > open\n    inner = close\n    out := inner[1]\nplot(out)\n'))).diagnostics;
+    const d = analyze(
+      parse(
+        tokenize(
+          HEAD + 'out = 0.0\nif close > open\n    inner = close\n    out := inner[1]\nplot(out)\n',
+        ),
+      ),
+    ).diagnostics;
     expect(d.some((x) => x.severity === 'warning' && /local/.test(x.message))).toBe(true);
   });
 });
 
 describe('#18 backends agree when a ta.* dropped arg contains a stateful call', () => {
   it('valuewhen with a stateful (dropped) occurrence arg cross-checks', async () => {
-    await bothBackends(HEAD + 'v = ta.valuewhen(close > open, close, int(ta.cum(1.0)) % 1)\nplot(v)\n');
+    await bothBackends(
+      HEAD + 'v = ta.valuewhen(close > open, close, int(ta.cum(1.0)) % 1)\nplot(v)\n',
+    );
   });
 });

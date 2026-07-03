@@ -35,7 +35,14 @@ function makeBars(count: number, startMs = Date.UTC(2024, 0, 1)): Bar[] {
     const drift = Math.sin(i / 9) * 2.5 + Math.cos(i / 23) * 1.2;
     const open = price;
     const close = price + drift;
-    bars.push({ time: startMs + i * 60_000, open, high: Math.max(open, close) + 0.8, low: Math.min(open, close) - 0.8, close, volume: 1_000 + (i % 13) * 25 });
+    bars.push({
+      time: startMs + i * 60_000,
+      open,
+      high: Math.max(open, close) + 0.8,
+      low: Math.min(open, close) - 0.8,
+      close,
+      volume: 1_000 + (i % 13) * 25,
+    });
     price = close;
   }
   return bars;
@@ -93,11 +100,14 @@ let diverged = 0;
 for (const [id, plot] of js) {
   const other = interp.get(id)!.data;
   for (let i = 0; i < plot.data.length; i++) {
-    const a = plot.data[i], b = other[i];
+    const a = plot.data[i],
+      b = other[i];
     if (!((Number.isNaN(a) && Number.isNaN(b)) || Math.abs(a - b) < 1e-9)) diverged++;
   }
 }
-console.log(`two backends over ${bars.length} bars: ${diverged === 0 ? 'IDENTICAL ✓' : `${diverged} divergences ✗`}\n`);
+console.log(
+  `two backends over ${bars.length} bars: ${diverged === 0 ? 'IDENTICAL ✓' : `${diverged} divergences ✗`}\n`,
+);
 
 const last = bars.length - 1;
 for (const plot of js.values()) {

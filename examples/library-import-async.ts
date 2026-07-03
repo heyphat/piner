@@ -14,7 +14,14 @@
  *     bun run examples/library-import-async.ts
  */
 import { join } from 'node:path';
-import { compileAsync, fsLibrarySource, Engine, ArrayFeed, type Bar, type LibraryIdentity } from '../src/node.js';
+import {
+  compileAsync,
+  fsLibrarySource,
+  Engine,
+  ArrayFeed,
+  type Bar,
+  type LibraryIdentity,
+} from '../src/node.js';
 
 function makeBars(count: number): Bar[] {
   const bars: Bar[] = [];
@@ -22,7 +29,14 @@ function makeBars(count: number): Bar[] {
   for (let i = 0; i < count; i++) {
     const drift = Math.sin(i / 9) * 2.5 + Math.cos(i / 23) * 1.2;
     const close = price + drift;
-    bars.push({ time: Date.UTC(2024, 0, 1) + i * 60_000, open: price, high: Math.max(price, close) + 0.8, low: Math.min(price, close) - 0.8, close, volume: 1000 });
+    bars.push({
+      time: Date.UTC(2024, 0, 1) + i * 60_000,
+      open: price,
+      high: Math.max(price, close) + 0.8,
+      low: Math.min(price, close) - 0.8,
+      close,
+      volume: 1000,
+    });
     price = close;
   }
   return bars;
@@ -38,11 +52,14 @@ async function runBoth(compiled: Awaited<ReturnType<typeof compileAsync>>, label
   for (const [id, p] of js.outputs.plots) {
     const o = ip.outputs.plots.get(id)!.data;
     for (let i = 0; i < p.data.length; i++) {
-      const a = p.data[i], b = o[i];
+      const a = p.data[i],
+        b = o[i];
       if (!((Number.isNaN(a) && Number.isNaN(b)) || Math.abs(a - b) < 1e-9)) diverged++;
     }
   }
-  console.log(`${label}: ${diverged === 0 ? 'both backends IDENTICAL ✓' : `${diverged} divergences ✗`}, last z-score = ${js.outputs.plots.get(0)!.data.at(-1)?.toFixed(3)}`);
+  console.log(
+    `${label}: ${diverged === 0 ? 'both backends IDENTICAL ✓' : `${diverged} divergences ✗`}, last z-score = ${js.outputs.plots.get(0)!.data.at(-1)?.toFixed(3)}`,
+  );
 }
 
 const consumer = `//@version=6

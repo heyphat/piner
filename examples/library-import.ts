@@ -23,7 +23,14 @@
  * See `examples/library-import-fs.ts` for the SAME libraries loaded from disk on Node
  * via `@heyphat/piner/node`'s `loadLibraryDir()` (browser-first core stays pure).
  */
-import { compile, CompileError, Engine, ArrayFeed, type Bar, type LibraryRegistry } from '../src/index.js';
+import {
+  compile,
+  CompileError,
+  Engine,
+  ArrayFeed,
+  type Bar,
+  type LibraryRegistry,
+} from '../src/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Deterministic OHLCV bars (same output every run — the engine never reads the
@@ -155,7 +162,9 @@ plot(zw,        "z-weighted width")
 //    allocation as local functions — which is why both backends stay identical.
 // ─────────────────────────────────────────────────────────────────────────────
 const compiled = compile(source, { libraries: registry });
-console.log(`compiled "${compiled.metadata.title}" — ${compiled.metadata.inputs.length} inputs, ${compiled.metadata.historySlotCount} history slots\n`);
+console.log(
+  `compiled "${compiled.metadata.title}" — ${compiled.metadata.inputs.length} inputs, ${compiled.metadata.historySlotCount} history slots\n`,
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 5. Run BOTH backends and prove they agree byte-for-byte over every bar. This is
@@ -172,12 +181,15 @@ let diverged = 0;
 for (const [id, plot] of js) {
   const other = interp.get(id)!.data;
   for (let i = 0; i < plot.data.length; i++) {
-    const a = plot.data[i], b = other[i];
+    const a = plot.data[i],
+      b = other[i];
     const equal = (Number.isNaN(a) && Number.isNaN(b)) || Math.abs(a - b) < 1e-9;
     if (!equal) diverged++;
   }
 }
-console.log(`two backends over ${bars.length} bars: ${diverged === 0 ? 'IDENTICAL ✓' : `${diverged} divergences ✗`}\n`);
+console.log(
+  `two backends over ${bars.length} bars: ${diverged === 0 ? 'IDENTICAL ✓' : `${diverged} divergences ✗`}\n`,
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 6. Read the structured outputs (plain data — no rendering).
@@ -199,29 +211,50 @@ function expectRejected(label: string, fn: () => unknown): void {
     fn();
     console.log(`  ✗ ${label}: NOT rejected (unexpected)`);
   } catch (e) {
-    const msg = e instanceof CompileError ? e.diagnostics[0]?.message ?? e.message : (e as Error).message;
+    const msg =
+      e instanceof CompileError ? (e.diagnostics[0]?.message ?? e.message) : (e as Error).message;
     console.log(`  ✓ ${label}\n      → ${msg}`);
   }
 }
 
 // (a) importing a library that isn't in the registry
 expectRejected('missing library', () =>
-  compile('//@version=6\nindicator("x")\nimport alice/ghost/1 as g\nplot(g.f(close))\n', { libraries: registry }));
+  compile('//@version=6\nindicator("x")\nimport alice/ghost/1 as g\nplot(g.f(close))\n', {
+    libraries: registry,
+  }),
+);
 
 // (b) requesting a version that doesn't match
 expectRejected('version mismatch', () =>
-  compile('//@version=6\nindicator("x")\nimport alice/mathx/2 as mx\nplot(mx.zscore(close, 20))\n', { libraries: registry }));
+  compile(
+    '//@version=6\nindicator("x")\nimport alice/mathx/2 as mx\nplot(mx.zscore(close, 20))\n',
+    { libraries: registry },
+  ),
+);
 
 // (c) referencing a private (non-exported) symbol
 expectRejected('private symbol', () =>
-  compile('//@version=6\nindicator("x")\nimport alice/mathx/1 as mx\nplot(mx.mean(close, 20))\n', { libraries: registry }));
+  compile('//@version=6\nindicator("x")\nimport alice/mathx/1 as mx\nplot(mx.mean(close, 20))\n', {
+    libraries: registry,
+  }),
+);
 
 // (d) a library whose export calls a global-only side-effecting builtin (plot)
 expectRejected('export-constraint violation', () =>
   compile('//@version=6\nindicator("x")\nimport bad/lib/1 as bad\nplot(bad.draw(close))\n', {
-    libraries: [{ key: 'bad/lib/1', source: '//@version=6\nlibrary("Bad")\nexport draw(float x) =>\n    plot(x)\n    x\n' }],
-  }));
+    libraries: [
+      {
+        key: 'bad/lib/1',
+        source: '//@version=6\nlibrary("Bad")\nexport draw(float x) =>\n    plot(x)\n    x\n',
+      },
+    ],
+  }),
+);
 
 // (e) an alias that shadows a builtin namespace (piner does not extend builtins)
 expectRejected('alias shadows builtin namespace', () =>
-  compile('//@version=6\nindicator("x")\nimport alice/mathx/1 as math\nplot(math.zscore(close, 20))\n', { libraries: registry }));
+  compile(
+    '//@version=6\nindicator("x")\nimport alice/mathx/1 as math\nplot(math.zscore(close, 20))\n',
+    { libraries: registry },
+  ),
+);

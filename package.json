@@ -46,6 +46,8 @@
     "test": "bun test",
     "test:watch": "bun test --watch",
     "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "build": "bun run build:js && bun run build:cjs && bun run build:node && bun run build:node:cjs && bun run build:types",
     "build:js": "bun build ./src/index.ts --outdir dist --target browser --format esm --sourcemap=linked",
     "build:cjs": "bun build ./src/index.ts --outdir dist --target node --format cjs --entry-naming \"[name].cjs\" --sourcemap=linked",
@@ -59,6 +61,7 @@
     "@types/bun": "^1.2.5",
     "fast-check": "^4.8.0",
     "pinets": "0.9.22",
+    "prettier": "^3.9.4",
     "typescript": "^5.7.2"
   },
   "engines": {

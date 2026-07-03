@@ -5,7 +5,8 @@ import { compile, Engine, ArrayFeed, type Bar, type CompiledScript } from '../sr
 function mulberry32(seed: number) {
   let a = seed >>> 0;
   return () => {
-    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
@@ -35,7 +36,10 @@ async function crossCheck(c: CompiledScript, bars: Bar[], ticks: [Bar, boolean][
   const ip = new Engine(c, new ArrayFeed(bars), { backend: 'interp' });
   await js.run({ symbol: 'T', timeframe: '1' });
   await ip.run({ symbol: 'T', timeframe: '1' });
-  for (const [bar, close] of ticks) { js.tick(bar, close); ip.tick(bar, close); }
+  for (const [bar, close] of ticks) {
+    js.tick(bar, close);
+    ip.tick(bar, close);
+  }
 
   expect([...ip.outputs.plots.keys()].sort()).toEqual([...js.outputs.plots.keys()].sort());
   for (const [id, jp] of js.outputs.plots) {
@@ -43,7 +47,9 @@ async function crossCheck(c: CompiledScript, bars: Bar[], ticks: [Bar, boolean][
     expect(jp.data.length).toBe(ipp.data.length);
     for (let i = 0; i < jp.data.length; i++) {
       if (!eqNaN(jp.data[i], ipp.data[i])) {
-        throw new Error(`plot ${id} '${jp.title}' diverged at bar ${i}: js=${jp.data[i]} interp=${ipp.data[i]}`);
+        throw new Error(
+          `plot ${id} '${jp.title}' diverged at bar ${i}: js=${jp.data[i]} interp=${ipp.data[i]}`,
+        );
       }
     }
   }
@@ -142,7 +148,9 @@ hline(0.0, title="zero")
 
 describe('cross-check battery (codegen == interpreter)', () => {
   for (const [name, src] of Object.entries(SCRIPTS)) {
-    it(name, async () => { await crossCheck(compile(src), bars); });
+    it(name, async () => {
+      await crossCheck(compile(src), bars);
+    });
   }
 });
 
@@ -161,20 +169,32 @@ function makeGenerator(seed: number) {
       return (r() * 50).toFixed(2);
     }
     const form = r();
-    if (form < 0.3) return `(${numeric(depth - 1)} ${pick(['+', '-', '*', '/'])} ${numeric(depth - 1)})`;
+    if (form < 0.3)
+      return `(${numeric(depth - 1)} ${pick(['+', '-', '*', '/'])} ${numeric(depth - 1)})`;
     if (form < 0.55) {
-      const fn = pick(['ta.sma', 'ta.ema', 'ta.rma', 'ta.wma', 'ta.stdev', 'ta.highest', 'ta.lowest', 'ta.rsi']);
+      const fn = pick([
+        'ta.sma',
+        'ta.ema',
+        'ta.rma',
+        'ta.wma',
+        'ta.stdev',
+        'ta.highest',
+        'ta.lowest',
+        'ta.rsi',
+      ]);
       return `${fn}(${pick(series)}, ${len()})`;
     }
     if (form < 0.65) return `ta.atr(${len()})`;
     if (form < 0.72) return `ta.change(${pick(series)})`;
-    if (form < 0.82) return `${pick(['math.max', 'math.min'])}(${numeric(depth - 1)}, ${numeric(depth - 1)})`;
+    if (form < 0.82)
+      return `${pick(['math.max', 'math.min'])}(${numeric(depth - 1)}, ${numeric(depth - 1)})`;
     if (form < 0.9) return `math.abs(${numeric(depth - 1)})`;
     if (form < 0.96) return `(${cond(depth - 1)} ? ${numeric(depth - 1)} : ${numeric(depth - 1)})`;
     return `nz(${numeric(depth - 1)}, ${numeric(depth - 1)})`;
   }
   function cond(depth: number): string {
-    if (depth <= 0 || r() < 0.5) return `${numeric(depth)} ${pick(['<', '>', '<=', '>=', '==', '!='])} ${numeric(depth)}`;
+    if (depth <= 0 || r() < 0.5)
+      return `${numeric(depth)} ${pick(['<', '>', '<=', '>=', '==', '!='])} ${numeric(depth)}`;
     return `(${cond(depth - 1)} ${pick(['and', 'or'])} ${cond(depth - 1)})`;
   }
   return { numeric };

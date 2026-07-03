@@ -40,8 +40,9 @@ source → lexer/ → parser/ (AST) → sema/inline.ts (monomorphize user fns/me
 Both backends target the same runtime `$` = `ExecutionContext` (`src/runtime/context.ts`).
 
 **The slot model** (heart of the engine, resolved at compile time in `sema/slots.ts`):
+
 - **History slots** — a series value referenced as `x[n]` gets a column in `SeriesStore` (`runtime/series.ts`): flat typed-array columns indexed by a global bar counter; out-of-range reads return `na`, never throw.
-- **State slots** — each *call site* of a stateful built-in (e.g. `ta.sma`) gets an integer site id; the builtin keeps per-site state (ring buffers etc.).
+- **State slots** — each _call site_ of a stateful built-in (e.g. `ta.sma`) gets an integer site id; the builtin keeps per-site state (ring buffers etc.).
 - **`var`/`varip` slots** — `var` persists across bars; `varip` also persists across realtime ticks (exempt from rollback).
 
 **Realtime model** (`engine/driver.ts`): historical bars run `main($)` once and commit. A realtime tick = rollback (truncate SeriesStore to committed length, restore builtin/var snapshots, drop uncommitted outputs) + replay the open bar. This single mechanism produces correct repainting.
@@ -59,6 +60,7 @@ Other key areas: `runtime/builtins/` (one file per namespace: ta/math/str/color/
 ## Docs
 
 `docs/` is substantive and kept current — read before changing semantics:
+
 - `docs/architecture.md` — engine design (slot model, `$`, driver/rollback).
 - `docs/compiler-design.md` — the compiler contract (AST annotations, precedence, slot rules, codegen mapping).
 - `docs/pine-semantics.md` — the v6 spec being implemented, with citations.

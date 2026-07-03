@@ -9,7 +9,14 @@
  * Feature: library-import-export.
  */
 import { describe, it, expect } from 'bun:test';
-import { compile, Engine, ArrayFeed, type Bar, type CompiledScript, type LibraryRegistry } from '../src/index.js';
+import {
+  compile,
+  Engine,
+  ArrayFeed,
+  type Bar,
+  type CompiledScript,
+  type LibraryRegistry,
+} from '../src/index.js';
 
 function makeBars(n: number): Bar[] {
   const bars: Bar[] = [];
@@ -37,7 +44,8 @@ async function crossCheck(c: CompiledScript): Promise<Engine> {
   for (const [id, jp] of js.outputs.plots) {
     const ipp = ip.outputs.plots.get(id)!;
     for (let i = 0; i < jp.data.length; i++) {
-      if (!eqNaN(jp.data[i], ipp.data[i])) throw new Error(`plot ${id} bar ${i}: js=${jp.data[i]} ip=${ipp.data[i]}`);
+      if (!eqNaN(jp.data[i], ipp.data[i]))
+        throw new Error(`plot ${id} bar ${i}: js=${jp.data[i]} ip=${ipp.data[i]}`);
     }
   }
   return js;
@@ -46,9 +54,10 @@ async function crossCheck(c: CompiledScript): Promise<Engine> {
 describe('TradingView docs — canonical library examples run through piner', () => {
   // ── "Creating a library" — AllTimeHighLow (default params + var state) ──
   it('AllTimeHighLow: default series params, var state, per-call-site independence', async () => {
-    const registry: LibraryRegistry = [{
-      key: 'PineCoders/AllTimeHighLow/1',
-      source: `//@version=6
+    const registry: LibraryRegistry = [
+      {
+        key: 'PineCoders/AllTimeHighLow/1',
+        source: `//@version=6
 // @description Provides functions calculating the all-time high/low of values.
 library("AllTimeHighLow", true)
 // @function Calculates the all-time high of a series.
@@ -62,29 +71,34 @@ export lo(float val = low) =>
 plot(hi())
 plot(lo())
 `,
-    }];
+      },
+    ];
     // The doc's exact consumer snippet.
-    const c = compile(`//@version=6
+    const c = compile(
+      `//@version=6
 indicator("Using AllTimeHighLow library", "", true)
 import PineCoders/AllTimeHighLow/1 as allTime
 plot(allTime.hi())
 plot(allTime.lo())
 plot(allTime.hi(close))
-`, { libraries: registry });
+`,
+      { libraries: registry },
+    );
     const js = await crossCheck(c);
     const maxHigh = Math.max(...bars.map((b) => b.high));
     const minLow = Math.min(...bars.map((b) => b.low));
     const maxClose = Math.max(...bars.map((b) => b.close));
-    expect(js.outputs.plots.get(0)!.data.at(-1)).toBeCloseTo(maxHigh, 9);  // hi() → all-time high of `high`
-    expect(js.outputs.plots.get(1)!.data.at(-1)).toBeCloseTo(minLow, 9);   // lo() → all-time low of `low`
+    expect(js.outputs.plots.get(0)!.data.at(-1)).toBeCloseTo(maxHigh, 9); // hi() → all-time high of `high`
+    expect(js.outputs.plots.get(1)!.data.at(-1)).toBeCloseTo(minLow, 9); // lo() → all-time low of `low`
     expect(js.outputs.plots.get(2)!.data.at(-1)).toBeCloseTo(maxClose, 9); // hi(close) → independent call site
   });
 
   // ── "User-defined types and objects" — Point ──
   it('Point: exported UDT, constructor via alias, explicit type keyword, field access', async () => {
-    const registry: LibraryRegistry = [{
-      key: 'userName/Point/1',
-      source: `//@version=6
+    const registry: LibraryRegistry = [
+      {
+        key: 'userName/Point/1',
+        source: `//@version=6
 library("Point")
 export type point
     int x
@@ -92,15 +106,19 @@ export type point
     bool isHi
     bool wasBreached = false
 `,
-    }];
+      },
+    ];
     // The doc's snippet is `pt.point newPoint = pt.point.new()`. Build points from bar data and plot a field.
-    const c = compile(`//@version=6
+    const c = compile(
+      `//@version=6
 indicator("")
 import userName/Point/1 as pt
 pt.point p = pt.point.new(bar_index, close, close > open, false)
 plot(p.y, "y")
 plot(p.isHi ? 1.0 : 0.0, "isHi")
-`, { libraries: registry });
+`,
+      { libraries: registry },
+    );
     const js = await crossCheck(c);
     const last = bars.length - 1;
     expect(js.outputs.plots.get(0)!.data[last]).toBeCloseTo(bars[last].close, 9);
@@ -108,9 +126,10 @@ plot(p.isHi ? 1.0 : 0.0, "isHi")
   });
 
   it('Point: default-constructed object uses field defaults', async () => {
-    const registry: LibraryRegistry = [{
-      key: 'userName/Point/1',
-      source: `//@version=6
+    const registry: LibraryRegistry = [
+      {
+        key: 'userName/Point/1',
+        source: `//@version=6
 library("Point")
 export type point
     int x
@@ -118,32 +137,39 @@ export type point
     bool isHi
     bool wasBreached = false
 `,
-    }];
+      },
+    ];
     // `pt.point.new()` — no args; `wasBreached` defaults to false.
-    const c = compile(`//@version=6
+    const c = compile(
+      `//@version=6
 indicator("")
 import userName/Point/1 as pt
 pt.point np = pt.point.new()
 plot(np.wasBreached ? 1.0 : 0.0, "wasBreached (defaults false)")
-`, { libraries: registry });
+`,
+      { libraries: registry },
+    );
     const js = await crossCheck(c);
     expect(js.outputs.plots.get(0)!.data.at(-1)).toBe(0); // default false
   });
 
   // ── "Enum types" — Signal ──
   it('Signal: exported enum with titled members, member access through the alias', async () => {
-    const registry: LibraryRegistry = [{
-      key: 'userName/Signal/1',
-      source: `//@version=6
+    const registry: LibraryRegistry = [
+      {
+        key: 'userName/Signal/1',
+        source: `//@version=6
 library("Signal")
 export enum State
     long = "Long"
     short = "Short"
     neutral = "Neutral"
 `,
-    }];
+      },
+    ];
     // Adapted from the doc's Signal example (channel-based state), using the enum members.
-    const c = compile(`//@version=6
+    const c = compile(
+      `//@version=6
 indicator("")
 import userName/Signal/1 as Signal
 float medianValue = ta.median(close, 20)
@@ -152,7 +178,9 @@ float upper = medianValue + rangeValue
 float lower = medianValue - rangeValue
 mySignal = close > upper ? Signal.State.long : close < lower ? Signal.State.short : Signal.State.neutral
 plot(mySignal == Signal.State.long ? 1.0 : mySignal == Signal.State.short ? -1.0 : 0.0, "signal")
-`, { libraries: registry });
+`,
+      { libraries: registry },
+    );
     const js = await crossCheck(c);
     // signal is one of {-1, 0, 1} on every bar
     for (const v of js.outputs.plots.get(0)!.data) {
@@ -167,9 +195,10 @@ plot(mySignal == Signal.State.long ? 1.0 : mySignal == Signal.State.short ? -1.0
   // changePercent(), dema(), and donchian() (tuple return). Aliased as `tax` (NOT `ta`,
   // which would shadow the builtin namespace — a deliberate piner restriction).
   it('real-world published patterns: multi-function lib, EMA-based state, tuple return', async () => {
-    const registry: LibraryRegistry = [{
-      key: 'PineCoders/ta/7',
-      source: `//@version=6
+    const registry: LibraryRegistry = [
+      {
+        key: 'PineCoders/ta/7',
+        source: `//@version=6
 library("ta")
 export changePercent(float newValue, float oldValue) =>
     (newValue - oldValue) / oldValue * 100.0
@@ -182,8 +211,10 @@ export donchian(int length) =>
     lo = ta.lowest(low, length)
     [hi, lo, math.avg(hi, lo)]
 `,
-    }];
-    const c = compile(`//@version=6
+      },
+    ];
+    const c = compile(
+      `//@version=6
 indicator("uses ta")
 import PineCoders/ta/7 as tax
 plot(tax.changePercent(close, close[1]), "chg%")
@@ -192,7 +223,9 @@ plot(tax.dema(close, 10), "dema")
 plot(dcHi, "donchian hi")
 plot(dcLo, "donchian lo")
 plot(dcMid, "donchian mid")
-`, { libraries: registry });
+`,
+      { libraries: registry },
+    );
     const js = await crossCheck(c);
     const last = bars.length - 1;
     const hi20 = Math.max(...bars.slice(last - 19, last + 1).map((b) => b.high));
@@ -205,14 +238,24 @@ plot(dcMid, "donchian mid")
   // ── "A library can use other libraries, or even previous versions of itself" ──
   it('a library importing a PREVIOUS VERSION of itself resolves (distinct identities)', async () => {
     const registry: LibraryRegistry = [
-      { key: 'acme/util/1', source: '//@version=6\nlibrary("util")\nexport base(float x) => x + 1.0\n' },
-      { key: 'acme/util/2', source: '//@version=6\nlibrary("util")\nimport acme/util/1 as prev\nexport base(float x) => prev.base(x) * 2.0\n' },
+      {
+        key: 'acme/util/1',
+        source: '//@version=6\nlibrary("util")\nexport base(float x) => x + 1.0\n',
+      },
+      {
+        key: 'acme/util/2',
+        source:
+          '//@version=6\nlibrary("util")\nimport acme/util/1 as prev\nexport base(float x) => prev.base(x) * 2.0\n',
+      },
     ];
-    const c = compile(`//@version=6
+    const c = compile(
+      `//@version=6
 indicator("")
 import acme/util/2 as u
 plot(u.base(close), "v2 uses v1")
-`, { libraries: registry });
+`,
+      { libraries: registry },
+    );
     const js = await crossCheck(c);
     const last = bars.length - 1;
     expect(js.outputs.plots.get(0)!.data[last]).toBeCloseTo((bars[last].close + 1) * 2, 9);
@@ -222,9 +265,10 @@ plot(u.base(close), "v2 uses v1")
   it('PivotLabels: exported fn using a NON-exported internal UDT + array<point> + pivots', async () => {
     // Verbatim structure from the doc: `point` is NOT exported (used only internally),
     // yet the exported drawPivots() compiles and runs.
-    const registry: LibraryRegistry = [{
-      key: 'TradingView/PivotLabels/1',
-      source: `//@version=6
+    const registry: LibraryRegistry = [
+      {
+        key: 'TradingView/PivotLabels/1',
+        source: `//@version=6
 library("PivotLabels", true)
 type point
     int x
@@ -251,12 +295,16 @@ export countHiPivots(int qtyLabels, int leftLegs, int rightLegs) =>
         hi := hi + (na(eachPoint) ? 0 : eachPoint.isHi ? 1 : 0)
     hi
 `,
-    }];
-    const c = compile(`//@version=6
+      },
+    ];
+    const c = compile(
+      `//@version=6
 indicator("")
 import TradingView/PivotLabels/1 as dpl
 plot(dpl.countHiPivots(20, 10, 5), "hi pivots")
-`, { libraries: registry });
+`,
+      { libraries: registry },
+    );
     const js = await crossCheck(c);
     expect(js.outputs.plots.size).toBe(1);
   });

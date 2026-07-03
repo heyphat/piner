@@ -14,7 +14,15 @@
 import { describe, it, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { compile, CompileError, ParseError, Engine, ArrayFeed, type Bar, type LibraryRegistry } from '../src/index.js';
+import {
+  compile,
+  CompileError,
+  ParseError,
+  Engine,
+  ArrayFeed,
+  type Bar,
+  type LibraryRegistry,
+} from '../src/index.js';
 
 const DIR = resolve(import.meta.dir, 'pinescripts/libraries');
 
@@ -23,7 +31,11 @@ const DIR = resolve(import.meta.dir, 'pinescripts/libraries');
  * consumer that imports + exercises its exported surface. The consumer's plots are what the
  * two backends are compared on.
  */
-interface LibEntry { file: string; identity: string; exercise: string; }
+interface LibEntry {
+  file: string;
+  identity: string;
+  exercise: string;
+}
 const LIBRARIES: LibEntry[] = [
   {
     file: 'rayolf-rc-highest-lowest.pine',
@@ -110,8 +122,7 @@ const bars: Bar[] = Array.from({ length: 120 }, (_, i) => {
 });
 
 type Stage = 'pass' | 'parse' | 'sema' | 'runtime' | 'divergence';
-const eqNaN = (a: number, b: number) =>
-  (Number.isNaN(a) && Number.isNaN(b)) || a === b;
+const eqNaN = (a: number, b: number) => (Number.isNaN(a) && Number.isNaN(b)) || a === b;
 
 async function classify(exercise: string): Promise<{ stage: Stage; detail: string }> {
   let compiled;
@@ -121,7 +132,12 @@ async function classify(exercise: string): Promise<{ stage: Stage; detail: strin
     if (e instanceof ParseError) return { stage: 'parse', detail: `${e.line}:${e.col} ${e.raw}` };
     if (e instanceof CompileError) {
       const d = e.diagnostics.find((x) => x.severity === 'error');
-      return { stage: 'sema', detail: d ? `${d.line}:${d.col} ${d.message}` : e.message.split('\n')[1]?.trim() ?? e.message };
+      return {
+        stage: 'sema',
+        detail: d
+          ? `${d.line}:${d.col} ${d.message}`
+          : (e.message.split('\n')[1]?.trim() ?? e.message),
+      };
     }
     return { stage: 'sema', detail: (e as Error).message.split('\n')[0] };
   }
@@ -131,14 +147,25 @@ async function classify(exercise: string): Promise<{ stage: Stage; detail: strin
     return e;
   };
   let js, ip;
-  try { js = await run('js'); } catch (e) { return { stage: 'runtime', detail: `js: ${(e as Error).message.split('\n')[0]}` }; }
-  try { ip = await run('interp'); } catch (e) { return { stage: 'runtime', detail: `interp: ${(e as Error).message.split('\n')[0]}` }; }
+  try {
+    js = await run('js');
+  } catch (e) {
+    return { stage: 'runtime', detail: `js: ${(e as Error).message.split('\n')[0]}` };
+  }
+  try {
+    ip = await run('interp');
+  } catch (e) {
+    return { stage: 'runtime', detail: `interp: ${(e as Error).message.split('\n')[0]}` };
+  }
   for (const [id, jp] of js.outputs.plots) {
     const ipp = ip.outputs.plots.get(id);
     if (!ipp) return { stage: 'divergence', detail: `plot ${id} present in js, absent in interp` };
     for (let i = 0; i < jp.data.length; i++) {
       if (!eqNaN(jp.data[i], ipp.data[i])) {
-        return { stage: 'divergence', detail: `plot "${jp.title}" bar ${i}: js=${jp.data[i]} ip=${ipp.data[i]}` };
+        return {
+          stage: 'divergence',
+          detail: `plot "${jp.title}" bar ${i}: js=${jp.data[i]} ip=${ipp.data[i]}`,
+        };
       }
     }
   }

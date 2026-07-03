@@ -21,7 +21,11 @@ describe('Property 23 — cyclic dependency graphs are rejected in cycle order',
         }));
         const src = `//@version=6\nindicator("c")\nimport ${u}/${names[0]}/1 as e\nplot(e.f(close))\n`;
         let err: unknown;
-        try { compile(src, { libraries: reg }); } catch (e) { err = e; }
+        try {
+          compile(src, { libraries: reg });
+        } catch (e) {
+          err = e;
+        }
         expect(err).toBeInstanceOf(CompileError);
         const msg = (err as CompileError).message.toLowerCase();
         expect(msg).toContain('cyclic');

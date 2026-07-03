@@ -1,7 +1,14 @@
 import { describe, it, expect } from 'bun:test';
 import { tokenize, LexError } from '../src/lexer/lexer.js';
 import { parse, ParseError } from '../src/parser/parser.js';
-import { compile, CompileError, Engine, ArrayFeed, ExecutionBudgetError, type Bar } from '../src/index.js';
+import {
+  compile,
+  CompileError,
+  Engine,
+  ArrayFeed,
+  ExecutionBudgetError,
+  type Bar,
+} from '../src/index.js';
 
 const HEAD = '//@version=6\nindicator("x")\n';
 const oneBar: Bar[] = [{ time: 0, open: 1, high: 1, low: 1, close: 1, volume: 1 }];
@@ -95,38 +102,52 @@ describe('execution budget rejects runaway user loops', () => {
 
   for (const backend of ['js', 'interp'] as const) {
     it(`${backend}: while loop exceeds budget`, async () => {
-      await expect(runWithTinyBudget(HEAD + 'i = 0\nwhile true\n    i := i + 1\nplot(i)\n', backend))
-        .rejects.toThrow(ExecutionBudgetError);
+      await expect(
+        runWithTinyBudget(HEAD + 'i = 0\nwhile true\n    i := i + 1\nplot(i)\n', backend),
+      ).rejects.toThrow(ExecutionBudgetError);
     });
 
     it(`${backend}: numeric for loop exceeds budget`, async () => {
-      await expect(runWithTinyBudget(HEAD + 's = 0\nfor i = 0 to 10\n    s := s + i\nplot(s)\n', backend))
-        .rejects.toThrow(ExecutionBudgetError);
+      await expect(
+        runWithTinyBudget(HEAD + 's = 0\nfor i = 0 to 10\n    s := s + i\nplot(s)\n', backend),
+      ).rejects.toThrow(ExecutionBudgetError);
     });
 
     it(`${backend}: for-in loop exceeds budget`, async () => {
-      await expect(runWithTinyBudget(HEAD + 'a = array.new_float(5, close)\ns = 0.0\nfor v in a\n    s := s + v\nplot(s)\n', backend))
-        .rejects.toThrow(ExecutionBudgetError);
+      await expect(
+        runWithTinyBudget(
+          HEAD + 'a = array.new_float(5, close)\ns = 0.0\nfor v in a\n    s := s + v\nplot(s)\n',
+          backend,
+        ),
+      ).rejects.toThrow(ExecutionBudgetError);
     });
   }
 });
 
 describe('prototype pollution hardening', () => {
   it('rejects reserved prototype member access at compile time', () => {
-    expect(() => compile(HEAD + `type T
+    expect(() =>
+      compile(
+        HEAD +
+          `type T
     float x
 t = T.new(1.0)
 t.__proto__.polluted := 1
 plot(t.x)
-`)).toThrow(CompileError);
+`,
+      ),
+    ).toThrow(CompileError);
   });
 
   it('generated UDT constructors create null-prototype records', () => {
-    const c = compile(HEAD + `type T
+    const c = compile(
+      HEAD +
+        `type T
     float x
 t = T.new(1.0)
 plot(t.x)
-`);
+`,
+    );
     expect(c.source).toContain('Object.create(null)');
   });
 });

@@ -42,7 +42,14 @@ const bars: Bar[] = [10, 20, 30, 40].map((c, i) => ({
   volume: 1,
 }));
 
-const tick = (close: number): Bar => ({ time: 4 * 60_000, open: 50, high: close, low: 50, close, volume: 1 });
+const tick = (close: number): Bar => ({
+  time: 4 * 60_000,
+  open: 50,
+  high: close,
+  low: 50,
+  close,
+  volume: 1,
+});
 
 describe('runtime core — historical pass', () => {
   it('computes sma, history (close[1]) and var counter bar-by-bar', async () => {

@@ -347,9 +347,7 @@ export interface Unary extends Annotations {
   loc?: Loc;
 }
 export type BinaryOp =
-  | '+' | '-' | '*' | '/' | '%'
-  | '==' | '!=' | '<' | '<=' | '>' | '>='
-  | 'and' | 'or';
+  '+' | '-' | '*' | '/' | '%' | '==' | '!=' | '<' | '<=' | '>' | '>=' | 'and' | 'or';
 export interface Binary extends Annotations {
   kind: 'Binary';
   op: BinaryOp;

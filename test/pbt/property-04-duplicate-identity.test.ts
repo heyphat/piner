@@ -16,12 +16,20 @@ describe('Property 4 — duplicate identities are rejected', () => {
     fc.assert(
       fc.property(seg, seg, seg, fc.boolean(), fc.boolean(), (p, l, v, firstObj, secondObj) => {
         const canonical = `${p}/${l}/${v}`;
-        const key = (obj: boolean): LibraryRegistryKey => (obj ? { user: p, lib: l, version: v } : `${p}/${l}/${v}`);
+        const key = (obj: boolean): LibraryRegistryKey =>
+          obj ? { user: p, lib: l, version: v } : `${p}/${l}/${v}`;
         const src = `//@version=6\nindicator("c")\nplot(close)\n`;
         let err: unknown;
         try {
-          compile(src, { libraries: [{ key: key(firstObj), source: libSrc('A') }, { key: key(secondObj), source: libSrc('B') }] });
-        } catch (e) { err = e; }
+          compile(src, {
+            libraries: [
+              { key: key(firstObj), source: libSrc('A') },
+              { key: key(secondObj), source: libSrc('B') },
+            ],
+          });
+        } catch (e) {
+          err = e;
+        }
         expect(err).toBeInstanceOf(CompileError);
         expect((err as CompileError).message).toContain(canonical);
       }),

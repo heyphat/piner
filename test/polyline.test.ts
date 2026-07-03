@@ -2,7 +2,12 @@ import { describe, it, expect } from 'bun:test';
 import { compile, Engine, ArrayFeed, type Bar } from '../src/index.js';
 
 const bars: Bar[] = Array.from({ length: 8 }, (_, i) => ({
-  time: i * 60000, open: 100 + i, high: 110 + i, low: 90 + i, close: 100 + i * 2, volume: 1000,
+  time: i * 60000,
+  open: 100 + i,
+  high: 110 + i,
+  low: 90 + i,
+  close: 100 + i * 2,
+  volume: 1000,
 }));
 
 async function runBoth(src: string) {
@@ -16,7 +21,9 @@ async function runBoth(src: string) {
 
 describe('chart.point (two-level namespace) + field access', () => {
   it('chart.point.from_index builds a point and obj.field reads it', async () => {
-    const { js, ip } = await runBoth('//@version=6\nindicator("x")\np = chart.point.from_index(bar_index, close)\nplot(p.price)\nplot(p.index)\n');
+    const { js, ip } = await runBoth(
+      '//@version=6\nindicator("x")\np = chart.point.from_index(bar_index, close)\nplot(p.price)\nplot(p.index)\n',
+    );
     const price = js.outputs.plots.get(0)!.data;
     const index = js.outputs.plots.get(1)!.data;
     for (let i = 0; i < bars.length; i++) {
@@ -28,7 +35,9 @@ describe('chart.point (two-level namespace) + field access', () => {
   });
 
   it('chart.point.now uses the current bar index/time', async () => {
-    const { js } = await runBoth('//@version=6\nindicator("x")\npt = chart.point.now(close)\nplot(pt.time)\n');
+    const { js } = await runBoth(
+      '//@version=6\nindicator("x")\npt = chart.point.now(close)\nplot(pt.time)\n',
+    );
     expect(js.outputs.plots.get(0)!.data[5]).toBe(bars[5].time);
   });
 });

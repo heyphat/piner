@@ -22,12 +22,20 @@ import { compile, Engine, ArrayFeed, type Bar } from '../src/index.js';
 const SIXH = 6 * 3600_000;
 const bars: Bar[] = Array.from({ length: 40 }, (_, i) => ({
   time: Date.UTC(2021, 0, 1) + i * SIXH,
-  open: 100 + i, high: 110 + i, low: 90 + i, close: 100 + (i % 7), volume: 1000 + i * 3,
+  open: 100 + i,
+  high: 110 + i,
+  low: 90 + i,
+  close: 100 + (i % 7),
+  volume: 1000 + i * 3,
 }));
-const eqNaN = (a: number, b: number) => (Number.isNaN(a) && Number.isNaN(b)) || Math.abs(a - b) < 1e-9 || a === b;
+const eqNaN = (a: number, b: number) =>
+  (Number.isNaN(a) && Number.isNaN(b)) || Math.abs(a - b) < 1e-9 || a === b;
 
 /** Compile once, run both backends, cross-check every plot, return the js engine. */
-async function bothBackends(src: string, opts: { symbol?: string; timeframe?: string; inputs?: Record<string, unknown> } = {}) {
+async function bothBackends(
+  src: string,
+  opts: { symbol?: string; timeframe?: string; inputs?: Record<string, unknown> } = {},
+) {
   const c = compile(src);
   const symbol = opts.symbol ?? 'BINANCE:BTCUSDT';
   const timeframe = opts.timeframe ?? '360';
@@ -39,7 +47,9 @@ async function bothBackends(src: string, opts: { symbol?: string; timeframe?: st
     const ipp = ip.outputs.plots.get(id)!;
     for (let i = 0; i < jp.data.length; i++) {
       if (!eqNaN(jp.data[i], ipp.data[i])) {
-        throw new Error(`backend diverge plot "${jp.title}"(${id}) bar ${i}: js=${jp.data[i]} ip=${ipp.data[i]}`);
+        throw new Error(
+          `backend diverge plot "${jp.title}"(${id}) bar ${i}: js=${jp.data[i]} ip=${ipp.data[i]}`,
+        );
       }
     }
   }
@@ -49,7 +59,10 @@ const plot = (e: Engine, title: string) => {
   for (const [, p] of e.outputs.plots) if (p.title === title) return p.data;
   throw new Error(`no plot titled "${title}"`);
 };
-const last = (e: Engine, title: string) => { const d = plot(e, title); return d[d.length - 1]; };
+const last = (e: Engine, title: string) => {
+  const d = plot(e, title);
+  return d[d.length - 1];
+};
 
 describe('dayofweek constants', () => {
   it('the day constants are Sunday=1 … Saturday=7', async () => {
@@ -62,8 +75,15 @@ plot(dayofweek.wednesday, "wed")
 plot(dayofweek.thursday, "thu")
 plot(dayofweek.friday, "fri")
 plot(dayofweek.saturday, "sat")`);
-    expect([last(e, 'sun'), last(e, 'mon'), last(e, 'tue'), last(e, 'wed'), last(e, 'thu'), last(e, 'fri'), last(e, 'sat')])
-      .toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect([
+      last(e, 'sun'),
+      last(e, 'mon'),
+      last(e, 'tue'),
+      last(e, 'wed'),
+      last(e, 'thu'),
+      last(e, 'fri'),
+      last(e, 'sat'),
+    ]).toEqual([1, 2, 3, 4, 5, 6, 7]);
   });
   it('the `dayofweek` leaf still returns the current bar day (1..7) and compares to the constant', async () => {
     const e = await bothBackends(`//@version=6
@@ -111,7 +131,10 @@ plot(c.price, "copy")
 chart.point q = na
 plot(na(chart.point.copy(q)) ? 1 : 0, "na-safe")
 plot(chart.point.now().price, "now")`);
-    const orig = plot(e, 'orig'), copy = plot(e, 'copy'), nasafe = plot(e, 'na-safe'), now = plot(e, 'now');
+    const orig = plot(e, 'orig'),
+      copy = plot(e, 'copy'),
+      nasafe = plot(e, 'na-safe'),
+      now = plot(e, 'now');
     for (let i = 0; i < bars.length; i++) {
       expect(copy[i]).toBeCloseTo(orig[i] + 1, 9); // the copy moved…
       expect(orig[i]).toBeCloseTo(bars[i].close, 9); // …the original did not
@@ -132,7 +155,9 @@ plot((close + open)[2], "inline")
 x = close + open
 plot(x[2], "viaVar")
 plot(close[2] + open[2], "manual")`);
-    const inline = plot(e, 'inline'), viaVar = plot(e, 'viaVar'), manual = plot(e, 'manual');
+    const inline = plot(e, 'inline'),
+      viaVar = plot(e, 'viaVar'),
+      manual = plot(e, 'manual');
     for (let i = 0; i < inline.length; i++) {
       expect(eqNaN(inline[i], viaVar[i])).toBe(true);
       expect(eqNaN(inline[i], manual[i])).toBe(true);
@@ -154,7 +179,7 @@ describe('non-numeric series history (x[n] for arrays / strings)', () => {
   // History slots are polymorphic: a reference value (array, string, color, UDT) read via x[n]
   // must come back as the value, not the NaN a numeric Float64Array column would coerce it to.
   // (This unblocks LuxAlgo supply-demand-range, which walks v[j] over request.security_lower_tf.)
-  it('array-valued history reads back the prior bar\'s array (both backends)', async () => {
+  it("array-valued history reads back the prior bar's array (both backends)", async () => {
     const e = await bothBackends(`//@version=6
 indicator("ah")
 arr = array.new_float(0)
@@ -163,19 +188,23 @@ plot(array.size(arr), "sizeNow")
 plot(bar_index > 0 ? array.get(arr[1], 0) : na, "prevClose")`);
     expect(plot(e, 'sizeNow').every((v) => v === 1)).toBe(true); // a fresh 1-element array each bar
     const pc = plot(e, 'prevClose');
-    expect(Number.isNaN(pc[0])).toBe(true);          // no prior bar
+    expect(Number.isNaN(pc[0])).toBe(true); // no prior bar
     // coverage-gaps `bars`: close = 100 + (i % 7), so prevClose[i] = 100 + ((i-1) % 7)
     expect(pc[1]).toBe(100);
     expect(pc[5]).toBe(104);
     expect(pc[8]).toBe(100);
   });
 
-  it('string-valued history reads back the prior bar\'s string (both backends)', async () => {
+  it("string-valued history reads back the prior bar's string (both backends)", async () => {
     const e = await bothBackends(`//@version=6
 indicator("sh")
 s = str.tostring(bar_index)
 plot(bar_index > 0 and s[1] == str.tostring(bar_index - 1) ? 1 : 0, "ok")`);
-    expect(plot(e, 'ok').slice(1).every((v) => v === 1)).toBe(true);
+    expect(
+      plot(e, 'ok')
+        .slice(1)
+        .every((v) => v === 1),
+    ).toBe(true);
   });
 });
 
@@ -188,12 +217,27 @@ describe('request.security_lower_tf (intrabar) — host-injected lower-TF bars',
     const H = 3600_000;
     const T = Date.UTC(2024, 0, 1);
     // 3 chart bars at 60-min.
-    const chart: Bar[] = [0, 1, 2].map((c) => ({ time: T + c * H, open: 100 + c, high: 110 + c, low: 90 + c, close: 105 + c, volume: 0 }));
+    const chart: Bar[] = [0, 1, 2].map((c) => ({
+      time: T + c * H,
+      open: 100 + c,
+      high: 110 + c,
+      low: 90 + c,
+      close: 105 + c,
+      volume: 0,
+    }));
     // 3 intrabars per chart bar with distinct volumes 1..9 (bar0: 1,2,3 · bar1: 4,5,6 · bar2: 7,8,9).
     const ltf: Bar[] = [];
-    for (let c = 0; c < 3; c++) for (let k = 0; k < 3; k++) {
-      ltf.push({ time: T + c * H + k * (H / 3), open: 100, high: 110 + k, low: 90 - k, close: 100 + k, volume: c * 3 + k + 1 });
-    }
+    for (let c = 0; c < 3; c++)
+      for (let k = 0; k < 3; k++) {
+        ltf.push({
+          time: T + c * H + k * (H / 3),
+          open: 100,
+          high: 110 + k,
+          low: 90 - k,
+          close: 100 + k,
+          volume: c * 3 + k + 1,
+        });
+      }
     const src = `//@version=6
 indicator("ltf")
 get_hlv() => [high, low, volume]
@@ -217,18 +261,29 @@ plot(array.size(one), "scalarN")`;
     for (const [id, jp] of js.outputs.plots) {
       const ipp = ip.outputs.plots.get(id)!;
       for (let i = 0; i < jp.data.length; i++) {
-        if (!eqNaN(jp.data[i], ipp.data[i])) throw new Error(`backend diverge "${jp.title}" bar ${i}: js=${jp.data[i]} ip=${ipp.data[i]}`);
+        if (!eqNaN(jp.data[i], ipp.data[i]))
+          throw new Error(
+            `backend diverge "${jp.title}" bar ${i}: js=${jp.data[i]} ip=${ipp.data[i]}`,
+          );
       }
     }
-    expect(plot(js, 'n')).toEqual([3, 3, 3]);              // 3 intrabars bucketed per chart bar
-    expect(plot(js, 'vsum')).toEqual([6, 15, 24]);          // Σ volumes per bar: 1+2+3, 4+5+6, 7+8+9
-    expect(plot(js, 'h0')).toEqual([110, 110, 110]);        // first intrabar high (110+0) each bar
-    expect(plot(js, 'scalarN')).toEqual([3, 3, 3]);         // scalar expr → one array per chart bar
+    expect(plot(js, 'n')).toEqual([3, 3, 3]); // 3 intrabars bucketed per chart bar
+    expect(plot(js, 'vsum')).toEqual([6, 15, 24]); // Σ volumes per bar: 1+2+3, 4+5+6, 7+8+9
+    expect(plot(js, 'h0')).toEqual([110, 110, 110]); // first intrabar high (110+0) each bar
+    expect(plot(js, 'scalarN')).toEqual([3, 3, 3]); // scalar expr → one array per chart bar
   });
 
   it('no injected lower-TF bars → [] per chart bar (graceful, pre-feed behavior)', async () => {
-    const H = 3600_000, T = Date.UTC(2024, 0, 1);
-    const chart: Bar[] = [0, 1, 2].map((c) => ({ time: T + c * H, open: 100, high: 110, low: 90, close: 100, volume: 1 }));
+    const H = 3600_000,
+      T = Date.UTC(2024, 0, 1);
+    const chart: Bar[] = [0, 1, 2].map((c) => ({
+      time: T + c * H,
+      open: 100,
+      high: 110,
+      low: 90,
+      close: 100,
+      volume: 1,
+    }));
     const c = compile(`//@version=6
 indicator("ltf0")
 v = request.security_lower_tf(syminfo.tickerid, "1", close)
@@ -244,8 +299,16 @@ plot(array.size(v), "n")`);
     // so security_lower_tf returns a single intrabar per bar (the bar's own values) — letting the
     // volume-profile render from chart data alone instead of accumulating nothing. An EXPLICIT tf
     // ("1") with no data still returns [] (see the test above).
-    const H = 3600_000, T = Date.UTC(2024, 0, 1);
-    const chart: Bar[] = [0, 1, 2].map((c) => ({ time: T + c * H, open: 100 + c, high: 110 + c, low: 90 + c, close: 105 + c, volume: 7 + c }));
+    const H = 3600_000,
+      T = Date.UTC(2024, 0, 1);
+    const chart: Bar[] = [0, 1, 2].map((c) => ({
+      time: T + c * H,
+      open: 100 + c,
+      high: 110 + c,
+      low: 90 + c,
+      close: 105 + c,
+      volume: 7 + c,
+    }));
     const c = compile(`//@version=6
 indicator("ltfauto")
 get_hlv() => [high, low, volume]
@@ -255,9 +318,9 @@ plot(array.size(v) > 0 ? array.get(v, 0) : na, "v0")
 plot(array.size(h) > 0 ? array.get(h, 0) : na, "h0")`);
     const e = new Engine(c, new ArrayFeed(chart), { backend: 'js' });
     await e.run({ symbol: 'X', timeframe: '60' });
-    expect(plot(e, 'n')).toEqual([1, 1, 1]);           // one intrabar = the chart bar itself
-    expect(plot(e, 'v0')).toEqual([7, 8, 9]);          // its own volume
-    expect(plot(e, 'h0')).toEqual([110, 111, 112]);    // its own high
+    expect(plot(e, 'n')).toEqual([1, 1, 1]); // one intrabar = the chart bar itself
+    expect(plot(e, 'v0')).toEqual([7, 8, 9]); // its own volume
+    expect(plot(e, 'h0')).toEqual([110, 111, 112]); // its own high
   });
 });
 
@@ -302,8 +365,8 @@ chooseIf(x) =>
         -100.0
 plot(pick("b"), "sw")
 plot(chooseIf(close), "if")`);
-    expect(last(e, 'sw')).toBe(20);   // switch "b" branch
-    expect(last(e, 'if')).toBe(100);  // close > 0 → the `if` branch
+    expect(last(e, 'sw')).toBe(20); // switch "b" branch
+    expect(last(e, 'if')).toBe(100); // close > 0 → the `if` branch
   });
 });
 
@@ -364,9 +427,9 @@ plot(chart.left_visible_bar_time, "left")
 plot(chart.right_visible_bar_time, "right")
 plot(last_bar_time, "lbt")`);
     expect([last(e, 'bg'), last(e, 'fg')]).toEqual([1, 1]);
-    expect(plot(e, 'left')[0]).toBe(bars[0].time);                 // leftmost = first bar
-    expect(last(e, 'right')).toBe(bars[bars.length - 1].time);     // rightmost = last bar
-    expect(last(e, 'right')).toBe(last(e, 'lbt'));                 // == last_bar_time
+    expect(plot(e, 'left')[0]).toBe(bars[0].time); // leftmost = first bar
+    expect(last(e, 'right')).toBe(bars[bars.length - 1].time); // rightmost = last bar
+    expect(last(e, 'right')).toBe(last(e, 'lbt')); // == last_bar_time
   });
 });
 
@@ -379,13 +442,14 @@ plot(session.islastbar ? 1 : 0, "slb")
 plot(session.isfirstbar_regular ? 1 : 0, "sfbr")
 plot(session.islastbar_regular ? 1 : 0, "slbr")
 plot(session.regular == "regular" ? 1 : 0, "reg")`);
-    const sfb = plot(e, 'sfb'), slb = plot(e, 'slb');
-    expect(sfb[0]).toBe(1);                       // very first bar starts a session
-    expect(slb[slb.length - 1]).toBe(1);          // last bar ends its session
+    const sfb = plot(e, 'sfb'),
+      slb = plot(e, 'slb');
+    expect(sfb[0]).toBe(1); // very first bar starts a session
+    expect(slb[slb.length - 1]).toBe(1); // last bar ends its session
     // 4×6h bars per UTC day → a new session every 4th bar (bars 0,4,8,… are first).
     expect(sfb[4]).toBe(1);
     expect(sfb[5]).toBe(0);
-    expect(plot(e, 'sfbr')).toEqual(sfb);         // regular == extended on a 24h feed
+    expect(plot(e, 'sfbr')).toEqual(sfb); // regular == extended on a 24h feed
     expect(plot(e, 'slbr')).toEqual(slb);
     expect(last(e, 'reg')).toBe(1);
   });
@@ -421,10 +485,13 @@ plot(syminfo.mintick, "mt")`);
     expect(last(e, 'mt')).toBeCloseTo(last(e, 'mm') / last(e, 'ps'), 12);
   });
   it('timeframe.isticks is false for a minute timeframe; main_period equals the period', async () => {
-    const e = await bothBackends(`//@version=6
+    const e = await bothBackends(
+      `//@version=6
 indicator("tf")
 plot(timeframe.isticks ? 1 : 0, "ticks")
-plot(timeframe.main_period == timeframe.period ? 1 : 0, "mainper")`, { timeframe: '360' });
+plot(timeframe.main_period == timeframe.period ? 1 : 0, "mainper")`,
+      { timeframe: '360' },
+    );
     expect(last(e, 'ticks')).toBe(0);
     expect(last(e, 'mainper')).toBe(1);
   });
@@ -449,7 +516,8 @@ describe('ta.pvt (Price Volume Trend)', () => {
 indicator("pvt")
 plot(ta.pvt, "pvt")`);
     // independent reference computation over the same bars
-    let ref = 0, prev = NaN;
+    let ref = 0,
+      prev = NaN;
     const got = plot(e, 'pvt');
     for (let i = 0; i < bars.length; i++) {
       const c = bars[i].close;
@@ -500,7 +568,7 @@ plot(strategy.opentrades.capital_held, "och")`;
     expect(last(e, 'npp')).toBeCloseTo((r.netProfit / cap) * 100, 9);
     expect(last(e, 'gpp')).toBeCloseTo((r.grossProfit / cap) * 100, 9);
     expect(last(e, 'glp')).toBeCloseTo((r.grossLoss / cap) * 100, 9);
-    expect(last(e, 'opp')).toBeCloseTo(0, 9);                              // flat at the end
+    expect(last(e, 'opp')).toBeCloseTo(0, 9); // flat at the end
     // averages
     expect(last(e, 'avt')).toBeCloseTo(r.netProfit / r.closedTrades.length, 9);
     expect(last(e, 'awt')).toBeCloseTo(r.grossProfit / r.wins, 9);
@@ -528,9 +596,10 @@ if bar_index == 8
     strategy.close("MyLong")
 plot(str.length(strategy.position_entry_name), "len")
 plot(strategy.position_entry_name == "MyLong" ? 1 : 0, "isml")`);
-    const len = plot(e, 'len'), isml = plot(e, 'isml');
-    expect(len[1]).toBe(0);          // before entry → empty
-    expect(isml[4]).toBe(1);         // while holding → "MyLong"
+    const len = plot(e, 'len'),
+      isml = plot(e, 'isml');
+    expect(len[1]).toBe(0); // before entry → empty
+    expect(isml[4]).toBe(1); // while holding → "MyLong"
     expect(len[len.length - 1]).toBe(0); // after close → empty again
   });
 
@@ -542,7 +611,9 @@ if bar_index == 2
 plot(strategy.opentrades.capital_held, "och")
 plot(strategy.position_size, "sz")
 plot(strategy.position_avg_price, "ap")`);
-    const sz = plot(e, 'sz'), ap = plot(e, 'ap'), och = plot(e, 'och');
+    const sz = plot(e, 'sz'),
+      ap = plot(e, 'ap'),
+      och = plot(e, 'och');
     const i = sz.length - 1;
     expect(sz[i]).toBe(3);
     expect(och[i]).toBeCloseTo(Math.abs(sz[i] * ap[i]), 6); // |size · avgPrice|
@@ -573,9 +644,9 @@ if barstate.islast
     lf := linefill.new(l1, l2, color.new(color.blue, 80))
 plot(array.size(linefill.all), "nfills")
 plot(array.size(polyline.all), "npoly")`);
-    expect(last(e, 'nfills')).toBe(1);   // one linefill created on the last bar
+    expect(last(e, 'nfills')).toBe(1); // one linefill created on the last bar
     expect(plot(e, 'nfills')[0]).toBe(0); // none before
-    expect(last(e, 'npoly')).toBe(0);    // no polylines created
+    expect(last(e, 'npoly')).toBe(0); // no polylines created
   });
 });
 
@@ -646,9 +717,9 @@ single() =>
         n += 1
     n
 plot(single(), "single")`);
-    expect(last(e, 'dn')).toBe(5);   // 4,3,2,1,0
-    expect(last(e, 'ds')).toBe(10);  // 4+3+2+1+0
-    expect(last(e, 'asc')).toBe(5);  // 0,1,2,3,4
+    expect(last(e, 'dn')).toBe(5); // 4,3,2,1,0
+    expect(last(e, 'ds')).toBe(10); // 4+3+2+1+0
+    expect(last(e, 'asc')).toBe(5); // 0,1,2,3,4
     expect(last(e, 'downBy')).toBe(6); // 10,8,6,4,2,0
     expect(last(e, 'single')).toBe(1); // from==to runs once
   });
@@ -660,8 +731,15 @@ describe('line.new / box.new two-chart.point overload', () => {
   // and the trailing opts object in x2 → garbage coords, nothing rendered. Now the
   // constructors detect two chart.points and map index/time→x and price→y per xloc.
   const drawPool = (e: Engine) =>
-    (e as unknown as { ctx: { drawPool: { objects: Map<number, { type: string; props: Record<string, unknown> }> } } }).ctx.drawPool;
-  const ofType = (e: Engine, t: string) => [...drawPool(e).objects.values()].filter((o) => o.type === t).map((o) => o.props);
+    (
+      e as unknown as {
+        ctx: {
+          drawPool: { objects: Map<number, { type: string; props: Record<string, unknown> }> };
+        };
+      }
+    ).ctx.drawPool;
+  const ofType = (e: Engine, t: string) =>
+    [...drawPool(e).objects.values()].filter((o) => o.type === t).map((o) => o.props);
 
   it('line.new(point, point, opts): index-form uses .index, time-form uses .time (both backends)', async () => {
     const e = await bothBackends(`//@version=6
@@ -751,7 +829,13 @@ describe('fundamental-type keyword used as a variable name', () => {
   // parse a typed decl (`color <name>`), erroring "expected Ident (got Op '=')". A type keyword
   // followed by `=` / `:=` is a variable NAME; it now falls through to the expression-led path.
   const drawPool = (e: Engine) =>
-    (e as unknown as { ctx: { drawPool: { objects: Map<number, { type: string; props: Record<string, unknown> }> } } }).ctx.drawPool;
+    (
+      e as unknown as {
+        ctx: {
+          drawPool: { objects: Map<number, { type: string; props: Record<string, unknown> }> };
+        };
+      }
+    ).ctx.drawPool;
 
   it('parses `color = …` and resolves it as a local shadowing the namespace (both backends)', async () => {
     const e = await bothBackends(`//@version=6
@@ -783,8 +867,11 @@ describe('drawing object caps (max_*_count) — most-recent-N retention', () => 
   // type (max_lines_count / …, default 50) and FIFO-evicts the oldest; piner kept everything,
   // so the host re-rendered thousands of objects. The pool now enforces the cap.
   const liveOfType = (e: Engine, t: string) =>
-    [...(e as unknown as { ctx: { drawPool: { objects: Map<number, { type: string }> } } }).ctx.drawPool.objects.values()]
-      .filter((o) => o.type === t).length;
+    [
+      ...(
+        e as unknown as { ctx: { drawPool: { objects: Map<number, { type: string }> } } }
+      ).ctx.drawPool.objects.values(),
+    ].filter((o) => o.type === t).length;
 
   it('keeps only the last max_lines_count lines (FIFO eviction)', async () => {
     const c = compile(`//@version=6

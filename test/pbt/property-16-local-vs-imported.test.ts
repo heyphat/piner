@@ -14,18 +14,43 @@ import { runPlots, comparePlots } from './harness.js';
 describe('Property 16 — imported functions behave identically to local functions', () => {
   it('imported f(close) == local f(close), per bar, on both backends', async () => {
     await fc.assert(
-      fc.asyncProperty(exprArb(['src', 'close', 'high', 'low'], 3), barsArb(30), async (e, bars) => {
-        const local = compile(`//@version=6\nindicator("t")\nf(float src) => ${e}\nplot(f(close), title="p")\n`);
-        const imported = compile(
-          `//@version=6\nindicator("t")\nimport u/genlib/1 as g\nplot(g.f(close), title="p")\n`,
-          { libraries: [{ key: 'u/genlib/1', source: `//@version=6\nlibrary("G")\nexport f(float src) => ${e}\n` }] },
-        );
-        // Each variant's two backends agree...
-        comparePlots(await runPlots(local, bars, 'js'), await runPlots(local, bars, 'interp'), 'local js/interp');
-        comparePlots(await runPlots(imported, bars, 'js'), await runPlots(imported, bars, 'interp'), 'imported js/interp');
-        // ...and imported ≡ local.
-        comparePlots(await runPlots(imported, bars, 'js'), await runPlots(local, bars, 'js'), 'imported vs local');
-      }),
+      fc.asyncProperty(
+        exprArb(['src', 'close', 'high', 'low'], 3),
+        barsArb(30),
+        async (e, bars) => {
+          const local = compile(
+            `//@version=6\nindicator("t")\nf(float src) => ${e}\nplot(f(close), title="p")\n`,
+          );
+          const imported = compile(
+            `//@version=6\nindicator("t")\nimport u/genlib/1 as g\nplot(g.f(close), title="p")\n`,
+            {
+              libraries: [
+                {
+                  key: 'u/genlib/1',
+                  source: `//@version=6\nlibrary("G")\nexport f(float src) => ${e}\n`,
+                },
+              ],
+            },
+          );
+          // Each variant's two backends agree...
+          comparePlots(
+            await runPlots(local, bars, 'js'),
+            await runPlots(local, bars, 'interp'),
+            'local js/interp',
+          );
+          comparePlots(
+            await runPlots(imported, bars, 'js'),
+            await runPlots(imported, bars, 'interp'),
+            'imported js/interp',
+          );
+          // ...and imported ≡ local.
+          comparePlots(
+            await runPlots(imported, bars, 'js'),
+            await runPlots(local, bars, 'js'),
+            'imported vs local',
+          );
+        },
+      ),
       { numRuns: 100 },
     );
   });

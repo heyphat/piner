@@ -33,7 +33,11 @@ export class Engine {
   readonly ctx = new ExecutionContext();
   private readonly driver: Driver;
 
-  constructor(script: ScriptFn | CompiledScript, private readonly feed: DataFeed, opts: EngineOptions = {}) {
+  constructor(
+    script: ScriptFn | CompiledScript,
+    private readonly feed: DataFeed,
+    opts: EngineOptions = {},
+  ) {
     let main: ScriptFn;
     if (typeof script === 'function') {
       main = script;
@@ -59,7 +63,8 @@ export class Engine {
   async run(opts: RunOptions): Promise<void> {
     this.ctx.symbol = opts.symbol;
     this.ctx.tfStr = opts.timeframe;
-    if (opts.mintick != null && Number.isFinite(opts.mintick) && opts.mintick > 0) this.ctx.mintick = opts.mintick;
+    if (opts.mintick != null && Number.isFinite(opts.mintick) && opts.mintick > 0)
+      this.ctx.mintick = opts.mintick;
     const bars = await this.feed.history(opts.symbol, opts.timeframe);
     this.ctx.allBars = bars; // for request.security resampling
     this.driver.runHistorical(bars);

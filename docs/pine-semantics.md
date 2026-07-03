@@ -22,7 +22,7 @@ every item maps to a mechanism in [`architecture.md`](./architecture.md) §13.
 ## 2. Series & history
 
 - **The `[]` operator.** `[verified]` `close[0] == close` (current bar),
-  `close[1]` is one bar back. A *constant* offset references **different bars on
+  `close[1]` is one bar back. A _constant_ offset references **different bars on
   each execution** as the series grows — this is why Pine series ≠ arrays.
   → [execution-model](https://www.tradingview.com/pine-script-docs/language/execution-model/),
   [operators](https://www.tradingview.com/pine-script-docs/language/operators/)
@@ -80,12 +80,12 @@ every item maps to a mechanism in [`architecture.md`](./architecture.md) §13.
 
 - `[verified]` Returns **confirmed** values on historical bars but possibly
   **unconfirmed** (developing) values on realtime bars — the source of HTF repaint.
-- `[verified]` `barmerge.lookahead_on` *without* an offset leaks future data on
+- `[verified]` `barmerge.lookahead_on` _without_ an offset leaks future data on
   historical bars (returns the first intrabar of the HTF period); `lookahead_on` +
   `[1]` offset is the **non-repainting** idiom (always last confirmed value).
 - **Default lookahead = `barmerge.lookahead_off`** `[verified]` — confirmed against
   the v6 reference (default since v3; v1/v2 defaulted to `lookahead_on`). On
-  historical bars `lookahead_off` returns the *last confirmed* HTF value (no future
+  historical bars `lookahead_off` returns the _last confirmed_ HTF value (no future
   leak); no effect on realtime. piner implements this default (Phase 7).
   → [other-timeframes-and-data](https://www.tradingview.com/pine-script-docs/concepts/other-timeframes-and-data/),
   [repainting](https://www.tradingview.com/pine-script-docs/concepts/repainting/)

@@ -17,7 +17,8 @@ async function bothBackends(src: string, mintick?: number) {
   for (const [id, jp] of js.outputs.plots) {
     const ipp = ip.outputs.plots.get(id)!;
     for (let i = 0; i < jp.data.length; i++) {
-      const a = jp.data[i], b = ipp.data[i];
+      const a = jp.data[i],
+        b = ipp.data[i];
       const same = (Number.isNaN(a) && Number.isNaN(b)) || Math.abs(a - b) < 1e-9;
       if (!same) throw new Error(`diverge plot ${id} bar ${i}: js=${a} ip=${b}`);
     }
@@ -68,7 +69,7 @@ describe('strategy — broker simulator', () => {
       '//@version=6\nstrategy("s")\nif bar_index == 0\n    strategy.entry("L", strategy.long)\nif bar_index == 5\n    strategy.entry("S", strategy.short)\nplot(strategy.position_size)\n',
     );
     const sz = eng.outputs.plots.get(0)!.data;
-    expect(sz[1]).toBe(1);  // long after bar1 fill
+    expect(sz[1]).toBe(1); // long after bar1 fill
     expect(sz[6]).toBe(-1); // reversed to short after bar6 fill
     // long @101 closed @106 → +5 realized; short opened @106
     expect(eng.strategy.netProfit).toBeCloseTo(5, 9);
@@ -117,7 +118,8 @@ describe('strategy — broker simulator', () => {
     // exit loss=50 ticks → stop = 101 - 50*mintick. mintick=0.01 → 100.5 (>= 99 → stopped
     // out); mintick=0.05 → 98.5 (< 99 → never breached → stays open). Same script, the only
     // difference is the tick size.
-    const src = '//@version=6\nstrategy("s")\nif bar_index == 0\n    strategy.entry("L", strategy.long)\nstrategy.exit("X", "L", loss = 50)\nplot(strategy.position_size)\n';
+    const src =
+      '//@version=6\nstrategy("s")\nif bar_index == 0\n    strategy.entry("L", strategy.long)\nstrategy.exit("X", "L", loss = 50)\nplot(strategy.position_size)\n';
 
     const tight = await bothBackends(src, 0.01);
     expect(tight.outputs.plots.get(0)!.data[9]).toBe(0); // stopped out
@@ -233,8 +235,16 @@ describe('strategy — broker simulator', () => {
 
   it('trailing stop (trail_points/trail_offset) ratchets then closes on a reversal', async () => {
     const run = async (prices: number[]) => {
-      const tb: Bar[] = prices.map((px, i) => ({ time: i * 60000, open: px, high: px + 1, low: px - 1, close: px, volume: 1 }));
-      const src = '//@version=6\nstrategy("s")\nif bar_index == 0\n    strategy.entry("L", strategy.long)\nstrategy.exit("X", "L", trail_points = 200, trail_offset = 300)\nplot(strategy.position_size)\n';
+      const tb: Bar[] = prices.map((px, i) => ({
+        time: i * 60000,
+        open: px,
+        high: px + 1,
+        low: px - 1,
+        close: px,
+        volume: 1,
+      }));
+      const src =
+        '//@version=6\nstrategy("s")\nif bar_index == 0\n    strategy.entry("L", strategy.long)\nstrategy.exit("X", "L", trail_points = 200, trail_offset = 300)\nplot(strategy.position_size)\n';
       const c = compile(src);
       const js = new Engine(c, new ArrayFeed(tb), { backend: 'js' });
       const ip = new Engine(c, new ArrayFeed(tb), { backend: 'interp' });
@@ -274,7 +284,7 @@ describe('strategy — broker simulator', () => {
     expect(ot[9]).toBe(0);
   });
 
-  it('strategy.exit from_entry targets only that entry\'s lots', async () => {
+  it("strategy.exit from_entry targets only that entry's lots", async () => {
     // A @101 (bar1), B @102 (bar2). The exit tied to "B" (profit 100 ticks → 103,
     // hit by bar2's high 104) closes ONLY B; A stays open to the end.
     const eng = await bothBackends(
@@ -287,7 +297,7 @@ describe('strategy — broker simulator', () => {
     expect(eng.outputs.plots.get(0)!.data[9]).toBe(1); // A still open
   });
 
-  it('exit profit ticks are measured from each entry\'s own fill price, not the position average', async () => {
+  it("exit profit ticks are measured from each entry's own fill price, not the position average", async () => {
     // A @101 → target 105 (hit bar3, high 105); B @102 → target 106 (hit bar4).
     // The position average (101.5) would have put both targets at 105.5.
     const eng = await bothBackends(
@@ -304,7 +314,7 @@ describe('strategy — broker simulator', () => {
     // after the FIFO close of A, the remaining position re-prices to B's entry
     const ap = eng.outputs.plots.get(0)!.data;
     expect(ap[2]).toBeCloseTo(101.5, 9); // both lots open
-    expect(ap[3]).toBeCloseTo(102, 9);   // only B left
+    expect(ap[3]).toBeCloseTo(102, 9); // only B left
   });
 
   it('strategy.cancel(id) cancels exit brackets too', async () => {

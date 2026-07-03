@@ -8,7 +8,8 @@ const bars: Bar[] = Array.from({ length: 40 }, (_, i) => {
   const c = 100 + Math.sin(i / 4) * 6 + (i % 5);
   return { time: i * 60000, open: c - 1, high: c + 2, low: c - 2, close: c, volume: 1000 + i * 10 };
 });
-const eqNaN = (a: number, b: number) => (Number.isNaN(a) && Number.isNaN(b)) || Math.abs(a - b) < 1e-9 || a === b;
+const eqNaN = (a: number, b: number) =>
+  (Number.isNaN(a) && Number.isNaN(b)) || Math.abs(a - b) < 1e-9 || a === b;
 async function crossCheck(src: string, data = bars) {
   const c = compile(src);
   const js = new Engine(c, new ArrayFeed(data), { backend: 'js' });
@@ -17,7 +18,8 @@ async function crossCheck(src: string, data = bars) {
   await ip.run({ symbol: 'BTCUSD', timeframe: '60' });
   for (const [id, jp] of js.outputs.plots) {
     const ipp = ip.outputs.plots.get(id)!;
-    for (let i = 0; i < jp.data.length; i++) if (!eqNaN(jp.data[i], ipp.data[i])) throw new Error(`diverge plot ${id} bar ${i}`);
+    for (let i = 0; i < jp.data.length; i++)
+      if (!eqNaN(jp.data[i], ipp.data[i])) throw new Error(`diverge plot ${id} bar ${i}`);
   }
   return js;
 }
@@ -25,7 +27,9 @@ async function crossCheck(src: string, data = bars) {
 describe('NA representation (clone-safe) — regression for the structuredClone bug', () => {
   it('a reference-typed var left as na does not break the rollback snapshot', async () => {
     // Previously threw "The object can not be cloned" (NA was a Symbol).
-    await crossCheck('//@version=6\nindicator("x")\nvar line myLine = na\nvar label lb = na\nplot(close)\n');
+    await crossCheck(
+      '//@version=6\nindicator("x")\nvar line myLine = na\nvar label lb = na\nplot(close)\n',
+    );
   });
 });
 
@@ -33,7 +37,9 @@ describe('date/time builtins (leaves + functions)', () => {
   it('reads year/month/dayofmonth/hour/minute from the bar time', async () => {
     const t0 = Date.UTC(2021, 5, 15, 10, 30, 0); // Jun 15 2021 10:30 UTC
     const dbars: Bar[] = [{ time: t0, open: 1, high: 1, low: 1, close: 1, volume: 1 }];
-    const c = compile('//@version=6\nindicator("x")\nplot(year)\nplot(month)\nplot(dayofmonth)\nplot(hour)\nplot(minute)\nplot(year(time))\n');
+    const c = compile(
+      '//@version=6\nindicator("x")\nplot(year)\nplot(month)\nplot(dayofmonth)\nplot(hour)\nplot(minute)\nplot(year(time))\n',
+    );
     const eng = new Engine(c, new ArrayFeed(dbars));
     await eng.run({ symbol: 'T', timeframe: '1' });
     expect(eng.outputs.plots.get(0)!.data[0]).toBe(2021);
@@ -47,7 +53,9 @@ describe('date/time builtins (leaves + functions)', () => {
 
 describe('syminfo.* / timeframe.* from the run', () => {
   it('exposes symbol and timeframe info', async () => {
-    const c = compile('//@version=6\nindicator("x")\nplot(timeframe.in_seconds())\nplot(timeframe.isintraday ? 1.0 : 0.0)\n');
+    const c = compile(
+      '//@version=6\nindicator("x")\nplot(timeframe.in_seconds())\nplot(timeframe.isintraday ? 1.0 : 0.0)\n',
+    );
     const eng = new Engine(c, new ArrayFeed(bars));
     await eng.run({ symbol: 'BTCUSD', timeframe: '60' });
     expect(eng.outputs.plots.get(0)!.data[0]).toBe(60 * 60); // "60" minutes → 3600s
@@ -84,8 +92,12 @@ plot(ph)
     // ta.supertrend returns direction = -1 for an uptrend (trail below price) and +1 for a
     // downtrend (trail above price) — the convention the `trendUp = dir < 0` idiom relies on.
     const ta = new Ta();
-    const feed = (c: number) => { ta.host = { open: c, high: c + 1, low: c - 1, close: c, volume: 1000, time: 0 }; return ta.supertrend(3.0, 10, 0); };
-    let dir = NaN, line = NaN;
+    const feed = (c: number) => {
+      ta.host = { open: c, high: c + 1, low: c - 1, close: c, volume: 1000, time: 0 };
+      return ta.supertrend(3.0, 10, 0);
+    };
+    let dir = NaN,
+      line = NaN;
     for (let i = 0; i < 40; i++) [line, dir] = feed(100 + i * 2); // strong, sustained uptrend
     expect(dir).toBe(-1);
     expect(line).toBeLessThan(ta.host.close); // trail sits below price in an uptrend
@@ -110,7 +122,8 @@ plot(ph)
   });
   it('math.sum is the rolling window sum', () => {
     const ta = new Ta();
-    ta.sum(1, 3, 0); ta.sum(2, 3, 0);
+    ta.sum(1, 3, 0);
+    ta.sum(2, 3, 0);
     expect(ta.sum(3, 3, 0)).toBe(6); // 1+2+3
     expect(ta.sum(4, 3, 0)).toBe(9); // 2+3+4
   });
@@ -144,13 +157,15 @@ describe('collection methods (array / matrix)', () => {
 
 describe('constant namespaces resolve (compile-only)', () => {
   it('xloc/extend/format/font/text/currency/barmerge/order/math constants', () => {
-    expect(() => compile(`//@version=6
+    expect(() =>
+      compile(`//@version=6
 indicator("x")
 var l = line.new(bar_index, high, bar_index, low, xloc = xloc.bar_time, extend = extend.both)
 arr = array.from(3.0, 1.0, 2.0)
 array.sort(arr, order.descending)
 c = math.pi + math.e
 plot(c)
-`)).not.toThrow();
+`),
+    ).not.toThrow();
   });
 });

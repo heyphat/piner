@@ -17,7 +17,11 @@ function writeLib(pub: string, lib: string, version: string, source: string): vo
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, `${version}.pine`), source);
 }
-writeLib('PineCoders', 'AllTimeHighLow', '1', `//@version=6
+writeLib(
+  'PineCoders',
+  'AllTimeHighLow',
+  '1',
+  `//@version=6
 library("AllTimeHighLow", true)
 export hi(float val = high) =>
     var float ath = val
@@ -25,9 +29,15 @@ export hi(float val = high) =>
 export lo(float val = low) =>
     var float atl = val
     atl := math.min(atl, val)
-`);
+`,
+);
 writeLib('acme', 'util', '1', '//@version=6\nlibrary("util")\nexport base(float x) => x + 1.0\n');
-writeLib('acme', 'util', '2', '//@version=6\nlibrary("util")\nimport acme/util/1 as prev\nexport base(float x) => prev.base(x) * 2.0\n');
+writeLib(
+  'acme',
+  'util',
+  '2',
+  '//@version=6\nlibrary("util")\nimport acme/util/1 as prev\nexport base(float x) => prev.base(x) * 2.0\n',
+);
 // Noise that MUST be ignored by the scan.
 writeFileSync(join(root, 'README.md'), '# not a library');
 writeFileSync(join(root, 'acme', 'util', 'notes.txt'), 'ignore me');
@@ -50,7 +60,8 @@ async function bothAgree(consumer: string, libraries = loadLibraryDir(root)) {
   for (const [id, jp] of js.outputs.plots) {
     const ipp = ip.outputs.plots.get(id)!;
     for (let i = 0; i < jp.data.length; i++) {
-      if (!eqNaN(jp.data[i], ipp.data[i])) throw new Error(`plot ${id} bar ${i}: js=${jp.data[i]} ip=${ipp.data[i]}`);
+      if (!eqNaN(jp.data[i], ipp.data[i]))
+        throw new Error(`plot ${id} bar ${i}: js=${jp.data[i]} ip=${ipp.data[i]}`);
     }
   }
   return js;
@@ -59,11 +70,17 @@ async function bothAgree(consumer: string, libraries = loadLibraryDir(root)) {
 describe('filesystem library loader — hardening (audit fixes)', () => {
   it('fsLibrarySource matches identities case-sensitively', () => {
     const src = fsLibrarySource(root);
-    expect(src({ publisher: 'acme', lib: 'util', version: '1', canonical: 'acme/util/1' })).toBeDefined();
+    expect(
+      src({ publisher: 'acme', lib: 'util', version: '1', canonical: 'acme/util/1' }),
+    ).toBeDefined();
     // On a case-insensitive filesystem (macOS/Windows) `existsSync` would match `acme/`;
     // the loader must still reject a mis-cased identity (consistent with loadLibraryDir).
-    expect(src({ publisher: 'ACME', lib: 'util', version: '1', canonical: 'ACME/util/1' })).toBeUndefined();
-    expect(src({ publisher: 'acme', lib: 'Util', version: '1', canonical: 'acme/Util/1' })).toBeUndefined();
+    expect(
+      src({ publisher: 'ACME', lib: 'util', version: '1', canonical: 'ACME/util/1' }),
+    ).toBeUndefined();
+    expect(
+      src({ publisher: 'acme', lib: 'Util', version: '1', canonical: 'acme/Util/1' }),
+    ).toBeUndefined();
   });
 
   it('loaders do not follow a symlink that escapes the library root', () => {
@@ -79,14 +96,24 @@ describe('filesystem library loader — hardening (audit fixes)', () => {
       return; // symlinks unavailable on this platform — skip
     }
     expect(loadLibraryDir(escRoot).map((e) => e.key)).toEqual([]);
-    expect(fsLibrarySource(escRoot)({ publisher: 'pub', lib: 'evil', version: '1', canonical: 'pub/evil/1' })).toBeUndefined();
+    expect(
+      fsLibrarySource(escRoot)({
+        publisher: 'pub',
+        lib: 'evil',
+        version: '1',
+        canonical: 'pub/evil/1',
+      }),
+    ).toBeUndefined();
     rmSync(outside, { recursive: true, force: true });
     rmSync(escRoot, { recursive: true, force: true });
   });
 
   it('loadLibraryManifest rejects a source path that escapes the manifest directory', () => {
     const mroot = mkdtempSync(join(tmpdir(), 'piner-man-'));
-    writeFileSync(join(mroot, 'manifest.json'), JSON.stringify({ 'a/b/1': '../../../../etc/hosts' }));
+    writeFileSync(
+      join(mroot, 'manifest.json'),
+      JSON.stringify({ 'a/b/1': '../../../../etc/hosts' }),
+    );
     expect(() => loadLibraryManifest(join(mroot, 'manifest.json'))).toThrow(/escapes/);
     rmSync(mroot, { recursive: true, force: true });
   });
@@ -132,8 +159,14 @@ import PineCoders/AllTimeHighLow/1 as ath
 plot(ath.hi(), "ath")
 plot(ath.lo(), "atl")
 `);
-    expect(js.outputs.plots.get(0)!.data.at(-1)).toBeCloseTo(Math.max(...bars.map((b) => b.high)), 9);
-    expect(js.outputs.plots.get(1)!.data.at(-1)).toBeCloseTo(Math.min(...bars.map((b) => b.low)), 9);
+    expect(js.outputs.plots.get(0)!.data.at(-1)).toBeCloseTo(
+      Math.max(...bars.map((b) => b.high)),
+      9,
+    );
+    expect(js.outputs.plots.get(1)!.data.at(-1)).toBeCloseTo(
+      Math.min(...bars.map((b) => b.low)),
+      9,
+    );
   });
 
   it('transitive filesystem libraries resolve (acme/util/2 → acme/util/1)', async () => {
@@ -147,7 +180,10 @@ plot(u.base(close), "v2")
 
   it('loadLibraryManifest maps identities to source files (paths relative to the manifest)', () => {
     const manifestPath = join(root, 'manifest.json');
-    writeFileSync(manifestPath, JSON.stringify({ 'renamed/lib/9': 'PineCoders/AllTimeHighLow/1.pine' }));
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({ 'renamed/lib/9': 'PineCoders/AllTimeHighLow/1.pine' }),
+    );
     const reg = loadLibraryManifest(manifestPath);
     expect(reg).toHaveLength(1);
     expect(reg[0].key).toBe('renamed/lib/9');
@@ -156,8 +192,11 @@ plot(u.base(close), "v2")
 
   it('a loaded registry still enforces the core guardrails (missing import → CompileError)', () => {
     const reg = loadLibraryDir(root);
-    expect(() => compile('//@version=6\nindicator("x")\nimport who/knows/1 as w\nplot(w.f(close))\n', { libraries: reg }))
-      .toThrow(CompileError);
+    expect(() =>
+      compile('//@version=6\nindicator("x")\nimport who/knows/1 as w\nplot(w.f(close))\n', {
+        libraries: reg,
+      }),
+    ).toThrow(CompileError);
   });
 
   it('throws a clear error for a non-existent directory', () => {

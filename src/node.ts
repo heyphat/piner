@@ -35,7 +35,11 @@ import type { LibraryIdentity, LibraryRegistry } from './sema/library.js';
  */
 function realWithin(rootReal: string, p: string): string | null {
   let real: string;
-  try { real = realpathSync(p); } catch { return null; }
+  try {
+    real = realpathSync(p);
+  } catch {
+    return null;
+  }
   return real === rootReal || real.startsWith(rootReal + sep) ? real : null;
 }
 
@@ -110,16 +114,24 @@ export function loadLibraryManifest(manifestPath: string): LibraryRegistry {
     // read an arbitrary host file.
     const srcPath = resolve(base, rel);
     if (srcPath !== base && !srcPath.startsWith(base + sep)) {
-      throw new Error(`loadLibraryManifest: source path "${rel}" for "${key}" escapes the manifest directory`);
+      throw new Error(
+        `loadLibraryManifest: source path "${rel}" for "${key}" escapes the manifest directory`,
+      );
     }
     // The lexical check above cannot see through symlinks. Follow them and require the
     // REAL target to stay inside the manifest directory too, so a symlink planted in the
     // tree (e.g. `lib.pine → /etc/passwd`) cannot read an arbitrary host file — matching
     // the realpath containment `loadLibraryDir`/`fsLibrarySource` enforce.
     let real: string;
-    try { real = realpathSync(srcPath); } catch { throw new Error(`loadLibraryManifest: source "${rel}" for "${key}" does not exist`); }
+    try {
+      real = realpathSync(srcPath);
+    } catch {
+      throw new Error(`loadLibraryManifest: source "${rel}" for "${key}" does not exist`);
+    }
     if (real !== baseReal && !real.startsWith(baseReal + sep)) {
-      throw new Error(`loadLibraryManifest: source path "${rel}" for "${key}" escapes the manifest directory`);
+      throw new Error(
+        `loadLibraryManifest: source path "${rel}" for "${key}" escapes the manifest directory`,
+      );
     }
     if (!statSync(real).isFile()) {
       throw new Error(`loadLibraryManifest: source "${rel}" for "${key}" is not a regular file`);
@@ -130,7 +142,9 @@ export function loadLibraryManifest(manifestPath: string): LibraryRegistry {
 
 /** Non-hidden immediate subdirectory names of `dir`. */
 function subdirs(dir: string): string[] {
-  return readdirSync(dir).filter((name) => !name.startsWith('.') && statSync(join(dir, name)).isDirectory());
+  return readdirSync(dir).filter(
+    (name) => !name.startsWith('.') && statSync(join(dir, name)).isDirectory(),
+  );
 }
 
 /**
@@ -144,11 +158,18 @@ function subdirs(dir: string): string[] {
  * const compiled = await compileAsync(src, { resolveLibrary: fsLibrarySource('./pine-libs') });
  * ```
  */
-export function fsLibrarySource(root: string, opts: LoadLibraryDirOptions = {}): (identity: LibraryIdentity) => string | undefined {
+export function fsLibrarySource(
+  root: string,
+  opts: LoadLibraryDirOptions = {},
+): (identity: LibraryIdentity) => string | undefined {
   const exts = opts.extensions ?? ['.pine'];
   const rootAbs = resolve(root);
   let rootReal: string | null;
-  try { rootReal = realpathSync(rootAbs); } catch { rootReal = null; }
+  try {
+    rootReal = realpathSync(rootAbs);
+  } catch {
+    rootReal = null;
+  }
   return (identity) => {
     if (rootReal === null) return undefined; // root does not exist
     for (const ext of exts) {
@@ -160,8 +181,17 @@ export function fsLibrarySource(root: string, opts: LoadLibraryDirOptions = {}):
       // `alice/…` — matching `loadLibraryDir` and the documented contract; and (b) blocks
       // any symlink whose target escapes the root.
       let real: string;
-      try { real = realpathSync(filePath); } catch { continue; }
-      const expected = join(rootReal, identity.publisher, identity.lib, `${identity.version}${ext}`);
+      try {
+        real = realpathSync(filePath);
+      } catch {
+        continue;
+      }
+      const expected = join(
+        rootReal,
+        identity.publisher,
+        identity.lib,
+        `${identity.version}${ext}`,
+      );
       if (real === expected && statSync(real).isFile()) return readFileSync(real, 'utf8');
     }
     return undefined;

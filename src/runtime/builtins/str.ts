@@ -46,7 +46,10 @@ function formatNumberPattern(value: number, pattern: string): string {
   if (grouping > 0 && ip.length > grouping) {
     const parts: string[] = [];
     let i = ip.length;
-    while (i > grouping) { parts.unshift(ip.slice(i - grouping, i)); i -= grouping; }
+    while (i > grouping) {
+      parts.unshift(ip.slice(i - grouping, i));
+      i -= grouping;
+    }
     parts.unshift(ip.slice(0, i));
     ip = parts.join(',');
   }
@@ -66,10 +69,14 @@ function formatNumberSpec(value: number, spec: string): string {
   if (isNa(value)) return 'NaN';
   const s = spec.trim();
   switch (s) {
-    case 'integer': return formatNumberPattern(value, '#,##0'); // integer instance groups digits
-    case 'percent': return formatNumberPattern(value * 100, '#.###') + '%';
-    case 'currency': return '$' + formatNumberPattern(value, '#,##0.00');
-    default: return formatNumberPattern(value, s);
+    case 'integer':
+      return formatNumberPattern(value, '#,##0'); // integer instance groups digits
+    case 'percent':
+      return formatNumberPattern(value * 100, '#.###') + '%';
+    case 'currency':
+      return '$' + formatNumberPattern(value, '#,##0.00');
+    default:
+      return formatNumberPattern(value, s);
   }
 }
 
@@ -98,7 +105,12 @@ function formatVolume(value: number): string {
   if (!Number.isFinite(value)) return value > 0 ? '∞' : '-∞';
   const sign = value < 0 ? '-' : '';
   const abs = Math.abs(value);
-  const units: [number, string][] = [[1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'K']];
+  const units: [number, string][] = [
+    [1e12, 'T'],
+    [1e9, 'B'],
+    [1e6, 'M'],
+    [1e3, 'K'],
+  ];
   for (const [base, suffix] of units) {
     if (abs >= base) {
       const mantissa = (abs / base).toFixed(3).replace(/\.?0+$/, '');
@@ -144,18 +156,29 @@ export const StrNs = {
     if (isNa(fmt)) return NA as unknown as string;
     const src = String(fmt);
     let out = '';
-    for (let i = 0; i < src.length; ) {
+    for (let i = 0; i < src.length;) {
       const c = src[i];
       if (c === "'") {
-        if (src[i + 1] === "'") { out += "'"; i += 2; continue; }
+        if (src[i + 1] === "'") {
+          out += "'";
+          i += 2;
+          continue;
+        }
         i++;
-        while (i < src.length && src[i] !== "'") { out += src[i]; i++; }
+        while (i < src.length && src[i] !== "'") {
+          out += src[i];
+          i++;
+        }
         i++; // skip closing quote
         continue;
       }
       if (c === '{') {
         const end = src.indexOf('}', i);
-        if (end < 0) { out += c; i++; continue; }
+        if (end < 0) {
+          out += c;
+          i++;
+          continue;
+        }
         const body = src.slice(i + 1, end);
         const parts = body.split(',');
         const idx = Number(parts[0].trim());
@@ -166,7 +189,11 @@ export const StrNs = {
           out += formatNumberDefault(arg); // {n,number} → default grouped format
         } else if (parts.length === 1 && Number.isInteger(idx)) {
           // Plain {n}: numbers get MessageFormat's default grouped rendering.
-          out += isNa(arg) ? 'NaN' : typeof arg === 'number' ? formatNumberDefault(arg) : String(arg);
+          out += isNa(arg)
+            ? 'NaN'
+            : typeof arg === 'number'
+              ? formatNumberDefault(arg)
+              : String(arg);
         } else {
           // Unrecognized specifier: fall back to the plain argument value.
           out += isNa(arg) ? 'NaN' : String(arg ?? '');
@@ -291,13 +318,20 @@ export const StrNs = {
     const zAbs = Math.abs(offMin);
     const zStr = zSign + pad(Math.floor(zAbs / 60), 2) + pad(zAbs % 60, 2);
     let out = '';
-    for (let i = 0; i < format.length; ) {
+    for (let i = 0; i < format.length;) {
       const c = format[i];
       if (c === "'") {
         // Quoted literal; '' is an escaped single quote.
-        if (format[i + 1] === "'") { out += "'"; i += 2; continue; }
+        if (format[i + 1] === "'") {
+          out += "'";
+          i += 2;
+          continue;
+        }
         i++;
-        while (i < format.length && format[i] !== "'") { out += format[i]; i++; }
+        while (i < format.length && format[i] !== "'") {
+          out += format[i];
+          i++;
+        }
         i++;
         continue;
       }
@@ -306,17 +340,39 @@ export const StrNs = {
       while (j < format.length && format[j] === c) j++;
       const run = j - i;
       switch (c) {
-        case 'y': out += run <= 2 ? pad(year % 100, 2) : pad(year, run); break;
-        case 'M': out += run >= 2 ? pad(month, 2) : String(month); break;
-        case 'd': out += run >= 2 ? pad(day, 2) : String(day); break;
-        case 'H': out += run >= 2 ? pad(hour, 2) : String(hour); break;
-        case 'h': out += run >= 2 ? pad(hour12, 2) : String(hour12); break;
-        case 'm': out += run >= 2 ? pad(minute, 2) : String(minute); break;
-        case 's': out += run >= 2 ? pad(second, 2) : String(second); break;
-        case 'S': out += pad(millis, 3).slice(0, run); break; // fractions of a second
-        case 'a': out += hour < 12 ? 'AM' : 'PM'; break;
-        case 'Z': out += zStr; break;
-        default: out += c.repeat(run); break;
+        case 'y':
+          out += run <= 2 ? pad(year % 100, 2) : pad(year, run);
+          break;
+        case 'M':
+          out += run >= 2 ? pad(month, 2) : String(month);
+          break;
+        case 'd':
+          out += run >= 2 ? pad(day, 2) : String(day);
+          break;
+        case 'H':
+          out += run >= 2 ? pad(hour, 2) : String(hour);
+          break;
+        case 'h':
+          out += run >= 2 ? pad(hour12, 2) : String(hour12);
+          break;
+        case 'm':
+          out += run >= 2 ? pad(minute, 2) : String(minute);
+          break;
+        case 's':
+          out += run >= 2 ? pad(second, 2) : String(second);
+          break;
+        case 'S':
+          out += pad(millis, 3).slice(0, run);
+          break; // fractions of a second
+        case 'a':
+          out += hour < 12 ? 'AM' : 'PM';
+          break;
+        case 'Z':
+          out += zStr;
+          break;
+        default:
+          out += c.repeat(run);
+          break;
       }
       i = j;
     }
@@ -326,8 +382,12 @@ export const StrNs = {
 
 /** Wall-clock parts of an epoch-ms instant in a timezone, plus its UTC offset. */
 interface WallClock {
-  year: number; month: number; day: number;
-  hour: number; minute: number; second: number;
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
   offMin: number;
 }
 
@@ -365,8 +425,12 @@ function tzWallClock(time: number, timezone: string): WallClock {
   if (fixed !== null) {
     const local = new Date(time + fixed * 60000);
     return {
-      year: local.getUTCFullYear(), month: local.getUTCMonth() + 1, day: local.getUTCDate(),
-      hour: local.getUTCHours(), minute: local.getUTCMinutes(), second: local.getUTCSeconds(),
+      year: local.getUTCFullYear(),
+      month: local.getUTCMonth() + 1,
+      day: local.getUTCDate(),
+      hour: local.getUTCHours(),
+      minute: local.getUTCMinutes(),
+      second: local.getUTCSeconds(),
       offMin: fixed,
     };
   }
@@ -374,9 +438,15 @@ function tzWallClock(time: number, timezone: string): WallClock {
     let dtf = WALL_CLOCK_FORMATTER_CACHE.get(t);
     if (!dtf) {
       dtf = new Intl.DateTimeFormat('en-US', {
-        timeZone: t, hourCycle: 'h23',
-        year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'longOffset',
+        timeZone: t,
+        hourCycle: 'h23',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        timeZoneName: 'longOffset',
       });
       WALL_CLOCK_FORMATTER_CACHE.set(t, dtf);
     }
@@ -385,16 +455,24 @@ function tzWallClock(time: number, timezone: string): WallClock {
     // longOffset is like "GMT-05:00" / "GMT+9" / "GMT" (UTC). Parse to minutes.
     const off = m.timeZoneName ? fixedOffsetMinutes(m.timeZoneName.replace(/^GMT/i, 'GMT')) : 0;
     return {
-      year: Number(m.year), month: Number(m.month), day: Number(m.day),
-      hour: Number(m.hour) % 24, minute: Number(m.minute), second: Number(m.second),
+      year: Number(m.year),
+      month: Number(m.month),
+      day: Number(m.day),
+      hour: Number(m.hour) % 24,
+      minute: Number(m.minute),
+      second: Number(m.second),
       offMin: off ?? 0,
     };
   } catch {
     // Unknown/invalid zone: treat as UTC.
     const local = new Date(time);
     return {
-      year: local.getUTCFullYear(), month: local.getUTCMonth() + 1, day: local.getUTCDate(),
-      hour: local.getUTCHours(), minute: local.getUTCMinutes(), second: local.getUTCSeconds(),
+      year: local.getUTCFullYear(),
+      month: local.getUTCMonth() + 1,
+      day: local.getUTCDate(),
+      hour: local.getUTCHours(),
+      minute: local.getUTCMinutes(),
+      second: local.getUTCSeconds(),
       offMin: 0,
     };
   }

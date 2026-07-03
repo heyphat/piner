@@ -11,13 +11,28 @@
  * Compile-and-run tests cross-check the codegen and interpreter backends.
  */
 import { describe, it, expect } from 'bun:test';
-import { compile, Engine, ArrayFeed, Ta, ArrayNs, MapNs, MatrixNs, isNa, type Bar } from '../src/index.js';
+import {
+  compile,
+  Engine,
+  ArrayFeed,
+  Ta,
+  ArrayNs,
+  MapNs,
+  MatrixNs,
+  isNa,
+  type Bar,
+} from '../src/index.js';
 
 const bars: Bar[] = Array.from({ length: 30 }, (_, i) => ({
-  time: i * 60000, open: 100 + i, high: 105 + Math.sin(i), low: 95 + Math.cos(i),
-  close: 100 + (i % 6) - 3, volume: 1000 + i * 10,
+  time: i * 60000,
+  open: 100 + i,
+  high: 105 + Math.sin(i),
+  low: 95 + Math.cos(i),
+  close: 100 + (i % 6) - 3,
+  volume: 1000 + i * 10,
 }));
-const eqNaN = (a: number, b: number) => (Number.isNaN(a) && Number.isNaN(b)) || Math.abs(a - b) < 1e-9 || a === b;
+const eqNaN = (a: number, b: number) =>
+  (Number.isNaN(a) && Number.isNaN(b)) || Math.abs(a - b) < 1e-9 || a === b;
 
 async function bothBackends(src: string, data = bars) {
   const c = compile(src);
@@ -28,7 +43,8 @@ async function bothBackends(src: string, data = bars) {
   for (const [id, jp] of js.outputs.plots) {
     const ipp = ip.outputs.plots.get(id)!;
     for (let i = 0; i < jp.data.length; i++) {
-      if (!eqNaN(jp.data[i], ipp.data[i])) throw new Error(`diverge plot ${id} bar ${i}: js=${jp.data[i]} ip=${ipp.data[i]}`);
+      if (!eqNaN(jp.data[i], ipp.data[i]))
+        throw new Error(`diverge plot ${id} bar ${i}: js=${jp.data[i]} ip=${ipp.data[i]}`);
     }
   }
   return js;
@@ -45,23 +61,29 @@ describe('extended ta.* single-value functions', () => {
   });
   it('rising / falling over the window', () => {
     const r = new Ta();
-    r.rising(1, 2, 0); r.rising(2, 2, 0);
+    r.rising(1, 2, 0);
+    r.rising(2, 2, 0);
     expect(r.rising(3, 2, 0)).toBe(true); // 1<2<3
     const f = new Ta();
-    f.falling(3, 2, 0); f.falling(2, 2, 0);
+    f.falling(3, 2, 0);
+    f.falling(2, 2, 0);
     expect(f.falling(1, 2, 0)).toBe(true);
   });
   it('variance / median / percentrank', () => {
     const v = new Ta();
-    v.variance(2, 3, 0); v.variance(4, 3, 0);
+    v.variance(2, 3, 0);
+    v.variance(4, 3, 0);
     expect(v.variance(6, 3, 0)).toBeCloseTo(8 / 3, 9);
     const md = new Ta();
-    md.median(3, 3, 0); md.median(1, 3, 0);
+    md.median(3, 3, 0);
+    md.median(1, 3, 0);
     expect(md.median(2, 3, 0)).toBe(2); // sorted [1,2,3]
   });
   it('swma fixed weights [1,2,2,1]/6', () => {
     const ta = new Ta();
-    ta.swma(1, 0); ta.swma(2, 0); ta.swma(3, 0);
+    ta.swma(1, 0);
+    ta.swma(2, 0);
+    ta.swma(3, 0);
     expect(ta.swma(4, 0)).toBeCloseTo((1 + 4 + 6 + 4) / 6, 9); // 1*1+2*2+3*2+4*1
   });
   it('linreg of a perfect line returns the line value', () => {
@@ -73,15 +95,18 @@ describe('extended ta.* single-value functions', () => {
     const ta = new Ta();
     const host = { open: 0, high: 0, low: 0, close: 0, volume: 500, time: 0 };
     ta.host = host;
-    ta.vwma(50, 3, 0); ta.vwma(50, 3, 0);
+    ta.vwma(50, 3, 0);
+    ta.vwma(50, 3, 0);
     expect(ta.vwma(50, 3, 0)).toBeCloseTo(50, 9);
   });
   it('stoch is 100 at the window high and 0 at the low', () => {
     const ta = new Ta();
-    ta.stoch(5, 10, 0, 3, 0); ta.stoch(5, 10, 0, 3, 0);
+    ta.stoch(5, 10, 0, 3, 0);
+    ta.stoch(5, 10, 0, 3, 0);
     expect(ta.stoch(10, 10, 0, 3, 0)).toBeCloseTo(100, 9);
     const lo = new Ta();
-    lo.stoch(5, 10, 0, 3, 0); lo.stoch(5, 10, 0, 3, 0);
+    lo.stoch(5, 10, 0, 3, 0);
+    lo.stoch(5, 10, 0, 3, 0);
     expect(lo.stoch(0, 10, 0, 3, 0)).toBeCloseTo(0, 9);
   });
 });
@@ -260,13 +285,16 @@ plot(mx.rows())
 `);
   });
   it('drawing methods via dot-call', async () => {
-    const eng = new Engine(compile(`//@version=6
+    const eng = new Engine(
+      compile(`//@version=6
 indicator("d")
 var l = line.new(bar_index, low, bar_index, high)
 l.set_y2(close)
 l.set_color(color.red)
 plot(close)
-`), new ArrayFeed(bars));
+`),
+      new ArrayFeed(bars),
+    );
     await eng.run({ symbol: 'T', timeframe: '1' });
     const l = eng.drawings[0];
     expect(l.props.y2).toBe(bars[bars.length - 1].close);

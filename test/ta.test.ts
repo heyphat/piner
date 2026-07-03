@@ -75,10 +75,14 @@ describe('ta.tr / ta.atr (read host OHLC)', () => {
     const ta = new Ta();
     const host = { open: 0, high: 0, low: 0, close: 0, volume: 0, time: 0 };
     ta.host = host;
-    host.high = 10; host.low = 8; host.close = 9;
+    host.high = 10;
+    host.low = 8;
+    host.close = 9;
     expect(ta.tr(0)).toBeNaN(); // first bar: no prev close → na (TV: bare ta.tr)
     expect(ta.tr(true, 1)).toBe(2); // handle_na=true: high-low on the first bar
-    host.high = 12; host.low = 9; host.close = 11;
+    host.high = 12;
+    host.low = 9;
+    host.close = 11;
     // max(12-9, |12-9|, |9-9|) = 3
     expect(ta.tr(0)).toBe(3);
     expect(ta.tr(true, 1)).toBe(3);
@@ -89,7 +93,9 @@ describe('ta.tr / ta.atr (read host OHLC)', () => {
     ta.host = host;
     let atr = NaN;
     for (let i = 0; i < 10; i++) {
-      host.high = 10 + i; host.low = 8 + i; host.close = 9 + i;
+      host.high = 10 + i;
+      host.low = 8 + i;
+      host.close = 9 + i;
       atr = ta.atr(3, 0);
     }
     expect(atr).toBeGreaterThanOrEqual(0);
@@ -101,7 +107,10 @@ describe('ta.highest / ta.lowest', () => {
     const hi = new Ta();
     const lo = new Ta();
     const seq = [3, 1, 4, 1, 5, 9, 2];
-    seq.forEach((v) => { hi.highest(v, 3, 0); lo.lowest(v, 3, 1); });
+    seq.forEach((v) => {
+      hi.highest(v, 3, 0);
+      lo.lowest(v, 3, 1);
+    });
     expect(hi.highest(6, 3, 0)).toBe(9); // window [9,2,6]
     expect(lo.lowest(6, 3, 1)).toBe(2);
   });
@@ -113,10 +122,10 @@ describe('ta.highest / ta.lowest', () => {
     const hi = new Ta();
     const lo = new Ta();
     const out = [NaN, 4, 7].map((v) => [hi.highest(v, 3, 0), lo.lowest(v, 3, 1)] as const);
-    expect(out[0][0]).toBeNaN();            // bar 0: window not full
-    expect(out[1][0]).toBeNaN();            // bar 1: window not full
-    expect(out[2][0]).toBe(7);              // bar 2: max(4,7) — na skipped, not delayed
-    expect(out[2][1]).toBe(4);              // min(4,7)
+    expect(out[0][0]).toBeNaN(); // bar 0: window not full
+    expect(out[1][0]).toBeNaN(); // bar 1: window not full
+    expect(out[2][0]).toBe(7); // bar 2: max(4,7) — na skipped, not delayed
+    expect(out[2][1]).toBe(4); // min(4,7)
   });
 });
 
@@ -128,7 +137,8 @@ describe('ta.stdev / ta.dev', () => {
   });
   it('stdev matches population formula', () => {
     const ta = new Ta();
-    ta.stdev(2, 3, 0); ta.stdev(4, 3, 0);
+    ta.stdev(2, 3, 0);
+    ta.stdev(4, 3, 0);
     const s = ta.stdev(6, 3, 0); // mean 4, var = ((4+0+4))/3 = 8/3
     expect(s).toBeCloseTo(Math.sqrt(8 / 3), 9);
   });
@@ -195,7 +205,9 @@ describe('ta call-site independence & snapshot/restore', () => {
   });
   it('snapshot/restore reproduces state exactly (rollback)', () => {
     const ta = new Ta();
-    ta.sma(1, 3, 0); ta.sma(2, 3, 0); ta.sma(3, 3, 0);
+    ta.sma(1, 3, 0);
+    ta.sma(2, 3, 0);
+    ta.sma(3, 3, 0);
     const snap = ta.snapshot();
     const a = ta.sma(4, 3, 0);
     ta.restore(snap);
