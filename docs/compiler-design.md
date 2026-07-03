@@ -24,23 +24,23 @@ source.pine
 ```
 
 **Central invariant:** both backends target the **same runtime `$` API** and make
-the *identical sequence of `$` calls*, so the interpreter and the generated JS
+the _identical sequence of `$` calls_, so the interpreter and the generated JS
 produce byte-identical per-bar output. The interpreter is the auditable oracle;
 the codegen is the fast path; a cross-check harness asserts they agree (§7).
 
 **One AST, annotated in place** by Phase 4 (never rebuilt). Node fields:
 
-| Field | Set by | Meaning |
-|---|---|---|
-| `kind` | Parser | discriminant (`Binary`, `HistoryRef`, `Call`, `VarDecl`, …) |
-| `loc` | Lexer/Parser | `{line, col}` for diagnostics |
-| `type` | Semantic | resolved type, or `void`/`na` |
-| `qual` | Semantic | qualifier ∈ `{const, input, simple, series}` |
-| `historySlot` | Slot alloc | history column id, or `null` |
-| `stateSite` | Slot alloc | call-site id for stateful builtins, or `null` |
-| `varSlot` | Slot alloc | `{id, mode}` for `var`/`varip`, else `null` |
+| Field         | Set by       | Meaning                                                     |
+| ------------- | ------------ | ----------------------------------------------------------- |
+| `kind`        | Parser       | discriminant (`Binary`, `HistoryRef`, `Call`, `VarDecl`, …) |
+| `loc`         | Lexer/Parser | `{line, col}` for diagnostics                               |
+| `type`        | Semantic     | resolved type, or `void`/`na`                               |
+| `qual`        | Semantic     | qualifier ∈ `{const, input, simple, series}`                |
+| `historySlot` | Slot alloc   | history column id, or `null`                                |
+| `stateSite`   | Slot alloc   | call-site id for stateful builtins, or `null`               |
+| `varSlot`     | Slot alloc   | `{id, mode}` for `var`/`varip`, else `null`                 |
 
-Phase 4 only *adds* annotations; it never changes `kind`/structure. Both backends
+Phase 4 only _adds_ annotations; it never changes `kind`/structure. Both backends
 **read** these annotations and never re-derive them — that's what guarantees they
 agree.
 
@@ -49,10 +49,11 @@ agree.
 ## 2. Lexer (Phase 2)
 
 ### 2.1 Token kinds
+
 - **Literals:** `INT`, `FLOAT`, `STRING`, `COLOR`, `BOOL`, `NA`.
 - **Identifiers:** `[A-Za-z_][A-Za-z0-9_]*`, case-sensitive.
 - **Keywords:** `if else switch for to by in while break continue var varip and or
-  not true false na import as export method type int float bool color string`.
+not true false na import as export method type int float bool color string`.
   (`true/false`→BOOL, `na`→NA; `and/or/not/in/to/by/as` are word-operators.)
 - **Operators/punct:** `+ - * / % == != < <= > >= = := += -= *= /= %= ? : => ( ) [ ] , .`
   `< >` double as type-template brackets; `[ ]` are overloaded (history / tuple /
@@ -63,6 +64,7 @@ agree.
 `!= <= >=` before single-char; `+= -= *= /= %=` before bare op; `=>` before `=`.
 
 ### 2.2 Line-continuation rule (the hardest lexer concern)
+
 Pine has **no continuation char and no terminator**. Continuation vs.
 new-statement vs. block-open is decided by **indentation + bracket nesting**:
 
@@ -89,6 +91,7 @@ Rule of thumb: **multiple-of-4 indent = block; any other non-zero indent =
 continue the previous line; brackets suspend all of it.**
 
 ### 2.3 Gotchas
+
 - Tabs vs spaces: 1 tab = 1 block level; spaces in units of 4; reject mixed.
 - `//` comments to EOL; **no block comments**; `//` inside a string is not a comment.
 - Strings `"`/`'` interchangeable; escapes `\" \' \n \t \\`. Triple-quoted
@@ -103,21 +106,23 @@ continue the previous line; brackets suspend all of it.**
 ## 3. Grammar (Phase 3)
 
 ### 3.1 Operator precedence (tightest = 1)
-| Lvl | Operators | Assoc | Notes |
-|---|---|---|---|
-| 1 | `()` call, `.` member | left | **Tighter than `[]`** so `close[1]`, `a.b().c[2]` parse. (Docs omit this — resolved.) |
-| 2 | `[]` history (postfix) | left | Cannot chain (`close[1][2]` illegal). |
-| 3 | unary `+ - not` | right | |
-| 4 | `* / %` | left | |
-| 5 | `+ -` | left | `+` also string concat |
-| 6 | `< <= > >=` | left | numeric only |
-| 7 | `== !=` | left | any fundamental type |
-| 8 | `and` | left | lazy/short-circuit in v6 |
-| 9 | `or` | left | lazy |
-| 10 | `?:` ternary | right | loosest; `a?x:b?y:z` = `a?x:(b?y:z)` |
-| stmt | `=` decl, `:=` reassign | right | statement-level only |
+
+| Lvl  | Operators               | Assoc | Notes                                                                                 |
+| ---- | ----------------------- | ----- | ------------------------------------------------------------------------------------- |
+| 1    | `()` call, `.` member   | left  | **Tighter than `[]`** so `close[1]`, `a.b().c[2]` parse. (Docs omit this — resolved.) |
+| 2    | `[]` history (postfix)  | left  | Cannot chain (`close[1][2]` illegal).                                                 |
+| 3    | unary `+ - not`         | right |                                                                                       |
+| 4    | `* / %`                 | left  |                                                                                       |
+| 5    | `+ -`                   | left  | `+` also string concat                                                                |
+| 6    | `< <= > >=`             | left  | numeric only                                                                          |
+| 7    | `== !=`                 | left  | any fundamental type                                                                  |
+| 8    | `and`                   | left  | lazy/short-circuit in v6                                                              |
+| 9    | `or`                    | left  | lazy                                                                                  |
+| 10   | `?:` ternary            | right | loosest; `a?x:b?y:z` = `a?x:(b?y:z)`                                                  |
+| stmt | `=` decl, `:=` reassign | right | statement-level only                                                                  |
 
 ### 3.2 Statements
+
 `VersionAnno` (`//@version=6`) → exactly one `Declaration`
 (`indicator/strategy/library`) → `TopStmt*`.
 
@@ -132,9 +137,11 @@ Import    := "import" user "/" lib "/" version ["as" alias]
 Qualifier := "const" | "simple" | "series"
 Type      := int|float|bool|color|string|line|box|label|table|... | UDT | array<T> | matrix<T> | map<K,V>
 ```
+
 Functions are **global-scope only**, last expression is the return, **no recursion**.
 
-### 3.3 Control flow (statement *or* expression)
+### 3.3 Control flow (statement _or_ expression)
+
 `if`/`else if`/`else`; `switch` (subject = equality match; subjectless = first-true;
 bare `=>` = default; **no fall-through**); `for IDENT = a to b [by c]`; `for x in coll`
 / `for [i, x] in coll`; `while`. As expressions, all branches unify to a common
@@ -142,6 +149,7 @@ type and the qualifier is the join over conditions + all branches. Loops may yie
 a value captured by a leading `vars =`.
 
 ### 3.4 Expressions
+
 literal · identifier · member (`a.b`) · call (positional + named `f(x=1)`) · method
 chain · `T.new(...)` · history `e[n]` · unary · binary · ternary · tuple literal
 `[a,b]` (prefix = tuple; postfix = history) · grouping · type-template.
@@ -151,27 +159,30 @@ chain · `T.new(...)` · history `e[n]` · unary · binary · ternary · tuple l
 ## 4. Types & qualifiers (Phase 4 part 1)
 
 ### 4.1 Lattice
+
 `const ⊏ input ⊏ simple ⊏ series`. **Allocate history storage iff the inferred
 qualifier is `series`.** Weaker may promote up; stronger may not be used where
 weaker is required (param ceilings, §4.3).
 
 ### 4.2 Leaf qualifiers
-| Source | Qualifier |
-|---|---|
-| literals (incl. bare `na`) | const |
-| `input.*()` | input |
-| **`input.source()`** | **series float** (exception) |
-| `open/high/low/close/volume/hl2/hlc3/ohlc4/hlcc4/time/time_close/bar_index/last_bar_index` | series |
-| `barstate.*` | series bool |
-| `syminfo.*`, `timeframe.*` | simple |
-| **`ta.*()` results** | **always series** |
-| `request.security()` | series |
-| reference/special types, collections, **UDT instances** | always series |
+
+| Source                                                                                     | Qualifier                    |
+| ------------------------------------------------------------------------------------------ | ---------------------------- |
+| literals (incl. bare `na`)                                                                 | const                        |
+| `input.*()`                                                                                | input                        |
+| **`input.source()`**                                                                       | **series float** (exception) |
+| `open/high/low/close/volume/hl2/hlc3/ohlc4/hlcc4/time/time_close/bar_index/last_bar_index` | series                       |
+| `barstate.*`                                                                               | series bool                  |
+| `syminfo.*`, `timeframe.*`                                                                 | simple                       |
+| **`ta.*()` results**                                                                       | **always series**            |
+| `request.security()`                                                                       | series                       |
+| reference/special types, collections, **UDT instances**                                    | always series                |
 
 ### 4.3 Bottom-up qualifier inference (`⊔` = max)
+
 1. leaf literal → const; leaf builtin/var/param → declared qualifier
 2. unary → Q(x)
-3. binary `a OP b` → Q(a) ⊔ Q(b) (incl. comparisons/logical; result *type* is bool but qualifier is the join)
+3. binary `a OP b` → Q(a) ⊔ Q(b) (incl. comparisons/logical; result _type_ is bool but qualifier is the join)
 4. history `a[n]` → series
 5. ternary / if-expr / switch-expr → join of **all** conditions and **all** branches
 6. function call result → **by contract, not arg-join**: `ta.*`/`request.security`/`.new()`/collection ctors → series; `input.*` → input (except `input.source` → series); `math.*`/pure → join of args; **user fns** → inferred from body per call site
@@ -183,11 +194,13 @@ weaker is required (param ceilings, §4.3).
 max-allowed qualifier (classic trap: `series int` length into `ta.sma` is an error).
 
 ### 4.4 Type rules
+
 Fundamentals `int float bool color string` (+ enum). `bool` is **never `na`** in v6.
 Auto **int→float** promotion (one-directional). **v6 `/` is float division**
 (`5/2 == 2.5`); wrap in `int()` to truncate. **No implicit numeric→bool** — require `bool()`.
 
 ### 4.5 `na` propagation
+
 - Arithmetic: contagious — any `na` operand → `na`. `nz/na()/fixnan` handle it.
 - Logical `and/or/not`: bool operands, never `na`, strict true/false.
 - **Comparison (`== != < <= > >=`): any `na` operand → `false`** (resolved for v6:
@@ -204,7 +217,9 @@ Three independent id namespaces; ids are **lexical** (stable across bars/ticks),
 never merged by argument equality, never split per loop iteration.
 
 ### 5.1 History slots
+
 A value needs a history column **iff it is the operand of `[]`**.
+
 - `v[n]` where `v` is a symbol → mark that **symbol** historied (one slot per symbol).
 - `f(args)[n]` → slot keyed to **that call site**.
 - builtin series `close[n]` → slot for that producing expression.
@@ -213,13 +228,16 @@ A value needs a history column **iff it is the operand of `[]`**.
 - **Lint:** `v[n]` where `v` is local-scope is unreliable → warn.
 
 ### 5.2 Stateful-builtin call-site ids
+
 Stateful = carries cross-bar state. **Treat all `ta.*` (and `math.sum`) as stateful**; pure elementwise math is not (unless its result is `[]`-referenced → §5.1).
+
 - N textual occurrences ⇒ N ids (never CSE-merge identical calls).
 - One call inside a `for` loop ⇒ ONE id (shared across iterations).
 - A call inside `if`/`switch`/ternary / `and`/`or` RHS ⇒ still ONE id, advanced only when reached — **danger**: skipping corrupts internal series → warn (§8).
 - Stateful builtin inside a UDF ⇒ id per (outer call site × inner call site).
 
 ### 5.3 `var` / `varip` slots
+
 - Plain (no keyword): **no persistent slot** — re-init every bar; cross-bar persistence only via `[]`.
 - `var`: init once on first execution of the declaring scope (global → first bar; local → first bar the branch is reached). Guard with an init flag.
 - `varip`: init on first execution (may be an intrabar tick).
@@ -227,6 +245,7 @@ Stateful = carries cross-bar state. **Treat all `ta.*` (and `math.sum`) as state
 - A `var` that is also `[]`-referenced needs **both** a persistence slot and a history column.
 
 ### 5.4 Scope legality (same walk)
+
 - **Global-only (error in local scope):** `indicator strategy library plot plotshape plotchar plotarrow plotcandle plotbar barcolor bgcolor hline fill alertcondition`, and all `type`/`enum`/function defs.
 - `input.*()` allowed locally but **hoisted** to global (read once).
 - **No recursion.**
@@ -239,36 +258,36 @@ Stateful = carries cross-bar state. **Treat all `ta.*` (and `math.sum`) as state
 from `historySlot`), state cells (keyed by `stateSite`), var/varip slots, and
 rollback. Plain variables are ordinary JS `let`s re-initialized each bar.
 
-| AST node | Emitted JS | Notes |
-|---|---|---|
-| int/float/bool/string literal | literal | |
-| color `#RRGGBB[AA]` | `$.color("#…")` | |
-| `na` | `$.NA` | |
-| builtin series read (`close`) | `$.series.close` | current-bar value |
-| plain var read | JS local `v` | re-init each bar |
-| `var`/`varip` read | `$.getVar(id)` / `$.getVarip(id)` | |
-| `var`/`varip` init | `$.initVar(id, () => expr)` / `$.initVarip(...)` | init-flag guard |
-| reassign `v := e` (plain) | `v = e` | also `+= -= …` |
-| reassign `var`/`varip` | `$.setVar(id, e)` / `$.setVarip(id, e)` | |
-| history `e[n]` | `$.get(slot, n)` | `slot = node.historySlot`; OOB → `$.NA` |
-| member `a.b` | `a.b` / namespace | UDT field / namespace |
-| field reassign `obj.f := e` | `obj.f = e` | |
-| `T.new(...)` | emitted ctor | series |
-| **stateful builtin** `ta.x(args)` | `$.ta.x(args, site)` | `site = node.stateSite` |
-| pure builtin `math.x(args)` | `$.math.x(args)` | no site |
-| `input.*(...)` | `$.input.x(...)` | hoisted to one-time init |
-| arithmetic `a+b` | `$.add(a,b)` | also `$.sub/mul/div/mod`; **div = float** |
-| unary minus | `$.neg(x)` | na-propagating |
-| string concat `+` | `$.concat(a,b)` | |
-| comparison `a<b` | `$.lt(a,b)` (`le/gt/ge/eq/ne`) | **na operand → false** |
-| `and`/`or` | JS `&&`/`||` | lazy; warn if stateful call in RHS |
-| `not` | `$.not(x)` | |
-| ternary `c?a:b` | `(c ? a : b)` | lazy; warn on stateful in branch |
-| `if`/`switch` expr | IIFE; unmatched → `$.NA` (or `false` if bool) | branches pre-unified |
-| `for`/`while`/`for…in` | JS loop; bounds re-eval each iter (v6) | shared state ids respected |
-| tuple destructure | `const [a,b] = f()` | one shared qualifier |
-| UDF call | emitted JS fn, per-call-site slot namespace threaded | independent scope |
-| global `plot()` | `$.plot(series, {opts})` | registered at compile time |
+| AST node                          | Emitted JS                                           | Notes                                     |
+| --------------------------------- | ---------------------------------------------------- | ----------------------------------------- |
+| int/float/bool/string literal     | literal                                              |                                           |
+| color `#RRGGBB[AA]`               | `$.color("#…")`                                      |                                           |
+| `na`                              | `$.NA`                                               |                                           |
+| builtin series read (`close`)     | `$.series.close`                                     | current-bar value                         |
+| plain var read                    | JS local `v`                                         | re-init each bar                          |
+| `var`/`varip` read                | `$.getVar(id)` / `$.getVarip(id)`                    |                                           |
+| `var`/`varip` init                | `$.initVar(id, () => expr)` / `$.initVarip(...)`     | init-flag guard                           |
+| reassign `v := e` (plain)         | `v = e`                                              | also `+= -= …`                            |
+| reassign `var`/`varip`            | `$.setVar(id, e)` / `$.setVarip(id, e)`              |                                           |
+| history `e[n]`                    | `$.get(slot, n)`                                     | `slot = node.historySlot`; OOB → `$.NA`   |
+| member `a.b`                      | `a.b` / namespace                                    | UDT field / namespace                     |
+| field reassign `obj.f := e`       | `obj.f = e`                                          |                                           |
+| `T.new(...)`                      | emitted ctor                                         | series                                    |
+| **stateful builtin** `ta.x(args)` | `$.ta.x(args, site)`                                 | `site = node.stateSite`                   |
+| pure builtin `math.x(args)`       | `$.math.x(args)`                                     | no site                                   |
+| `input.*(...)`                    | `$.input.x(...)`                                     | hoisted to one-time init                  |
+| arithmetic `a+b`                  | `$.add(a,b)`                                         | also `$.sub/mul/div/mod`; **div = float** |
+| unary minus                       | `$.neg(x)`                                           | na-propagating                            |
+| string concat `+`                 | `$.concat(a,b)`                                      |                                           |
+| comparison `a<b`                  | `$.lt(a,b)` (`le/gt/ge/eq/ne`)                       | **na operand → false**                    |
+| `and`/`or`                        | JS `&&`/`                                            |                                           | `   | lazy; warn if stateful call in RHS |
+| `not`                             | `$.not(x)`                                           |                                           |
+| ternary `c?a:b`                   | `(c ? a : b)`                                        | lazy; warn on stateful in branch          |
+| `if`/`switch` expr                | IIFE; unmatched → `$.NA` (or `false` if bool)        | branches pre-unified                      |
+| `for`/`while`/`for…in`            | JS loop; bounds re-eval each iter (v6)               | shared state ids respected                |
+| tuple destructure                 | `const [a,b] = f()`                                  | one shared qualifier                      |
+| UDF call                          | emitted JS fn, per-call-site slot namespace threaded | independent scope                         |
+| global `plot()`                   | `$.plot(series, {opts})`                             | registered at compile time                |
 
 na-propagating ops funnel through `$` (not raw JS) so NaN-propagation, v6
 float-division, and na→false comparisons live in one place — identical across backends.
@@ -326,8 +345,8 @@ fidelity.
 
 > **Update (current):** every originally-deferred item is now implemented —
 > `array.*`/`map.*`/`matrix.*`, all drawing objects (`line/label/box/table/polyline/
-> linefill`), `alert`/`alertcondition`, expanded `ta.*` (macd/bb/stoch/supertrend/…),
-> **user-defined functions** *and* user `method` receivers (via call-site
+linefill`), `alert`/`alertcondition`, expanded `ta.*` (macd/bb/stoch/supertrend/…),
+> **user-defined functions** _and_ user `method` receivers (via call-site
 > inlining/monomorphization — `src/sema/inline.ts`: each call site gets a fresh clone
 > → independent history/state/var slots, args bound once, recursion rejected),
 > **`request.security()`** (Phase 7, v1), the **`strategy.*`** broker (Phase 8, v1),
@@ -340,12 +359,14 @@ fidelity.
 ## 9. Open risks & the two unsettled semantics
 
 ### 9.1 Resolved conflicts (recorded)
+
 - `.`/`()` bind **tighter** than `[]` (docs omit this).
 - 1 tab = 1 block level; spaces in units of 4; reject mixed.
 - `na` through comparisons → `false`; `bool` never `na` (v6, via FAQ + migration guide).
 - `var`/`varip` are persistence modes orthogonal to qualifier; qualifier = join over init + all reassignments.
 
 ### 9.2 Two unsettled semantics — keep behind flags
+
 1. **`naComparisonMode`** (default `v6`: comparison with `na` → `false`, `bool`
    never `na`, emit the `==na` lint). All comparisons funnel through `$.eq/$.ne/…`
    so flipping to a `v5` three-valued mode is a one-place change. Pin from `//@version=`.
@@ -355,6 +376,7 @@ fidelity.
    documented future leak. Pinned by `test/security.test.ts`.
 
 ### 9.3 Standing risks
+
 - `forBoundsAllowSeries` (default on for v6): `to` re-evaluated each iteration.
 - Conditional/lazy stateful calls can corrupt internal series → **warn**, recommend hoisting.
 - Buffer sizing from max constant offset; series-int offset → on-demand buffer (cap ~5000).

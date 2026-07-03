@@ -2,7 +2,12 @@ import { describe, it, expect } from 'bun:test';
 import { compile, Engine, ArrayFeed, type Bar } from '../src/index.js';
 
 const bars: Bar[] = Array.from({ length: 12 }, (_, i) => ({
-  time: i * 60000, open: 100 + i, high: 110, low: 90, close: 100 + i, volume: 1000,
+  time: i * 60000,
+  open: 100 + i,
+  high: 110,
+  low: 90,
+  close: 100 + i,
+  volume: 1000,
 }));
 
 describe('input metadata extraction', () => {
@@ -20,7 +25,11 @@ plot(ta.sma(src, len) * mult)
     expect(byTitle['Length']).toMatchObject({ kind: 'int', default: 14, minval: 1, maxval: 200 });
     expect(byTitle['Mult']).toMatchObject({ kind: 'float', default: 2, step: 0.5 });
     expect(byTitle['Use EMA']).toMatchObject({ kind: 'bool', default: true });
-    expect(byTitle['Mode']).toMatchObject({ kind: 'string', default: 'fast', options: ['fast', 'slow'] });
+    expect(byTitle['Mode']).toMatchObject({
+      kind: 'string',
+      default: 'fast',
+      options: ['fast', 'slow'],
+    });
     expect(byTitle['Source']).toMatchObject({ kind: 'source' });
     expect(c.metadata.inputs.length).toBe(5);
   });
@@ -36,9 +45,19 @@ n   = input.int(5, "N", 1, 100, 1, [5, 10, 20])
 plot(close)
 `);
     const byTitle = Object.fromEntries(c.metadata.inputs.map((d) => [d.title, d]));
-    expect(byTitle['TF']).toMatchObject({ kind: 'timeframe', default: '1W', options: ['60', '240', '1D', '1W', '1M'] });
+    expect(byTitle['TF']).toMatchObject({
+      kind: 'timeframe',
+      default: '1W',
+      options: ['60', '240', '1D', '1W', '1M'],
+    });
     expect(byTitle['Sym']).toMatchObject({ kind: 'symbol', default: 'AAPL' });
-    expect(byTitle['N']).toMatchObject({ kind: 'int', default: 5, minval: 1, maxval: 100, options: [5, 10, 20] });
+    expect(byTitle['N']).toMatchObject({
+      kind: 'int',
+      default: 5,
+      minval: 1,
+      maxval: 100,
+      options: [5, 10, 20],
+    });
   });
 
   it('resolves input.color defaults — literal, color.new(...), color.rgb(...), color.<const>', () => {
@@ -82,7 +101,10 @@ plot(close, color = col == pcol ? color.white : color.black)
 `);
     const byTitle = Object.fromEntries(c.metadata.inputs.map((d) => [d.title, d]));
     expect(byTitle['Mode']).toMatchObject({
-      default: 'Historical', options: ['Historical', 'Present'], group: 'My Group', tooltip: 'My Tooltip',
+      default: 'Historical',
+      options: ['Historical', 'Present'],
+      group: 'My Group',
+      tooltip: 'My Tooltip',
     });
     expect(byTitle['Color'].default).toBe('#089981FF');
     expect(byTitle['PColor'].default).toBe('#089981FF');
@@ -102,11 +124,14 @@ plot(b, "b")
 plot(c, "c")
 `;
     const compiled = compile(src);
-    expect(compiled.metadata.inputs.map((d) => d.key)).toEqual(["N", "N (2)", "N (3)"]);
-    expect(compiled.metadata.inputs.every((d) => d.title === "N")).toBe(true); // display label unchanged
-    for (const backend of ["js", "interp"] as const) {
-      const eng = new Engine(compiled, new ArrayFeed(bars), { backend, inputs: { N: 10, "N (2)": 20, "N (3)": 30 } });
-      await eng.run({ symbol: "T", timeframe: "1" });
+    expect(compiled.metadata.inputs.map((d) => d.key)).toEqual(['N', 'N (2)', 'N (3)']);
+    expect(compiled.metadata.inputs.every((d) => d.title === 'N')).toBe(true); // display label unchanged
+    for (const backend of ['js', 'interp'] as const) {
+      const eng = new Engine(compiled, new ArrayFeed(bars), {
+        backend,
+        inputs: { N: 10, 'N (2)': 20, 'N (3)': 30 },
+      });
+      await eng.run({ symbol: 'T', timeframe: '1' });
       expect(eng.outputs.plots.get(0)!.data[5]).toBe(10);
       expect(eng.outputs.plots.get(1)!.data[5]).toBe(20);
       expect(eng.outputs.plots.get(2)!.data[5]).toBe(30); // each "N" resolved independently
@@ -123,9 +148,21 @@ plot(c, "c")
 describe('declaration metadata — drawing caps', () => {
   it('extracts max_*_count from indicator() (defaults: lines/labels/boxes 50, polylines 100)', () => {
     const def = compile('//@version=6\nindicator("d")\nplot(close)\n').metadata;
-    expect([def.maxLinesCount, def.maxLabelsCount, def.maxBoxesCount, def.maxPolylinesCount]).toEqual([50, 50, 50, 100]);
-    const set = compile('//@version=6\nindicator("d", max_boxes_count = 500, max_lines_count = 300, max_labels_count = 200, max_polylines_count = 250)\nplot(close)\n').metadata;
-    expect([set.maxLinesCount, set.maxLabelsCount, set.maxBoxesCount, set.maxPolylinesCount]).toEqual([300, 200, 500, 250]);
+    expect([
+      def.maxLinesCount,
+      def.maxLabelsCount,
+      def.maxBoxesCount,
+      def.maxPolylinesCount,
+    ]).toEqual([50, 50, 50, 100]);
+    const set = compile(
+      '//@version=6\nindicator("d", max_boxes_count = 500, max_lines_count = 300, max_labels_count = 200, max_polylines_count = 250)\nplot(close)\n',
+    ).metadata;
+    expect([
+      set.maxLinesCount,
+      set.maxLabelsCount,
+      set.maxBoxesCount,
+      set.maxPolylinesCount,
+    ]).toEqual([300, 200, 500, 250]);
   });
 });
 
@@ -151,7 +188,9 @@ plot(ta.sma(close, len))
   });
 
   it('a bool override of false is honored (not treated as "unset")', async () => {
-    const c = compile('//@version=6\nindicator("x")\non = input.bool(true, "On")\nplot(on ? 1.0 : 0.0)\n');
+    const c = compile(
+      '//@version=6\nindicator("x")\non = input.bool(true, "On")\nplot(on ? 1.0 : 0.0)\n',
+    );
     const ov = new Engine(c, new ArrayFeed(bars), { inputs: { On: false } });
     await ov.run({ symbol: 'T', timeframe: '1' });
     expect(ov.outputs.plots.get(0)!.data[5]).toBe(0);
@@ -159,7 +198,9 @@ plot(ta.sma(close, len))
 
   it('input.source override resolves a source-NAME string to that series (both backends)', async () => {
     // bars[5]: open=105 high=110 low=90 close=105 → hl2=100
-    const c = compile('//@version=6\nindicator("x")\nsrc = input.source(close, "Source")\nplot(src)\n');
+    const c = compile(
+      '//@version=6\nindicator("x")\nsrc = input.source(close, "Source")\nplot(src)\n',
+    );
     for (const backend of ['js', 'interp'] as const) {
       const def = new Engine(c, new ArrayFeed(bars), { backend });
       await def.run({ symbol: 'T', timeframe: '1' });

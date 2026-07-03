@@ -24,14 +24,19 @@ function crossCheck(src: string, bars: Bar[]) {
   const js = new Engine(c, new ArrayFeed(bars), { backend: 'js' });
   const ip = new Engine(c, new ArrayFeed(bars), { backend: 'interp' });
   // run synchronously via the same feed
-  return Promise.all([js.run({ symbol: 'T', timeframe: '1' }), ip.run({ symbol: 'T', timeframe: '1' })]).then(() => {
+  return Promise.all([
+    js.run({ symbol: 'T', timeframe: '1' }),
+    ip.run({ symbol: 'T', timeframe: '1' }),
+  ]).then(() => {
     for (const [id, jsPlot] of js.outputs.plots) {
       const ipPlot = ip.outputs.plots.get(id)!;
       expect(ipPlot).toBeDefined();
       expect(jsPlot.data.length).toBe(ipPlot.data.length);
       for (let i = 0; i < jsPlot.data.length; i++) {
         if (!eqNaN(jsPlot.data[i], ipPlot.data[i])) {
-          throw new Error(`backend divergence in plot ${id} ('${jsPlot.title}') at bar ${i}: js=${jsPlot.data[i]} interp=${ipPlot.data[i]}`);
+          throw new Error(
+            `backend divergence in plot ${id} ('${jsPlot.title}') at bar ${i}: js=${jsPlot.data[i]} interp=${ipPlot.data[i]}`,
+          );
         }
       }
     }
@@ -81,18 +86,27 @@ plot(diff, title="d")
     const total = eng.outputs.plots.get(0)!.data;
     // running sum is monotonic in count of additions; equals sum of closes
     let acc = 0;
-    for (let i = 0; i < bars.length; i++) { acc += bars[i].close; expect(total[i]).toBeCloseTo(acc, 6); }
+    for (let i = 0; i < bars.length; i++) {
+      acc += bars[i].close;
+      expect(total[i]).toBeCloseTo(acc, 6);
+    }
     expect(eng.outputs.plots.get(1)!.data[0]).toBeNaN(); // close[1] na on first bar
   });
 
-  it('RSI + hline cross-checks', () => crossCheck(`//@version=6
+  it('RSI + hline cross-checks', () =>
+    crossCheck(
+      `//@version=6
 indicator("RSI")
 r = ta.rsi(close, 14)
 plot(r, title="rsi")
 hline(70, title="ob")
-`, bars));
+`,
+      bars,
+    ));
 
-  it('Bollinger bands (sma + stdev) cross-checks', () => crossCheck(`//@version=6
+  it('Bollinger bands (sma + stdev) cross-checks', () =>
+    crossCheck(
+      `//@version=6
 indicator("BB")
 length = 20
 basis = ta.sma(close, length)
@@ -100,9 +114,13 @@ dev = 2.0 * ta.stdev(close, length)
 plot(basis, title="basis")
 plot(basis + dev, title="upper")
 plot(basis - dev, title="lower")
-`, bars));
+`,
+      bars,
+    ));
 
-  it('ternary / math / nz / comparisons cross-check', () => crossCheck(`//@version=6
+  it('ternary / math / nz / comparisons cross-check', () =>
+    crossCheck(
+      `//@version=6
 indicator("misc")
 x = close > open ? high : low
 y = math.max(close, open)
@@ -112,9 +130,13 @@ plot(x)
 plot(y)
 plot(z)
 plot(w)
-`, bars));
+`,
+      bars,
+    ));
 
-  it('if-expression and for-loop cross-check', () => crossCheck(`//@version=6
+  it('if-expression and for-loop cross-check', () =>
+    crossCheck(
+      `//@version=6
 indicator("control")
 sumv = 0.0
 for i = 1 to 3
@@ -124,17 +146,22 @@ avg = if bar_index > 5
 else
     close
 plot(avg)
-`, bars));
+`,
+      bars,
+    ));
 
   it('multiline string reaches the runtime intact (length counts the \\n)', async () => {
     // """ab<newline>cd""" → "ab\ncd" → str.length 5. Proves the lexed value flows
     // through parse → codegen → both backends unchanged.
-    const eng = await crossCheck(`//@version=6
+    const eng = await crossCheck(
+      `//@version=6
 indicator("ml")
 msg = """ab
 cd"""
 plot(str.length(msg))
-`, bars);
+`,
+      bars,
+    );
     expect(eng.outputs.plots.get(0)!.data[0]).toBe(5);
   });
 });
@@ -150,10 +177,12 @@ plot(b ? 1.0 : 0.0)
   });
 
   it('errors on undefined variable', () => {
-    expect(() => compile(`//@version=6
+    expect(() =>
+      compile(`//@version=6
 indicator("x")
 plot(undefinedVar)
-`)).toThrow(/undefined variable/);
+`),
+    ).toThrow(/undefined variable/);
   });
 });
 

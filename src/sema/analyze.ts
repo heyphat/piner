@@ -8,9 +8,7 @@
  * diagnostics. Annotations are written in place on the nodes (the contract in
  * §1.2); both backends read them.
  */
-import type {
-  Program, Stmt, Expr, SymRef, VarSlot, TypeField,
-} from '../parser/ast.js';
+import type { Program, Stmt, Expr, SymRef, VarSlot, TypeField } from '../parser/ast.js';
 // Type-only (erased at runtime) — avoids a runtime import cycle with library.ts,
 // which imports CompileError/OUTPUT_FNS from this module.
 import type { LibraryIdentity } from './library.js';
@@ -19,9 +17,25 @@ import type { PineType } from './types.js';
 import { TA_VARS } from '../codegen/intrinsics.js';
 import { ColorNs } from '../runtime/builtins/color.js';
 import {
-  SizeNs, TextNs, FontNs, ShapeNs, LocationNs, PositionNs, XlocNs, ExtendNs,
-  FormatNs, CurrencyNs, BarmergeNs, SessionNs, ScaleNs, OrderNs, YlocNs,
-  DisplayNs, HlineNs, PlotNs, DayofweekNs,
+  SizeNs,
+  TextNs,
+  FontNs,
+  ShapeNs,
+  LocationNs,
+  PositionNs,
+  XlocNs,
+  ExtendNs,
+  FormatNs,
+  CurrencyNs,
+  BarmergeNs,
+  SessionNs,
+  ScaleNs,
+  OrderNs,
+  YlocNs,
+  DisplayNs,
+  HlineNs,
+  PlotNs,
+  DayofweekNs,
 } from '../runtime/builtins/constants.js';
 
 /**
@@ -30,10 +44,24 @@ import {
  * same values the runtime carries. `color.*` is handled separately by constColorValue.
  */
 const NS_CONST: Record<string, Record<string, string | number | boolean>> = {
-  size: SizeNs, text: TextNs, font: FontNs, shape: ShapeNs, location: LocationNs,
-  position: PositionNs, xloc: XlocNs, extend: ExtendNs, format: FormatNs,
-  currency: CurrencyNs, barmerge: BarmergeNs, session: SessionNs, scale: ScaleNs,
-  order: OrderNs, yloc: YlocNs, display: DisplayNs, hline: HlineNs, plot: PlotNs,
+  size: SizeNs,
+  text: TextNs,
+  font: FontNs,
+  shape: ShapeNs,
+  location: LocationNs,
+  position: PositionNs,
+  xloc: XlocNs,
+  extend: ExtendNs,
+  format: FormatNs,
+  currency: CurrencyNs,
+  barmerge: BarmergeNs,
+  session: SessionNs,
+  scale: ScaleNs,
+  order: OrderNs,
+  yloc: YlocNs,
+  display: DisplayNs,
+  hline: HlineNs,
+  plot: PlotNs,
   dayofweek: DayofweekNs,
 };
 
@@ -56,7 +84,10 @@ export interface Diagnostic {
  * package index, so the public API is unchanged.
  */
 export class CompileError extends Error {
-  constructor(message: string, readonly diagnostics: Diagnostic[]) {
+  constructor(
+    message: string,
+    readonly diagnostics: Diagnostic[],
+  ) {
     super(message);
     this.name = 'CompileError';
   }
@@ -66,8 +97,20 @@ export class CompileError extends Error {
 export interface InputDecl {
   /** Override key: the input's title, else an auto id `input_<n>`. */
   key: string;
-  kind: 'int' | 'float' | 'bool' | 'string' | 'color' | 'source' | 'price' | 'timeframe'
-      | 'symbol' | 'session' | 'time' | 'text_area' | 'enum';
+  kind:
+    | 'int'
+    | 'float'
+    | 'bool'
+    | 'string'
+    | 'color'
+    | 'source'
+    | 'price'
+    | 'timeframe'
+    | 'symbol'
+    | 'session'
+    | 'time'
+    | 'text_area'
+    | 'enum';
   title?: string;
   default: number | boolean | string | null;
   minval?: number;
@@ -76,6 +119,22 @@ export interface InputDecl {
   options?: (string | number)[];
   group?: string;
   tooltip?: string;
+}
+
+export interface SecurityDependency {
+  /** true for request.security_lower_tf, false for request.security. */
+  lowerTf: boolean;
+  /** true when the symbol is a self-reference (`syminfo.tickerid`/`syminfo.ticker`/empty). */
+  self: boolean;
+  /** Statically-resolved literal symbol (null when self or dynamic). */
+  symbol: string | null;
+  /** true when the timeframe is a chart-timeframe self-reference (`timeframe.period`/empty). */
+  tfSelf: boolean;
+  /** Statically-resolved literal timeframe string (null when tfSelf or dynamic). */
+  timeframe: string | null;
+  /** true when the symbol or timeframe could not be resolved statically (a run is
+   *  needed to know the concrete dependency). */
+  dynamic: boolean;
 }
 
 export interface AnalyzeResult {
@@ -89,41 +148,139 @@ export interface AnalyzeResult {
   autoHistory: { slot: number; leaf: string }[];
   /** The script's `input.*` declarations, in source order (settings schema). */
   inputs: InputDecl[];
+  /** Best-effort static request.security[_lower_tf] dependencies (one per call site). */
+  securityDependencies: SecurityDependency[];
 }
 
 // Builtin OHLCV+time leaves backed by a fixed series slot.
 const STORED_LEAVES: Record<string, number> = {
-  open: 0, high: 1, low: 2, close: 3, volume: 4, time: 5,
+  open: 0,
+  high: 1,
+  low: 2,
+  close: 3,
+  volume: 4,
+  time: 5,
 };
 // Derived/computed builtin series leaves (no fixed slot).
 const DERIVED_LEAVES = new Set([
-  'hl2', 'hlc3', 'ohlc4', 'hlcc4', 'time_close', 'bar_index', 'last_bar_index',
-  'last_bar_time', 'timenow', 'time_tradingday',
-  'year', 'month', 'dayofmonth', 'dayofweek', 'hour', 'minute', 'second', 'weekofyear',
+  'hl2',
+  'hlc3',
+  'ohlc4',
+  'hlcc4',
+  'time_close',
+  'bar_index',
+  'last_bar_index',
+  'last_bar_time',
+  'timenow',
+  'time_tradingday',
+  'year',
+  'month',
+  'dayofmonth',
+  'dayofweek',
+  'hour',
+  'minute',
+  'second',
+  'weekofyear',
 ]);
 const INT_LEAVES = new Set([
-  'bar_index', 'last_bar_index', 'year', 'month', 'dayofmonth', 'dayofweek', 'hour', 'minute', 'second', 'weekofyear',
+  'bar_index',
+  'last_bar_index',
+  'year',
+  'month',
+  'dayofmonth',
+  'dayofweek',
+  'hour',
+  'minute',
+  'second',
+  'weekofyear',
 ]);
-const DATE_FNS = new Set(['year', 'month', 'dayofmonth', 'dayofweek', 'hour', 'minute', 'second', 'weekofyear']);
+const DATE_FNS = new Set([
+  'year',
+  'month',
+  'dayofmonth',
+  'dayofweek',
+  'hour',
+  'minute',
+  'second',
+  'weekofyear',
+]);
 const RESERVED_MEMBER_NAMES = new Set(['__proto__', 'constructor', 'prototype']);
 // String-valued `syminfo.*` members (the runtime surface in src/runtime/context.ts);
 // the rest (mintick, pricescale, …) are numeric.
 const SYMINFO_STRING_MEMBERS = new Set([
-  'tickerid', 'ticker', 'prefix', 'root', 'description', 'currency', 'basecurrency',
-  'type', 'timezone', 'session', 'volumetype', 'country',
+  'tickerid',
+  'ticker',
+  'prefix',
+  'root',
+  'description',
+  'currency',
+  'basecurrency',
+  'type',
+  'timezone',
+  'session',
+  'volumetype',
+  'country',
 ]);
 // `dayofweek.<day>` constants (Pine: Sunday = 1 … Saturday = 7).
 const DAYOFWEEK_CONST: Record<string, number> = {
-  sunday: 1, monday: 2, tuesday: 3, wednesday: 4, thursday: 5, friday: 6, saturday: 7,
+  sunday: 1,
+  monday: 2,
+  tuesday: 3,
+  wednesday: 4,
+  thursday: 5,
+  friday: 6,
+  saturday: 7,
 };
 export const NAMESPACES = new Set([
-  'ta', 'math', 'str', 'color', 'input', 'request', 'strategy', 'array', 'matrix',
-  'map', 'syminfo', 'timeframe', 'barstate', 'plot', 'shape', 'location', 'hline',
-  'display', 'chart', 'session', 'ticker', 'line', 'label', 'box', 'table',
-  'position', 'size', 'linefill', 'polyline',
-  'xloc', 'extend', 'format', 'font', 'text', 'currency', 'barmerge', 'session', 'scale', 'order',
-  'log', 'ticker', 'runtime',
-  'yloc', 'adjustment', 'backadjustment', 'settlement_as_close', 'earnings', 'dividends', 'splits',
+  'ta',
+  'math',
+  'str',
+  'color',
+  'input',
+  'request',
+  'strategy',
+  'array',
+  'matrix',
+  'map',
+  'syminfo',
+  'timeframe',
+  'barstate',
+  'plot',
+  'shape',
+  'location',
+  'hline',
+  'display',
+  'chart',
+  'session',
+  'ticker',
+  'line',
+  'label',
+  'box',
+  'table',
+  'position',
+  'size',
+  'linefill',
+  'polyline',
+  'xloc',
+  'extend',
+  'format',
+  'font',
+  'text',
+  'currency',
+  'barmerge',
+  'session',
+  'scale',
+  'order',
+  'log',
+  'ticker',
+  'runtime',
+  'yloc',
+  'adjustment',
+  'backadjustment',
+  'settlement_as_close',
+  'earnings',
+  'dividends',
+  'splits',
   'alert',
 ]);
 // request.security is implemented (Phase 7); the request.* fundamental/alternative
@@ -131,15 +288,49 @@ export const NAMESPACES = new Set([
 // nothing is hard-deferred at analysis time.
 const DEFERRED_NAMESPACES = new Set<string>([]);
 export const GLOBAL_FNS = new Set([
-  'plot', 'plotshape', 'plotchar', 'plotarrow', 'plotcandle', 'plotbar', 'hline',
-  'fill', 'bgcolor', 'barcolor', 'nz', 'na', 'fixnan', 'alert', 'alertcondition',
-  'indicator', 'strategy', 'library', 'int', 'float', 'bool', 'string',
-  'year', 'month', 'dayofmonth', 'dayofweek', 'hour', 'minute', 'second', 'weekofyear',
+  'plot',
+  'plotshape',
+  'plotchar',
+  'plotarrow',
+  'plotcandle',
+  'plotbar',
+  'hline',
+  'fill',
+  'bgcolor',
+  'barcolor',
+  'nz',
+  'na',
+  'fixnan',
+  'alert',
+  'alertcondition',
+  'indicator',
+  'strategy',
+  'library',
+  'int',
+  'float',
+  'bool',
+  'string',
+  'year',
+  'month',
+  'dayofmonth',
+  'dayofweek',
+  'hour',
+  'minute',
+  'second',
+  'weekofyear',
 ]);
 const DEFERRED_FNS = new Set<string>([]);
 export const OUTPUT_FNS = new Set([
-  'plot', 'plotshape', 'plotchar', 'plotarrow', 'plotcandle', 'plotbar',
-  'hline', 'fill', 'bgcolor', 'barcolor',
+  'plot',
+  'plotshape',
+  'plotchar',
+  'plotarrow',
+  'plotcandle',
+  'plotbar',
+  'hline',
+  'fill',
+  'bgcolor',
+  'barcolor',
 ]);
 
 const tBool: PineType = { kind: 'bool' };
@@ -154,11 +345,16 @@ const isFloat = (t?: PineType) => t?.kind === 'float';
 /** Input kind for a bare `input(defval, …)`, inferred from the default's type. */
 function inferInputKind(t?: PineType): string {
   switch (t?.kind) {
-    case 'bool': return 'bool';
-    case 'string': return 'string';
-    case 'color': return 'color';
-    case 'int': return 'int';
-    default: return 'float';
+    case 'bool':
+      return 'bool';
+    case 'string':
+      return 'string';
+    case 'color':
+      return 'color';
+    case 'int':
+      return 'int';
+    default:
+      return 'float';
   }
 }
 
@@ -171,7 +367,11 @@ type ConstResolve = (name: string) => Expr | undefined;
  * `HISTORICAL` → `'Historical'` — and `size.tiny` / `text.*` namespace tags, so
  * the settings panel sees the script's REAL default/options, not just inline literals.
  */
-function literalValue(e: Expr | undefined, resolve?: ConstResolve, depth = 0): number | boolean | string | null {
+function literalValue(
+  e: Expr | undefined,
+  resolve?: ConstResolve,
+  depth = 0,
+): number | boolean | string | null {
   if (!e || depth > 64) return null;
   if (e.kind === 'Number') return e.value;
   if (e.kind === 'Bool') return e.value;
@@ -205,8 +405,12 @@ function constColorValue(e: Expr | undefined, resolve?: ConstResolve, depth = 0)
     const c = (ColorNs as Record<string, unknown>)[e.property];
     return typeof c === 'string' ? c : null;
   }
-  if (e.kind === 'Call' && e.callee.kind === 'Member'
-    && e.callee.object.kind === 'Ident' && e.callee.object.name === 'color') {
+  if (
+    e.kind === 'Call' &&
+    e.callee.kind === 'Member' &&
+    e.callee.object.kind === 'Ident' &&
+    e.callee.object.name === 'color'
+  ) {
     const fn = e.callee.property;
     const pos = e.args.filter((a) => !a.name).map((a) => a.value);
     const named = (n: string): Expr | undefined => e.args.find((a) => a.name === n)?.value;
@@ -262,6 +466,16 @@ class Analyzer {
    *  (e.g. `input.string(HISTORICAL, options = [HISTORICAL, PRESENT])`). */
   private constEnv = new Map<string, Expr>();
   private securityCounter = 0;
+  private securityDeps: SecurityDependency[] = [];
+  /** request.security[_lower_tf] call sites (with their lexical scope), collected during
+   *  the pass; dependency extraction is DEFERRED to the end of run() so that every `:=`
+   *  in the program has already invalidated its constEnv entry — a loop body can reassign
+   *  a global AFTER the call in source but BEFORE it in execution order. */
+  private pendingSecurityDeps: {
+    e: Extract<Expr, { kind: 'Call' }>;
+    lowerTf: boolean;
+    scope: Scope;
+  }[] = [];
 
   constructor(private program: Program) {}
 
@@ -274,6 +488,14 @@ class Analyzer {
       } else if (s.kind === 'TypeDef') this.userTypes.set(s.name, s.fields);
     }
     for (const s of this.program.body) this.stmt(s);
+    // Deferred security-dep extraction: constEnv now reflects every reassignment in the
+    // program, so a fold can't report a value the runtime might not use (conservative:
+    // an arg reassigned anywhere — even after the call — comes back dynamic).
+    for (const p of this.pendingSecurityDeps) {
+      this.scope = p.scope;
+      this.securityDeps.push(this.extractSecurityDep(p.e, p.lowerTf));
+    }
+    this.scope = this.global;
     const c = this.slots.counts;
     return {
       program: this.program,
@@ -283,14 +505,25 @@ class Analyzer {
       varSlotCount: c.varSlotCount,
       autoHistory: this.autoHistory,
       inputs: this.inputs,
+      securityDependencies: this.securityDeps,
     };
   }
 
   private warn(node: { loc?: { line: number; col: number } }, message: string): void {
-    this.diags.push({ severity: 'warning', message, line: node.loc?.line ?? 0, col: node.loc?.col ?? 0 });
+    this.diags.push({
+      severity: 'warning',
+      message,
+      line: node.loc?.line ?? 0,
+      col: node.loc?.col ?? 0,
+    });
   }
   private error(node: { loc?: { line: number; col: number } }, message: string): void {
-    this.diags.push({ severity: 'error', message, line: node.loc?.line ?? 0, col: node.loc?.col ?? 0 });
+    this.diags.push({
+      severity: 'error',
+      message,
+      line: node.loc?.line ?? 0,
+      col: node.loc?.col ?? 0,
+    });
   }
 
   private freshJsName(name: string): string {
@@ -326,7 +559,13 @@ class Analyzer {
       case 'TupleDecl': {
         this.expr(s.init);
         s.syms = s.names.map((name) => {
-          const sym: SymRef = { kind: 'plain', name, type: tFloat, jsName: this.freshJsName(name), global: this.scope === this.global };
+          const sym: SymRef = {
+            kind: 'plain',
+            name,
+            type: tFloat,
+            jsName: this.freshJsName(name),
+            global: this.scope === this.global,
+          };
           this.scope.syms.set(name, sym);
           return sym;
         });
@@ -339,6 +578,9 @@ class Analyzer {
           s.target.sym = sym;
           s.sym = sym;
           if (sym.varSlot) s.varSlot = sym.varSlot;
+          // A reassigned global is no longer a constant: drop its recorded initializer
+          // so static folding (input metadata, security deps) can't use the stale value.
+          if (sym.global) this.constEnv.delete(s.target.name);
           // widen the symbol's type if the reassignment introduces a float
           if (isFloat(value) && sym.type?.kind === 'int') sym.type = tFloat;
         } else {
@@ -395,11 +637,16 @@ class Analyzer {
   // ── expressions (returns inferred coarse type) ────────────
   private expr(e: Expr): PineType {
     switch (e.kind) {
-      case 'Number': return (e.type = e.isInt ? tInt : tFloat);
-      case 'String': return (e.type = tString);
-      case 'Bool': return (e.type = tBool);
-      case 'Color': return (e.type = tColor);
-      case 'Na': return (e.type = tNa);
+      case 'Number':
+        return (e.type = e.isInt ? tInt : tFloat);
+      case 'String':
+        return (e.type = tString);
+      case 'Bool':
+        return (e.type = tBool);
+      case 'Color':
+        return (e.type = tColor);
+      case 'Na':
+        return (e.type = tNa);
 
       case 'Ident': {
         const sym = this.resolveIdent(e.name);
@@ -417,13 +664,20 @@ class Analyzer {
         // enum member access `E.member` → resolve to its constant value (compile-time).
         if (e.object.kind === 'Ident' && this.enums.has(e.object.name)) {
           const val = this.enums.get(e.object.name)!.get(e.property);
-          if (val) { e.constExpr = val; return (e.type = this.expr(val)); }
+          if (val) {
+            e.constExpr = val;
+            return (e.type = this.expr(val));
+          }
           this.error(e, `enum '${e.object.name}' has no member '${e.property}'`);
           return (e.type = tNa);
         }
         // `dayofweek.monday` etc. — `dayofweek` is also a series leaf, so the member
         // form is folded to its integer constant (Sunday = 1 … Saturday = 7).
-        if (e.object.kind === 'Ident' && e.object.name === 'dayofweek' && e.property in DAYOFWEEK_CONST) {
+        if (
+          e.object.kind === 'Ident' &&
+          e.object.name === 'dayofweek' &&
+          e.property in DAYOFWEEK_CONST
+        ) {
           e.constExpr = { kind: 'Number', value: DAYOFWEEK_CONST[e.property], isInt: true };
           return (e.type = tInt);
         }
@@ -474,7 +728,8 @@ class Analyzer {
         return (e.type = t);
       }
 
-      case 'Binary': return this.binary(e);
+      case 'Binary':
+        return this.binary(e);
 
       case 'Ternary': {
         this.expr(e.cond);
@@ -483,7 +738,8 @@ class Analyzer {
         return (e.type = isStr(a) || isStr(b) ? tString : isFloat(a) || isFloat(b) ? tFloat : a);
       }
 
-      case 'Call': return this.call(e);
+      case 'Call':
+        return this.call(e);
 
       case 'Tuple':
         for (const it of e.items) this.expr(it);
@@ -522,7 +778,12 @@ class Analyzer {
         if (e.step) this.expr(e.step);
         const prev = this.scope;
         this.scope = new Scope(prev);
-        e.varSym = { kind: 'plain', name: e.varName, type: tInt, jsName: this.freshJsName(e.varName) };
+        e.varSym = {
+          kind: 'plain',
+          name: e.varName,
+          type: tInt,
+          jsName: this.freshJsName(e.varName),
+        };
         this.scope.syms.set(e.varName, e.varSym);
         for (const st of e.body) this.stmt(st);
         this.scope = prev;
@@ -533,10 +794,20 @@ class Analyzer {
         const prev = this.scope;
         this.scope = new Scope(prev);
         if (e.indexName) {
-          e.indexSym = { kind: 'plain', name: e.indexName, type: tInt, jsName: this.freshJsName(e.indexName) };
+          e.indexSym = {
+            kind: 'plain',
+            name: e.indexName,
+            type: tInt,
+            jsName: this.freshJsName(e.indexName),
+          };
           this.scope.syms.set(e.indexName, e.indexSym);
         }
-        e.valueSym = { kind: 'plain', name: e.valueName, type: tFloat, jsName: this.freshJsName(e.valueName) };
+        e.valueSym = {
+          kind: 'plain',
+          name: e.valueName,
+          type: tFloat,
+          jsName: this.freshJsName(e.valueName),
+        };
         this.scope.syms.set(e.valueName, e.valueSym);
         for (const st of e.body) this.stmt(st);
         this.scope = prev;
@@ -601,8 +872,12 @@ class Analyzer {
     // UDT constructor: `T.new(...)` where T is a user-defined type. Record the
     // field schema so both backends build an identical `{field: value}` instance;
     // do NOT resolve `T` as a variable (it's a type name, not a value).
-    if (callee.kind === 'Member' && callee.object.kind === 'Ident'
-      && callee.property === 'new' && this.userTypes.has(callee.object.name)) {
+    if (
+      callee.kind === 'Member' &&
+      callee.object.kind === 'Ident' &&
+      callee.property === 'new' &&
+      this.userTypes.has(callee.object.name)
+    ) {
       const fields = this.userTypes.get(callee.object.name)!;
       e.udtFields = fields.map((f) => ({ name: f.name, default: f.default }));
       // args were already analyzed above — re-analyzing would duplicate input
@@ -622,11 +897,17 @@ class Analyzer {
       this.expr(callee);
     }
 
-    const isStateful = nsName === 'ta' || (nsName === 'math' && fnName === 'sum') || (!nsName && fnName === 'fixnan');
+    const isStateful =
+      nsName === 'ta' ||
+      (nsName === 'math' && fnName === 'sum') ||
+      (!nsName && fnName === 'fixnan');
     if (isStateful) {
       e.stateSite = this.slots.stateSlot();
       if (this.conditionalDepth > 0) {
-        this.warn(e, `stateful call '${nsName ? nsName + '.' : ''}${fnName}' inside a conditional branch may corrupt its internal series; consider hoisting it`);
+        this.warn(
+          e,
+          `stateful call '${nsName ? nsName + '.' : ''}${fnName}' inside a conditional branch may corrupt its internal series; consider hoisting it`,
+        );
       }
     }
 
@@ -634,11 +915,18 @@ class Analyzer {
     // dependency recording); other request.* are deferred.
     if (nsName === 'request' && (fnName === 'security' || fnName === 'security_lower_tf')) {
       e.securitySite = this.securityCounter++;
+      this.pendingSecurityDeps.push({
+        e,
+        lowerTf: fnName === 'security_lower_tf',
+        scope: this.scope,
+      });
     } else if (nsName && DEFERRED_NAMESPACES.has(nsName)) {
       this.error(e, `'${nsName}.${fnName}' is not yet supported`);
     }
-    if (!nsName && fnName && this.funcs.has(fnName)) this.error(e, `user-defined function calls are not yet supported`);
-    if (!nsName && fnName && DEFERRED_FNS.has(fnName)) this.error(e, `'${fnName}()' is not yet supported`);
+    if (!nsName && fnName && this.funcs.has(fnName))
+      this.error(e, `user-defined function calls are not yet supported`);
+    if (!nsName && fnName && DEFERRED_FNS.has(fnName))
+      this.error(e, `'${fnName}()' is not yet supported`);
 
     // stable output id for plot-family calls (both backends read it)
     if (!nsName && fnName && OUTPUT_FNS.has(fnName)) {
@@ -651,7 +939,8 @@ class Analyzer {
     }
     // bare `input(defval, title)` — auto-typed from the default value's type.
     if (!nsName && fnName === 'input') {
-      const defval = e.args.filter((a) => !a.name)[0]?.value ?? e.args.find((a) => a.name === 'defval')?.value;
+      const defval =
+        e.args.filter((a) => !a.name)[0]?.value ?? e.args.find((a) => a.name === 'defval')?.value;
       const kind = inferInputKind(defval?.type);
       e.inputKey = this.extractInput(e, kind);
       return (e.type = defval?.type ?? tFloat);
@@ -660,9 +949,92 @@ class Analyzer {
     return (e.type = this.callReturnType(nsName, fnName));
   }
 
+  /** Best-effort static extraction of a request.security[_lower_tf] dependency. */
+  private extractSecurityDep(
+    e: Extract<Expr, { kind: 'Call' }>,
+    lowerTf: boolean,
+  ): SecurityDependency {
+    const positional = e.args.filter((a) => !a.name).map((a) => a.value);
+    const symArg = e.args.find((a) => a.name === 'symbol')?.value ?? positional[0];
+    const tfArg = e.args.find((a) => a.name === 'timeframe')?.value ?? positional[1];
+
+    const symNode = this.deref(symArg);
+    let self = false;
+    let symbol: string | null = null;
+    let symDynamic = true;
+    if (symNode) {
+      if (symNode.kind === 'String') {
+        if (symNode.value === '') self = true;
+        else symbol = symNode.value;
+        symDynamic = false;
+      } else if (
+        symNode.kind === 'Member' &&
+        symNode.object.kind === 'Ident' &&
+        symNode.object.name === 'syminfo' &&
+        (symNode.property === 'tickerid' || symNode.property === 'ticker')
+      ) {
+        self = true;
+        symDynamic = false;
+      }
+    }
+
+    const tfNode = this.deref(tfArg);
+    let tfSelf = false;
+    let timeframe: string | null = null;
+    let tfDynamic = true;
+    if (tfNode) {
+      if (tfNode.kind === 'String') {
+        // Empty timeframe means "chart timeframe" (same rule as the empty symbol).
+        if (tfNode.value === '') tfSelf = true;
+        else timeframe = tfNode.value;
+        tfDynamic = false;
+      } else if (
+        tfNode.kind === 'Member' &&
+        tfNode.object.kind === 'Ident' &&
+        tfNode.object.name === 'timeframe' &&
+        tfNode.property === 'period'
+      ) {
+        // `timeframe.period` evaluates to the chart's TF at runtime — a static
+        // self-reference (`request.security(tickerid, timeframe.period, close)` == close).
+        tfSelf = true;
+        tfDynamic = false;
+      }
+    }
+
+    return { lowerTf, self, symbol, tfSelf, timeframe, dynamic: symDynamic || tfDynamic };
+  }
+
+  /** Follow const-bound identifiers to their defining expression (bounded), for static folding. */
+  private deref(node: Expr | undefined): Expr | undefined {
+    let n = node;
+    let guard = 0;
+    while (n && n.kind === 'Ident' && guard++ < 8) {
+      const next = this.constLookup(n.name);
+      if (!next) break;
+      n = next;
+    }
+    return n;
+  }
+
+  /** constEnv entry for `name`, but only when the name still binds to that global at the
+   *  current site — a local (or inlined-UDF-param) shadow must not fold to the global's
+   *  initializer. Unresolvable names stay unfolded, so consumers see them as dynamic. */
+  private constLookup(name: string): Expr | undefined {
+    const sym = this.scope.lookup(name);
+    if (sym && !sym.global) return undefined;
+    return this.constEnv.get(name);
+  }
+
   private callReturnType(ns: string | undefined, fn: string | undefined): PineType {
     if (ns === 'ta') {
-      if (fn === 'crossover' || fn === 'crossunder' || fn === 'cross' || fn === 'rising' || fn === 'falling') return tBool;
+      if (
+        fn === 'crossover' ||
+        fn === 'crossunder' ||
+        fn === 'cross' ||
+        fn === 'rising' ||
+        fn === 'falling'
+      )
+        return tBool;
       if (fn === 'barssince') return tInt;
       return tFloat; // macd/bb return tuples; coarse type unused for destructuring
     }
@@ -683,7 +1055,15 @@ class Analyzer {
       return tFloat;
     }
     // drawing objects: .new() returns an id; getters return numbers; setters void.
-    if (ns === 'line' || ns === 'label' || ns === 'box' || ns === 'table' || ns === 'linefill' || ns === 'polyline') return tFloat;
+    if (
+      ns === 'line' ||
+      ns === 'label' ||
+      ns === 'box' ||
+      ns === 'table' ||
+      ns === 'linefill' ||
+      ns === 'polyline'
+    )
+      return tFloat;
     if (ns === 'math') return tFloat;
     if (ns === 'str') {
       if (fn === 'tonumber') return tFloat;
@@ -696,7 +1076,14 @@ class Analyzer {
     if (ns === 'input') {
       if (fn === 'int' || fn === 'time') return tInt;
       if (fn === 'bool') return tBool;
-      if (fn === 'string' || fn === 'symbol' || fn === 'session' || fn === 'text_area' || fn === 'enum') return tString;
+      if (
+        fn === 'string' ||
+        fn === 'symbol' ||
+        fn === 'session' ||
+        fn === 'text_area' ||
+        fn === 'enum'
+      )
+        return tString;
       if (fn === 'color') return tColor;
       return tFloat;
     }
@@ -709,10 +1096,14 @@ class Analyzer {
     }
     if (fn && DATE_FNS.has(fn)) return tInt;
     switch (fn) {
-      case 'na': return tBool;
-      case 'int': return tInt;
-      case 'bool': return tBool;
-      case 'string': return tString;
+      case 'na':
+        return tBool;
+      case 'int':
+        return tInt;
+      case 'bool':
+        return tBool;
+      case 'string':
+        return tString;
       case 'timestamp':
       case 'time':
       case 'time_close':
@@ -730,10 +1121,23 @@ class Analyzer {
   private extractInput(e: Extract<Expr, { kind: 'Call' }>, fn: string): string {
     const pos = e.args.filter((a) => !a.name).map((a) => a.value);
     const named = (n: string) => e.args.find((a) => a.name === n)?.value;
-    const KINDS = ['int', 'float', 'bool', 'string', 'color', 'source', 'price', 'timeframe',
-      'symbol', 'session', 'time', 'text_area', 'enum'];
+    const KINDS = [
+      'int',
+      'float',
+      'bool',
+      'string',
+      'color',
+      'source',
+      'price',
+      'timeframe',
+      'symbol',
+      'session',
+      'time',
+      'text_area',
+      'enum',
+    ];
     const kind = (KINDS.includes(fn) ? fn : 'float') as InputDecl['kind'];
-    const resolve: ConstResolve = (n) => this.constEnv.get(n);
+    const resolve: ConstResolve = (n) => this.constLookup(n);
     const strArg = (e: Expr | undefined): string | undefined => {
       const v = literalValue(e, resolve);
       return typeof v === 'string' ? v : undefined;
@@ -770,7 +1174,12 @@ class Analyzer {
       minval: numLit(named('minval') ?? (numeric ? pos[2] : undefined), resolve),
       maxval: numLit(named('maxval') ?? (numeric ? pos[3] : undefined), resolve),
       step: numLit(named('step') ?? (numeric ? pos[4] : undefined), resolve),
-      options: optsExpr?.kind === 'Tuple' ? (optsExpr.items.map((it) => literalValue(it, resolve)).filter((v) => v != null) as (string | number)[]) : undefined,
+      options:
+        optsExpr?.kind === 'Tuple'
+          ? (optsExpr.items.map((it) => literalValue(it, resolve)).filter((v) => v != null) as (
+              string | number
+            )[])
+          : undefined,
       group: strArg(named('group')),
       tooltip: strArg(named('tooltip')),
     };
@@ -782,9 +1191,15 @@ class Analyzer {
   private resolveIdent(name: string): SymRef {
     const local = this.scope.lookup(name);
     if (local) return local;
-    if (name in STORED_LEAVES) return { kind: 'builtin-series', name, type: tFloat, builtinSlot: STORED_LEAVES[name] };
+    if (name in STORED_LEAVES)
+      return { kind: 'builtin-series', name, type: tFloat, builtinSlot: STORED_LEAVES[name] };
     if (DERIVED_LEAVES.has(name)) {
-      return { kind: 'builtin-series', name, type: INT_LEAVES.has(name) ? tInt : tFloat, builtinSlot: null };
+      return {
+        kind: 'builtin-series',
+        name,
+        type: INT_LEAVES.has(name) ? tInt : tFloat,
+        builtinSlot: null,
+      };
     }
     if (NAMESPACES.has(name)) return { kind: 'builtin-ns', name };
     if (GLOBAL_FNS.has(name)) return { kind: 'builtin-fn', name };
@@ -813,11 +1228,19 @@ class Analyzer {
         }
         return;
       }
-      if (sym.kind === 'plain' || sym.kind === 'var' || sym.kind === 'varip' || sym.kind === 'param') {
+      if (
+        sym.kind === 'plain' ||
+        sym.kind === 'var' ||
+        sym.kind === 'varip' ||
+        sym.kind === 'param'
+      ) {
         if (sym.historySlot == null) sym.historySlot = this.slots.historySlot();
         e.historySlot = sym.historySlot;
         if (sym.global === false && this.inlineDepth === 0) {
-          this.warn(e, `history ([]) of the local variable '${sym.name}' is unreliable; its column is only written on bars where its block executes — hoist it to global scope`);
+          this.warn(
+            e,
+            `history ([]) of the local variable '${sym.name}' is unreliable; its column is only written on bars where its block executes — hoist it to global scope`,
+          );
         }
         return;
       }

@@ -5,12 +5,38 @@
  * in the runtime and match the interpreter exactly.
  */
 import type {
-  Program, Stmt, Expr, VarDecl, Reassign, ExprStmt, IfNode, SwitchNode, ForNode,
-  ForInNode, WhileNode, Call, Member, Ident, TupleDecl, SymRef,
+  Program,
+  Stmt,
+  Expr,
+  VarDecl,
+  Reassign,
+  ExprStmt,
+  IfNode,
+  SwitchNode,
+  ForNode,
+  ForInNode,
+  WhileNode,
+  Call,
+  Member,
+  Ident,
+  TupleDecl,
+  SymRef,
 } from '../parser/ast.js';
 import type { AnalyzeResult } from '../sema/analyze.js';
 import type { ScriptFn } from '../engine/driver.js';
-import { nsRuntime, normalizeTaArgs, OUTPUT_FNS, NOOP_FNS, CAST_FNS, MARKER_KIND, DATE_FNS, TA_VARS, DRAWING_CASTS, NS_CALL_PARAMS, NS_OPTS_POSITIONAL } from './intrinsics.js';
+import {
+  nsRuntime,
+  normalizeTaArgs,
+  OUTPUT_FNS,
+  NOOP_FNS,
+  CAST_FNS,
+  MARKER_KIND,
+  DATE_FNS,
+  TA_VARS,
+  DRAWING_CASTS,
+  NS_CALL_PARAMS,
+  NS_OPTS_POSITIONAL,
+} from './intrinsics.js';
 
 export interface CodegenOutput {
   source: string;
@@ -40,17 +66,28 @@ class Emitter {
 
   private stmt(s: Stmt): string {
     switch (s.kind) {
-      case 'VarDecl': return this.varDecl(s);
-      case 'TupleDecl': return this.tupleDecl(s);
-      case 'Reassign': return this.reassign(s);
-      case 'ExprStmt': return this.exprStmt(s);
-      case 'If': return this.ifStmt(s);
-      case 'For': return this.forStmt(s);
-      case 'ForIn': return this.forInStmt(s);
-      case 'While': return this.whileStmt(s);
-      case 'Switch': return this.switchStmt(s);
-      case 'Break': return 'break;';
-      case 'Continue': return 'continue;';
+      case 'VarDecl':
+        return this.varDecl(s);
+      case 'TupleDecl':
+        return this.tupleDecl(s);
+      case 'Reassign':
+        return this.reassign(s);
+      case 'ExprStmt':
+        return this.exprStmt(s);
+      case 'If':
+        return this.ifStmt(s);
+      case 'For':
+        return this.forStmt(s);
+      case 'ForIn':
+        return this.forInStmt(s);
+      case 'While':
+        return this.whileStmt(s);
+      case 'Switch':
+        return this.switchStmt(s);
+      case 'Break':
+        return 'break;';
+      case 'Continue':
+        return 'continue;';
       case 'FuncDef':
       case 'TypeDef':
       case 'Import':
@@ -80,7 +117,8 @@ class Emitter {
     const names = s.syms!.map((y) => y.jsName).join(', ');
     // guard: an `na` tuple value (e.g. an unconfirmed request.security) → all-na
     let code = `let [${names}] = ((__t) => Array.isArray(__t) ? __t : [])(${this.expr(s.init)});`;
-    for (const y of s.syms!) if (y.historySlot != null) code += ` $.set(${y.historySlot}, ${y.jsName});`;
+    for (const y of s.syms!)
+      if (y.historySlot != null) code += ` $.set(${y.historySlot}, ${y.jsName});`;
     return code;
   }
 
@@ -109,13 +147,20 @@ class Emitter {
     const cur = this.expr(target);
     const v = this.expr(value);
     switch (op) {
-      case ':=': return v;
-      case '+=': return `$.add(${cur}, ${v})`;
-      case '-=': return `$.sub(${cur}, ${v})`;
-      case '*=': return `$.mul(${cur}, ${v})`;
-      case '/=': return `$.div(${cur}, ${v})`;
-      case '%=': return `$.mod(${cur}, ${v})`;
-      default: return v;
+      case ':=':
+        return v;
+      case '+=':
+        return `$.add(${cur}, ${v})`;
+      case '-=':
+        return `$.sub(${cur}, ${v})`;
+      case '*=':
+        return `$.mul(${cur}, ${v})`;
+      case '/=':
+        return `$.div(${cur}, ${v})`;
+      case '%=':
+        return `$.mod(${cur}, ${v})`;
+      default:
+        return v;
     }
   }
 
@@ -127,7 +172,8 @@ class Emitter {
   // ── control flow as statements ────────────────────────────
   private ifStmt(s: IfNode): string {
     let code = `if ($.toBool(${this.expr(s.cond)})) {\n${this.block(s.then)}\n}`;
-    for (const el of s.elifs) code += ` else if ($.toBool(${this.expr(el.cond)})) {\n${this.block(el.body)}\n}`;
+    for (const el of s.elifs)
+      code += ` else if ($.toBool(${this.expr(el.cond)})) {\n${this.block(el.body)}\n}`;
     if (s.else) code += ` else {\n${this.block(s.else)}\n}`;
     return code;
   }
@@ -140,9 +186,11 @@ class Emitter {
     const fromJs = this.expr(s.from);
     const toJs = this.expr(s.to);
     const magJs = s.step ? `Math.abs(${this.expr(s.step)})` : '1';
-    return `{ const __from_${v} = (${fromJs}); const __to_${v} = (${toJs}); ` +
+    return (
+      `{ const __from_${v} = (${fromJs}); const __to_${v} = (${toJs}); ` +
       `const __up_${v} = __from_${v} <= __to_${v}; const __step_${v} = (__up_${v} ? 1 : -1) * (${magJs}); ` +
-      `for (let ${v} = __from_${v}; __up_${v} ? ${v} <= __to_${v} : ${v} >= __to_${v}; ${v} += __step_${v}) {\n$.consumeLoopIteration();\n${this.block(s.body)}\n} }`;
+      `for (let ${v} = __from_${v}; __up_${v} ? ${v} <= __to_${v} : ${v} >= __to_${v}; ${v} += __step_${v}) {\n$.consumeLoopIteration();\n${this.block(s.body)}\n} }`
+    );
   }
   private forInStmt(s: ForInNode): string {
     const val = s.valueSym!.jsName!;
@@ -168,18 +216,26 @@ class Emitter {
     let defaultBody: string | null = null;
     for (const c of s.cases) {
       const body = this.block(c.body);
-      if (!c.test) { defaultBody = body; continue; }
-      const cond = s.subject ? `$.eq(__subj, (${this.expr(c.test)}))` : `$.toBool(${this.expr(c.test)})`;
+      if (!c.test) {
+        defaultBody = body;
+        continue;
+      }
+      const cond = s.subject
+        ? `$.eq(__subj, (${this.expr(c.test)}))`
+        : `$.toBool(${this.expr(c.test)})`;
       parts.push(`if (${cond}) {\n${body}\n}`);
     }
     const chain = parts.length
       ? parts.join(' else ') + (defaultBody !== null ? ` else {\n${defaultBody}\n}` : '')
-      : defaultBody ?? '';
+      : (defaultBody ?? '');
     return s.subject ? `{ const __subj = (${this.expr(s.subject)});\n${chain} }` : `{ ${chain} }`;
   }
 
   private block(body: Stmt[]): string {
-    return body.map((b) => this.stmt(b)).filter(Boolean).join('\n');
+    return body
+      .map((b) => this.stmt(b))
+      .filter(Boolean)
+      .join('\n');
   }
 
   /** Read expression for a resolved symbol (var/varip slot or plain local). */
@@ -202,12 +258,28 @@ class Emitter {
     }
     const last = body[body.length - 1];
     if (last) {
-      if (last.kind === 'ExprStmt') { lines.push(`return (${this.expr(last.expr)});`); return lines.join('\n'); }
-      if (last.kind === 'VarDecl' && last.sym) { const c = this.stmt(last); if (c) lines.push(c); lines.push(`return (${this.readSym(last.sym)});`); return lines.join('\n'); }
-      if (last.kind === 'Reassign' && last.target.kind === 'Ident' && last.sym) { const c = this.stmt(last); if (c) lines.push(c); lines.push(`return (${this.readSym(last.sym)});`); return lines.join('\n'); }
+      if (last.kind === 'ExprStmt') {
+        lines.push(`return (${this.expr(last.expr)});`);
+        return lines.join('\n');
+      }
+      if (last.kind === 'VarDecl' && last.sym) {
+        const c = this.stmt(last);
+        if (c) lines.push(c);
+        lines.push(`return (${this.readSym(last.sym)});`);
+        return lines.join('\n');
+      }
+      if (last.kind === 'Reassign' && last.target.kind === 'Ident' && last.sym) {
+        const c = this.stmt(last);
+        if (c) lines.push(c);
+        lines.push(`return (${this.readSym(last.sym)});`);
+        return lines.join('\n');
+      }
       // `if`/`switch` are EXPRESSIONS in Pine — a trailing one is the block's value (e.g. a UDF
       // whose body is a `switch`). Return its expression form, not run it as a side-effect stmt.
-      if (last.kind === 'If' || last.kind === 'Switch') { lines.push(`return (${this.expr(last)});`); return lines.join('\n'); }
+      if (last.kind === 'If' || last.kind === 'Switch') {
+        lines.push(`return (${this.expr(last)});`);
+        return lines.join('\n');
+      }
       const c = this.stmt(last);
       if (c) lines.push(c);
     }
@@ -218,38 +290,57 @@ class Emitter {
   // ── expressions ───────────────────────────────────────────
   private expr(e: Expr): string {
     switch (e.kind) {
-      case 'Number': return String(e.value);
-      case 'String': return JSON.stringify(e.value);
-      case 'Bool': return e.value ? 'true' : 'false';
-      case 'Color': return `$.colorLit(${JSON.stringify(e.value)})`;
-      case 'Na': return '$.NA';
-      case 'Ident': return this.ident(e);
-      case 'Member': return this.member(e);
+      case 'Number':
+        return String(e.value);
+      case 'String':
+        return JSON.stringify(e.value);
+      case 'Bool':
+        return e.value ? 'true' : 'false';
+      case 'Color':
+        return `$.colorLit(${JSON.stringify(e.value)})`;
+      case 'Na':
+        return '$.NA';
+      case 'Ident':
+        return this.ident(e);
+      case 'Member':
+        return this.member(e);
       case 'History': {
         if (e.historySlot == null) return '$.NA';
         const off = this.expr(e.offset);
         // inline-expr history: write this bar's value into the slot, then read offset-back.
-        if (e.historyExpr) return `($.set(${e.historySlot}, (${this.expr(e.base)})), $.get(${e.historySlot}, (${off})))`;
+        if (e.historyExpr)
+          return `($.set(${e.historySlot}, (${this.expr(e.base)})), $.get(${e.historySlot}, (${off})))`;
         return `$.get(${e.historySlot}, (${off}))`;
       }
       case 'Unary':
-        return e.op === 'not' ? `$.not(${this.expr(e.operand)})`
-          : e.op === '-' ? `$.neg(${this.expr(e.operand)})`
-          : `(${this.expr(e.operand)})`;
-      case 'Binary': return this.binary(e);
-      case 'Ternary': return `($.toBool(${this.expr(e.cond)}) ? (${this.expr(e.then)}) : (${this.expr(e.else)}))`;
-      case 'Call': return this.call(e);
-      case 'Tuple': return `[${e.items.map((it) => this.expr(it)).join(', ')}]`;
-      case 'If': return `(() => {\n${this.ifExprBody(e)}\n})()`;
-      case 'Switch': return this.switchExpr(e);
-      case 'For': case 'ForIn': case 'While':
+        return e.op === 'not'
+          ? `$.not(${this.expr(e.operand)})`
+          : e.op === '-'
+            ? `$.neg(${this.expr(e.operand)})`
+            : `(${this.expr(e.operand)})`;
+      case 'Binary':
+        return this.binary(e);
+      case 'Ternary':
+        return `($.toBool(${this.expr(e.cond)}) ? (${this.expr(e.then)}) : (${this.expr(e.else)}))`;
+      case 'Call':
+        return this.call(e);
+      case 'Tuple':
+        return `[${e.items.map((it) => this.expr(it)).join(', ')}]`;
+      case 'If':
+        return `(() => {\n${this.ifExprBody(e)}\n})()`;
+      case 'Switch':
+        return this.switchExpr(e);
+      case 'For':
+      case 'ForIn':
+      case 'While':
         return '$.NA'; // loop-as-value yield not supported in this build
     }
   }
 
   private ifExprBody(s: IfNode): string {
     let code = `if ($.toBool(${this.expr(s.cond)})) {\n${this.blockValue(s.then)}\n}`;
-    for (const el of s.elifs) code += ` else if ($.toBool(${this.expr(el.cond)})) {\n${this.blockValue(el.body)}\n}`;
+    for (const el of s.elifs)
+      code += ` else if ($.toBool(${this.expr(el.cond)})) {\n${this.blockValue(el.body)}\n}`;
     if (s.else) code += ` else {\n${this.blockValue(s.else)}\n}`;
     code += '\nreturn $.NA;';
     return code;
@@ -261,8 +352,12 @@ class Emitter {
     let defaultBody = 'return $.NA;';
     for (const c of s.cases) {
       const body = this.blockValue(c.body);
-      if (!c.test) { defaultBody = body; continue; }
-      const cond = subj !== null ? `$.eq(__subj, (${this.expr(c.test)}))` : `$.toBool(${this.expr(c.test)})`;
+      if (!c.test) {
+        defaultBody = body;
+        continue;
+      }
+      const cond =
+        subj !== null ? `$.eq(__subj, (${this.expr(c.test)}))` : `$.toBool(${this.expr(c.test)})`;
       parts.push(`if (${cond}) {\n${body}\n}`);
     }
     const head = subj !== null ? `const __subj = (${subj});\n` : '';
@@ -272,27 +367,38 @@ class Emitter {
   private ident(e: Ident): string {
     const sym = e.sym!;
     switch (sym.kind) {
-      case 'builtin-series': return `$.${sym.name}`;
-      case 'var': return `$.readVar(${sym.varSlot!.id})`;
-      case 'varip': return `$.readVarip(${sym.varSlot!.id})`;
+      case 'builtin-series':
+        return `$.${sym.name}`;
+      case 'var':
+        return `$.readVar(${sym.varSlot!.id})`;
+      case 'varip':
+        return `$.readVarip(${sym.varSlot!.id})`;
       case 'plain':
-      case 'param': return sym.jsName!;
-      case 'builtin-ns': return `$.${nsRuntime(sym.name) ?? sym.name}`;
-      default: return '$.NA';
+      case 'param':
+        return sym.jsName!;
+      case 'builtin-ns':
+        return `$.${nsRuntime(sym.name) ?? sym.name}`;
+      default:
+        return '$.NA';
     }
   }
 
   private member(e: Member): string {
     if (e.constExpr) return this.expr(e.constExpr); // resolved enum member
     // strategy.closedtrades.first_index / strategy.opentrades.capital_held — bare scalar stats.
-    if (e.object.kind === 'Member' && e.object.object.kind === 'Ident'
-      && e.object.object.sym?.kind === 'builtin-ns' && e.object.object.name === 'strategy'
-      && (e.object.property === 'closedtrades' || e.object.property === 'opentrades')) {
+    if (
+      e.object.kind === 'Member' &&
+      e.object.object.kind === 'Ident' &&
+      e.object.object.sym?.kind === 'builtin-ns' &&
+      e.object.object.name === 'strategy' &&
+      (e.object.property === 'closedtrades' || e.object.property === 'opentrades')
+    ) {
       return `$.strategy.tradeStat(${JSON.stringify(e.object.property)}, ${JSON.stringify(e.property)})`;
     }
     if (e.object.kind === 'Ident' && e.object.sym?.kind === 'builtin-ns') {
       // no-paren stateful ta variable (`ta.tr`) → a site-keyed call.
-      if (e.object.name === 'ta' && TA_VARS.has(e.property)) return `$.ta.${e.property}(${e.stateSite ?? 0})`;
+      if (e.object.name === 'ta' && TA_VARS.has(e.property))
+        return `$.ta.${e.property}(${e.stateSite ?? 0})`;
       const rt = nsRuntime(e.object.name) ?? e.object.name;
       return `$.${rt}.${e.property}`;
     }
@@ -307,19 +413,32 @@ class Emitter {
     const r = this.expr(e.right);
     switch (e.op) {
       // v6: bools cannot hold na — na coerces to false. Lazy RHS preserved by &&/||.
-      case 'and': return `($.toBool(${l}) && $.toBool(${r}))`;
-      case 'or': return `($.toBool(${l}) || $.toBool(${r}))`;
-      case '==': return `$.eq(${l}, ${r})`;
-      case '!=': return `$.ne(${l}, ${r})`;
-      case '<': return `$.lt(${l}, ${r})`;
-      case '<=': return `$.le(${l}, ${r})`;
-      case '>': return `$.gt(${l}, ${r})`;
-      case '>=': return `$.ge(${l}, ${r})`;
-      case '+': return e.type?.kind === 'string' ? `$.concat(${l}, ${r})` : `$.add(${l}, ${r})`;
-      case '-': return `$.sub(${l}, ${r})`;
-      case '*': return `$.mul(${l}, ${r})`;
-      case '/': return `$.div(${l}, ${r})`;
-      case '%': return `$.mod(${l}, ${r})`;
+      case 'and':
+        return `($.toBool(${l}) && $.toBool(${r}))`;
+      case 'or':
+        return `($.toBool(${l}) || $.toBool(${r}))`;
+      case '==':
+        return `$.eq(${l}, ${r})`;
+      case '!=':
+        return `$.ne(${l}, ${r})`;
+      case '<':
+        return `$.lt(${l}, ${r})`;
+      case '<=':
+        return `$.le(${l}, ${r})`;
+      case '>':
+        return `$.gt(${l}, ${r})`;
+      case '>=':
+        return `$.ge(${l}, ${r})`;
+      case '+':
+        return e.type?.kind === 'string' ? `$.concat(${l}, ${r})` : `$.add(${l}, ${r})`;
+      case '-':
+        return `$.sub(${l}, ${r})`;
+      case '*':
+        return `$.mul(${l}, ${r})`;
+      case '/':
+        return `$.div(${l}, ${r})`;
+      case '%':
+        return `$.mod(${l}, ${r})`;
     }
   }
 
@@ -328,19 +447,30 @@ class Emitter {
     // UDT constructor `T.new(...)` → an object literal of its fields.
     if (e.udtFields) return this.udtNew(e);
     // namespace call: ns.fn(args)
-    if (callee.kind === 'Member' && callee.object.kind === 'Ident' && callee.object.sym?.kind === 'builtin-ns') {
+    if (
+      callee.kind === 'Member' &&
+      callee.object.kind === 'Ident' &&
+      callee.object.sym?.kind === 'builtin-ns'
+    ) {
       const ns = callee.object.name;
       const fn = callee.property;
       const rt = nsRuntime(ns) ?? ns;
       if (ns === 'ta' || (ns === 'math' && fn === 'sum')) {
-        let valueArgs = normalizeTaArgs(fn, e.args.map((a) => this.expr(a.value)), '1', '0');
+        let valueArgs = normalizeTaArgs(
+          fn,
+          e.args.map((a) => this.expr(a.value)),
+          '1',
+          '0',
+        );
         // pivothigh/pivotlow have a 2-arg (left,right) form using high/low implicitly
         if ((fn === 'pivothigh' || fn === 'pivotlow') && valueArgs.length === 2) {
           valueArgs = [fn === 'pivothigh' ? '$.high' : '$.low', ...valueArgs];
         }
         // highest/lowest(bars) have a 1-arg (length) form defaulting source to high/low
-        if ((fn === 'highest' || fn === 'highestbars') && valueArgs.length === 1) valueArgs = ['$.high', ...valueArgs];
-        if ((fn === 'lowest' || fn === 'lowestbars') && valueArgs.length === 1) valueArgs = ['$.low', ...valueArgs];
+        if ((fn === 'highest' || fn === 'highestbars') && valueArgs.length === 1)
+          valueArgs = ['$.high', ...valueArgs];
+        if ((fn === 'lowest' || fn === 'lowestbars') && valueArgs.length === 1)
+          valueArgs = ['$.low', ...valueArgs];
         const all = [...valueArgs, String(e.stateSite ?? 0)];
         return `$.ta.${fn}(${all.join(', ')})`;
       }
@@ -375,8 +505,12 @@ class Emitter {
       return `$.${rt}.${fn}(${this.nsArgs(e, NS_CALL_PARAMS[`${ns}.${fn}`], NS_OPTS_POSITIONAL[`${ns}.${fn}`])})`;
     }
     // two-level namespace: chart.point.new(...) → $.chart.point.new(...)
-    if (callee.kind === 'Member' && callee.object.kind === 'Member'
-      && callee.object.object.kind === 'Ident' && callee.object.object.sym?.kind === 'builtin-ns') {
+    if (
+      callee.kind === 'Member' &&
+      callee.object.kind === 'Member' &&
+      callee.object.object.kind === 'Ident' &&
+      callee.object.object.sym?.kind === 'builtin-ns'
+    ) {
       // strategy.closedtrades.X(i) / strategy.opentrades.X(i) → per-trade introspection.
       if (callee.object.object.name === 'strategy') {
         const scope = callee.object.property;
@@ -424,9 +558,12 @@ class Emitter {
     if (coords) {
       const named = new Map(e.args.filter((a) => a.name).map((a) => [a.name!, a.value] as const));
       const positionalArgs = e.args.filter((a) => !a.name);
-      const slots: (typeof e.args[number]['value'] | undefined)[] = [];
+      const slots: ((typeof e.args)[number]['value'] | undefined)[] = [];
       for (let i = 0; i < coords.length; i++) slots[i] = positionalArgs[i]?.value; // coord slots
-      coords.forEach((pname, i) => { const v = named.get(pname); if (v !== undefined) slots[i] = v; }); // a coord passed by name
+      coords.forEach((pname, i) => {
+        const v = named.get(pname);
+        if (v !== undefined) slots[i] = v;
+      }); // a coord passed by name
       // Everything else → the trailing opts bag: extra POSITIONAL args keyed by their Pine
       // param name (optsPos), then NAMED args that aren't coords.
       const opts: [string, Expr][] = [];
@@ -439,14 +576,18 @@ class Emitter {
       // runtime's trailing `opts` parameter, not a skipped middle positional.
       const span = opts.length ? Math.max(slots.length, coords.length) : slots.length;
       const out: string[] = [];
-      for (let i = 0; i < span; i++) out.push(slots[i] !== undefined ? `(${this.expr(slots[i]!)})` : 'undefined');
-      if (opts.length) out.push(`{${opts.map(([k, v]) => `${JSON.stringify(k)}: (${this.expr(v)})`).join(', ')}}`);
+      for (let i = 0; i < span; i++)
+        out.push(slots[i] !== undefined ? `(${this.expr(slots[i]!)})` : 'undefined');
+      if (opts.length)
+        out.push(`{${opts.map(([k, v]) => `${JSON.stringify(k)}: (${this.expr(v)})`).join(', ')}}`);
       return out.join(', ');
     }
     const positional = e.args.filter((a) => !a.name).map((a) => `(${this.expr(a.value)})`);
     const named = e.args.filter((a) => a.name);
     if (named.length) {
-      positional.push(`{${named.map((a) => `${JSON.stringify(a.name)}: (${this.expr(a.value)})`).join(', ')}}`);
+      positional.push(
+        `{${named.map((a) => `${JSON.stringify(a.name)}: (${this.expr(a.value)})`).join(', ')}}`,
+      );
     }
     return positional.join(', ');
   }
@@ -466,7 +607,8 @@ class Emitter {
     if (name === 'timestamp') return `$.timestamp(${args.join(', ')})`;
     if (name === 'time') return `$.timeFn(${args.join(', ')})`;
     if (name === 'time_close') return `$.timeCloseFn(${args.join(', ')})`;
-    if (name === 'nz') return `$.nz(${args[0] ?? '$.NA'}${args[1] !== undefined ? `, ${args[1]}` : ''})`;
+    if (name === 'nz')
+      return `$.nz(${args[0] ?? '$.NA'}${args[1] !== undefined ? `, ${args[1]}` : ''})`;
     if (name === 'na') return `$.na(${args[0] ?? '$.NA'})`;
     if (name === 'alert') return `$.alert(${args[0] ?? '""'})`;
     if (name === 'alertcondition') {
@@ -504,7 +646,10 @@ class Emitter {
     const id = e.outputId ?? 0;
     const pos = e.args.filter((a) => !a.name).map((a) => a.value);
     const ex = (x?: Expr) => (x ? `(${this.expr(x)})` : 'undefined');
-    const title = () => { const t = this.namedArg(e, 'title'); return t ? this.expr(t) : JSON.stringify(`${name} ${id}`); };
+    const title = () => {
+      const t = this.namedArg(e, 'title');
+      return t ? this.expr(t) : JSON.stringify(`${name} ${id}`);
+    };
     const color = () => ex(this.namedArg(e, 'color'));
 
     switch (name) {
@@ -514,7 +659,9 @@ class Emitter {
         const titleJs = titleExpr ? this.expr(titleExpr) : JSON.stringify(`plot ${id}`);
         return `$.plot(${id}, ${ex(this.namedArg(e, 'series') ?? pos[0])}, ${ex(this.namedArg(e, 'color') ?? pos[2])}, ${titleJs}, ${this.optsObject(e, ['series', 'title', 'color'])})`;
       }
-      case 'plotshape': case 'plotchar': case 'plotarrow': {
+      case 'plotshape':
+      case 'plotchar':
+      case 'plotarrow': {
         // Bind by name with Pine's documented POSITIONAL fallback (most scripts call these
         // positionally) — otherwise title/style/location/color/text silently default and the
         // marker renders unstyled at the wrong side. Signatures differ per function:
@@ -527,16 +674,23 @@ class Emitter {
         if (name === 'plotarrow') {
           return `$.marker(${id}, ${series}, ${ex(this.namedArg(e, 'colorup') ?? pos[2])}, undefined, ${titleJs}, 'abovebar', '', ${JSON.stringify(MARKER_KIND[name])})`;
         }
-        const glyph = ex(name === 'plotchar' ? (this.namedArg(e, 'char') ?? pos[2]) : (this.namedArg(e, 'style') ?? pos[2]));
+        const glyph = ex(
+          name === 'plotchar'
+            ? (this.namedArg(e, 'char') ?? pos[2])
+            : (this.namedArg(e, 'style') ?? pos[2]),
+        );
         const loc = ex(this.namedArg(e, 'location') ?? pos[3]);
         const markerColor = ex(this.namedArg(e, 'color') ?? pos[4]);
         const text = ex(this.namedArg(e, 'text') ?? pos[6]);
         return `$.marker(${id}, ${series}, ${markerColor}, ${text}, ${titleJs}, (${loc} ?? 'abovebar'), (${glyph} ?? ''), ${JSON.stringify(MARKER_KIND[name])})`;
       }
-      case 'plotcandle': case 'plotbar':
-        return `$.plotcandle(${id}, ${ex(this.namedArg(e, 'open') ?? pos[0])}, ${ex(this.namedArg(e, 'high') ?? pos[1])}, ` +
+      case 'plotcandle':
+      case 'plotbar':
+        return (
+          `$.plotcandle(${id}, ${ex(this.namedArg(e, 'open') ?? pos[0])}, ${ex(this.namedArg(e, 'high') ?? pos[1])}, ` +
           `${ex(this.namedArg(e, 'low') ?? pos[2])}, ${ex(this.namedArg(e, 'close') ?? pos[3])}, ${color()}, ` +
-          `${ex(this.namedArg(e, 'wickcolor'))}, ${ex(this.namedArg(e, 'bordercolor'))}, ${title()})`;
+          `${ex(this.namedArg(e, 'wickcolor'))}, ${ex(this.namedArg(e, 'bordercolor'))}, ${title()})`
+        );
       case 'hline':
         return `$.hline(${id}, ${ex(this.namedArg(e, 'price') ?? pos[0])}, ${title()})`;
       case 'fill': {
@@ -547,10 +701,13 @@ class Emitter {
         // args are commonly positional, named keys alone can't tell them apart — disambiguate
         // by shape: a numeric 3rd arg (the color form's 3rd arg is always a color) or a
         // present 5th+6th positional arg marks the gradient overload.
-        const tv = this.namedArg(e, 'top_value'), bv = this.namedArg(e, 'bottom_value');
-        const tc = this.namedArg(e, 'top_color'), bc = this.namedArg(e, 'bottom_color');
+        const tv = this.namedArg(e, 'top_value'),
+          bv = this.namedArg(e, 'bottom_value');
+        const tc = this.namedArg(e, 'top_color'),
+          bc = this.namedArg(e, 'bottom_color');
         const top = pos[2]?.type?.kind;
-        const isGradient = !!(tv || bv || tc || bc) || top === 'int' || top === 'float' || !!(pos[4] && pos[5]);
+        const isGradient =
+          !!(tv || bv || tc || bc) || top === 'int' || top === 'float' || !!(pos[4] && pos[5]);
         if (isGradient) {
           return `$.fillGradient(${id}, ${p1}, ${p2}, ${ex(tv ?? pos[2])}, ${ex(bv ?? pos[3])}, ${ex(tc ?? pos[4])}, ${ex(bc ?? pos[5])}, ${title()})`;
         }
@@ -575,17 +732,21 @@ class Emitter {
     switch (fn) {
       case 'entry':
       case 'order':
-        return `$.strategy.${fn}(${ex(this.arg(e, 0, 'id'))}, ${ex(this.arg(e, 1, 'direction'))}, ` +
-          `${ex(this.arg(e, 2, 'qty'))}, ${ex(this.arg(e, 3, 'limit'))}, ${ex(this.arg(e, 4, 'stop'))}, ${when()})`;
+        return (
+          `$.strategy.${fn}(${ex(this.arg(e, 0, 'id'))}, ${ex(this.arg(e, 1, 'direction'))}, ` +
+          `${ex(this.arg(e, 2, 'qty'))}, ${ex(this.arg(e, 3, 'limit'))}, ${ex(this.arg(e, 4, 'stop'))}, ${when()})`
+        );
       case 'close':
         return `$.strategy.close(${ex(this.arg(e, 0, 'id'))}, ${ex(this.namedArg(e, 'qty'))}, ${when()})`;
       case 'close_all':
         return `$.strategy.close_all(${when()})`;
       case 'exit':
-        return `$.strategy.exit(${ex(this.arg(e, 0, 'id'))}, ${ex(this.arg(e, 1, 'from_entry'))}, ` +
+        return (
+          `$.strategy.exit(${ex(this.arg(e, 0, 'id'))}, ${ex(this.arg(e, 1, 'from_entry'))}, ` +
           `${ex(this.arg(e, 2, 'qty'))}, ${ex(this.arg(e, 4, 'profit'))}, ${ex(this.arg(e, 6, 'loss'))}, ` +
           `${ex(this.arg(e, 7, 'stop'))}, ${ex(this.arg(e, 5, 'limit'))}, ` +
-          `${ex(this.arg(e, 8, 'trail_price'))}, ${ex(this.arg(e, 9, 'trail_points'))}, ${ex(this.arg(e, 10, 'trail_offset'))}, ${when()})`;
+          `${ex(this.arg(e, 8, 'trail_price'))}, ${ex(this.arg(e, 9, 'trail_points'))}, ${ex(this.arg(e, 10, 'trail_offset'))}, ${when()})`
+        );
       case 'cancel':
         return `$.strategy.cancel(${ex(this.arg(e, 0, 'id'))}, ${when()})`;
       case 'cancel_all':

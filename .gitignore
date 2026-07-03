@@ -19,3 +19,4 @@ src/*.js
 .claude
 .gemini
 dev-docs
+.vscode

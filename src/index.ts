@@ -12,12 +12,16 @@ export type { CompiledScript, ScriptMetadata, CompileAsyncOptions } from './engi
 export { resolveLibraryClosure } from './sema/resolve.js';
 export type { AsyncLibrarySource, ResolveClosureOptions } from './sema/resolve.js';
 export type {
-  CompileOptions, LibraryRegistry, LibraryRegistryKey, LibraryIdentity, LibraryIdentityObject,
+  CompileOptions,
+  LibraryRegistry,
+  LibraryRegistryKey,
+  LibraryIdentity,
+  LibraryIdentityObject,
 } from './sema/library.js';
 export { tokenize, LexError } from './lexer/lexer.js';
 export { parse, ParseError } from './parser/parser.js';
 export { analyze } from './sema/analyze.js';
-export type { Diagnostic, AnalyzeResult, InputDecl } from './sema/analyze.js';
+export type { Diagnostic, AnalyzeResult, InputDecl, SecurityDependency } from './sema/analyze.js';
 export { emit } from './codegen/emit.js';
 export { makeInterpreted } from './interp/interpreter.js';
 export type * as ast from './parser/ast.js';
@@ -31,7 +35,14 @@ export { ArrayFeed } from './engine/feed.js';
 export type { DataFeed, Bar, TickHandler } from './engine/feed.js';
 
 // Runtime
-export { ExecutionContext, BuiltinSlot, NA, isNa, DEFAULT_LOOP_ITERATION_BUDGET, ExecutionBudgetError } from './runtime/context.js';
+export {
+  ExecutionContext,
+  BuiltinSlot,
+  NA,
+  isNa,
+  DEFAULT_LOOP_ITERATION_BUDGET,
+  ExecutionBudgetError,
+} from './runtime/context.js';
 export type { RollbackSnapshot } from './runtime/context.js';
 export { SeriesStore } from './runtime/series.js';
 export { Ta } from './runtime/builtins/ta.js';
@@ -43,7 +54,15 @@ export { DrawingPool } from './runtime/builtins/drawing.js';
 export type { DrawObject, DrawType } from './runtime/builtins/drawing.js';
 export { OutputCollector } from './runtime/output.js';
 export type {
-  PlotSeries, MarkerSeries, MarkerPoint, CandleSeries, OHLC, HLine, FillRegion, FillGradient, AlertEvent,
+  PlotSeries,
+  MarkerSeries,
+  MarkerPoint,
+  CandleSeries,
+  OHLC,
+  HLine,
+  FillRegion,
+  FillGradient,
+  AlertEvent,
   SecurityRequest,
 } from './runtime/output.js';
 export type { BarState } from './runtime/barstate.js';

@@ -21,7 +21,12 @@ const FLOOR = 0.92; // full-script compile+run floor (measured ~0.96; guards reg
 
 /** Run `fn`, returning the CompileError it throws (or undefined if it did not throw one). */
 function catchCompile(fn: () => unknown): CompileError | undefined {
-  try { fn(); } catch (e) { if (e instanceof CompileError) return e; throw e; }
+  try {
+    fn();
+  } catch (e) {
+    if (e instanceof CompileError) return e;
+    throw e;
+  }
   return undefined;
 }
 
@@ -41,7 +46,8 @@ async function parityDiff(src: string): Promise<string | null> {
     const ipp = ip.outputs.plots.get(id);
     if (!ipp) return `plot ${id} missing in interp backend`;
     for (let i = 0; i < jp.data.length; i++) {
-      const a = jp.data[i], b = ipp.data[i];
+      const a = jp.data[i],
+        b = ipp.data[i];
       const same = (Number.isNaN(a) && Number.isNaN(b)) || Math.abs(a - b) < 1e-9;
       if (!same) return `plot ${id} bar ${i}: js=${a} ip=${b}`;
     }
@@ -51,20 +57,31 @@ async function parityDiff(src: string): Promise<string | null> {
 
 // ── 1. Curated representative scripts (always runs) ──────────────────────────
 const CURATED: Record<string, string> = {
-  'plot + ta': '//@version=6\nindicator("x")\nplot(ta.sma(close, 5) + ta.ema(close, 9))\nplot(ta.rsi(close, 14))\n',
-  'tuple ta + history': '//@version=6\nindicator("x")\n[m, s, l] = ta.macd(close, 12, 26, 9)\nplot(m - m[1])\nplot(s)\n',
-  'var + na()': '//@version=6\nindicator("x")\nvar float hi = na\nhi := na(hi) ? high : math.max(hi, high)\nplot(hi)\nplot(na(hi[1]) ? 0.0 : 1.0)\n',
-  'if-expression + switch': '//@version=6\nindicator("x")\nx = close > open ? 1.0 : -1.0\ny = switch\n    x > 0 => high\n    => low\nplot(y)\n',
-  'for loop accumulate': '//@version=6\nindicator("x")\nsum = 0.0\nfor i = 0 to 4\n    sum += close[i]\nplot(sum / 5)\n',
+  'plot + ta':
+    '//@version=6\nindicator("x")\nplot(ta.sma(close, 5) + ta.ema(close, 9))\nplot(ta.rsi(close, 14))\n',
+  'tuple ta + history':
+    '//@version=6\nindicator("x")\n[m, s, l] = ta.macd(close, 12, 26, 9)\nplot(m - m[1])\nplot(s)\n',
+  'var + na()':
+    '//@version=6\nindicator("x")\nvar float hi = na\nhi := na(hi) ? high : math.max(hi, high)\nplot(hi)\nplot(na(hi[1]) ? 0.0 : 1.0)\n',
+  'if-expression + switch':
+    '//@version=6\nindicator("x")\nx = close > open ? 1.0 : -1.0\ny = switch\n    x > 0 => high\n    => low\nplot(y)\n',
+  'for loop accumulate':
+    '//@version=6\nindicator("x")\nsum = 0.0\nfor i = 0 to 4\n    sum += close[i]\nplot(sum / 5)\n',
   'UDF inlining': '//@version=6\nindicator("x")\nf(a, b) => a * 2 + b\nplot(f(close, open))\n',
-  'UDT': '//@version=6\nindicator("x")\ntype P\n    float v = close\np = P.new()\nplot(p.v)\n',
-  'enum': '//@version=6\nindicator("x")\nenum E\n    a = "A"\n    b = "B"\ne = E.b\nplot(e == "B" ? 1.0 : 0.0)\n',
-  'arrays': '//@version=6\nindicator("x")\nvar a = array.new_float(0)\narray.push(a, close)\nplot(array.size(a) > 0 ? array.last(a) : na)\n',
-  'request.security HTF': '//@version=6\nindicator("x")\nd = request.security(syminfo.tickerid, "D", close)\nplot(d)\n',
-  'math + color channels': '//@version=6\nindicator("x")\nplot(math.sin(close / 100) + math.sqrt(volume))\nplot(color.r(color.rgb(close % 255, 0, 0)))\n',
-  'strategy': '//@version=6\nstrategy("x")\nif ta.crossover(ta.sma(close, 5), ta.sma(close, 20))\n    strategy.entry("L", strategy.long)\nplot(strategy.position_size)\n',
-  'plot with per-bar color + fill': '//@version=6\nindicator("x")\np1 = plot(close)\np2 = plot(open)\nfill(p1, p2, color = close > open ? color.green : color.red)\n',
-  'drawing objects': '//@version=6\nindicator("x", overlay = true)\nif barstate.islast\n    label.new(bar_index, high, "hi")\n    line.new(bar_index - 5, low, bar_index, high)\nplot(close)\n',
+  UDT: '//@version=6\nindicator("x")\ntype P\n    float v = close\np = P.new()\nplot(p.v)\n',
+  enum: '//@version=6\nindicator("x")\nenum E\n    a = "A"\n    b = "B"\ne = E.b\nplot(e == "B" ? 1.0 : 0.0)\n',
+  arrays:
+    '//@version=6\nindicator("x")\nvar a = array.new_float(0)\narray.push(a, close)\nplot(array.size(a) > 0 ? array.last(a) : na)\n',
+  'request.security HTF':
+    '//@version=6\nindicator("x")\nd = request.security(syminfo.tickerid, "D", close)\nplot(d)\n',
+  'math + color channels':
+    '//@version=6\nindicator("x")\nplot(math.sin(close / 100) + math.sqrt(volume))\nplot(color.r(color.rgb(close % 255, 0, 0)))\n',
+  strategy:
+    '//@version=6\nstrategy("x")\nif ta.crossover(ta.sma(close, 5), ta.sma(close, 20))\n    strategy.entry("L", strategy.long)\nplot(strategy.position_size)\n',
+  'plot with per-bar color + fill':
+    '//@version=6\nindicator("x")\np1 = plot(close)\np2 = plot(open)\nfill(p1, p2, color = close > open ? color.green : color.red)\n',
+  'drawing objects':
+    '//@version=6\nindicator("x", overlay = true)\nif barstate.islast\n    label.new(bar_index, high, "hi")\n    line.new(bar_index - 5, low, bar_index, high)\nplot(close)\n',
 };
 
 describe('conformance — backend parity (curated)', () => {
@@ -78,7 +95,9 @@ describe('conformance — backend parity (curated)', () => {
 // ── 2. Hardening regressions ─────────────────────────────────────────────────
 describe('conformance — hardening', () => {
   it('na(x) is the is-na test (not the truthy na literal)', async () => {
-    const c = compile('//@version=6\nindicator("x")\nplot(na(close) ? 1.0 : 2.0)\nplot(na(na) ? 1.0 : 2.0)\n');
+    const c = compile(
+      '//@version=6\nindicator("x")\nplot(na(close) ? 1.0 : 2.0)\nplot(na(na) ? 1.0 : 2.0)\n',
+    );
     const eng = new Engine(c, new ArrayFeed(bars));
     await eng.run({ symbol: 'T', timeframe: '60' });
     expect(eng.outputs.plots.get(0)!.data[0]).toBe(2); // close is not na
@@ -86,7 +105,9 @@ describe('conformance — hardening', () => {
   });
 
   it('unsupported library import fails as a clean CompileError (no raw crash)', () => {
-    expect(() => compile('//@version=6\nindicator("x")\nimport user/lib/1 as lib\nplot(lib.f(close))\n')).toThrow(CompileError);
+    expect(() =>
+      compile('//@version=6\nindicator("x")\nimport user/lib/1 as lib\nplot(lib.f(close))\n'),
+    ).toThrow(CompileError);
   });
 
   it('AlgoAlpha S/R Retest script: `import TradingView/ta/12` is rejected cleanly (library-import-export)', () => {
@@ -98,7 +119,10 @@ describe('conformance — hardening', () => {
     // the library is unresolved (Req 2.8). Either way the compiler must fail cleanly
     // (a structured CompileError, never a raw crash) — this script is no longer
     // compilable as-authored.
-    const src = readFileSync(join(import.meta.dir, 'pinescripts/lux-algo/support-resistent-retest.pine'), 'utf8');
+    const src = readFileSync(
+      join(import.meta.dir, 'pinescripts/lux-algo/support-resistent-retest.pine'),
+      'utf8',
+    );
     // No registry → missing-library CompileError naming the identity (Req 2.8).
     const noReg = catchCompile(() => compile(src));
     expect(noReg).toBeInstanceOf(CompileError);
@@ -106,7 +130,13 @@ describe('conformance — hardening', () => {
     expect(noReg!.message).toContain('TradingView/ta/12');
     // Even WITH the library provided, its default alias `ta` shadows the builtin
     // namespace → CompileError naming the namespace (Req 3.7).
-    const withStub = catchCompile(() => compile(src, { libraries: [{ key: 'TradingView/ta/12', source: '//@version=6\nlibrary("ta")\nexport noop() => 0\n' }] }));
+    const withStub = catchCompile(() =>
+      compile(src, {
+        libraries: [
+          { key: 'TradingView/ta/12', source: '//@version=6\nlibrary("ta")\nexport noop() => 0\n' },
+        ],
+      }),
+    );
     expect(withStub).toBeInstanceOf(CompileError);
     expect(withStub!.message.toLowerCase()).toContain('namespace');
     expect(withStub!.message).toContain('ta');
@@ -115,8 +145,14 @@ describe('conformance — hardening', () => {
   it('a library-driven overlay script runs on both backends with byte-for-byte identical drawings', async () => {
     // Restores end-to-end two-backend + drawings coverage: an imported library computes a
     // level, the consumer draws a box + plots it, and both backends must agree exactly.
-    const reg = [{ key: 'u/levels/1', source: '//@version=6\nlibrary("Levels")\nexport mid(float h, float l) => (h + l) / 2.0\n' }];
-    const src = '//@version=6\nindicator("c", overlay=true)\nimport u/levels/1 as lv\nm = lv.mid(high, low)\nbox.new(bar_index, m + 1.0, bar_index + 1, m - 1.0)\nplot(m)\n';
+    const reg = [
+      {
+        key: 'u/levels/1',
+        source: '//@version=6\nlibrary("Levels")\nexport mid(float h, float l) => (h + l) / 2.0\n',
+      },
+    ];
+    const src =
+      '//@version=6\nindicator("c", overlay=true)\nimport u/levels/1 as lv\nm = lv.mid(high, low)\nbox.new(bar_index, m + 1.0, bar_index + 1, m - 1.0)\nplot(m)\n';
     const c = compile(src, { libraries: reg });
     const js = new Engine(c, new ArrayFeed(bars), { backend: 'js' });
     const ip = new Engine(c, new ArrayFeed(bars), { backend: 'interp' });
@@ -138,12 +174,14 @@ describe('conformance — hardening', () => {
       return eng.run({ symbol: 'XAUUSDT', timeframe: '60' }).then(() => eng.outputs.plots.size);
     };
     const js = await run('js');
-    expect(js).toBeGreaterThan(0);   // regression line + bands plotted, no crash
+    expect(js).toBeGreaterThan(0); // regression line + bands plotted, no crash
     expect(await run('interp')).toBe(js);
   });
 
   it('cross-symbol request.security degrades to na without throwing', async () => {
-    const c = compile('//@version=6\nindicator("x")\nplot(request.security("NASDAQ:TSLA", "D", close))\n');
+    const c = compile(
+      '//@version=6\nindicator("x")\nplot(request.security("NASDAQ:TSLA", "D", close))\n',
+    );
     const eng = new Engine(c, new ArrayFeed(bars));
     await eng.run({ symbol: 'T', timeframe: '60' });
     expect(eng.outputs.plots.get(0)!.data.every((v) => Number.isNaN(v))).toBe(true);
@@ -173,31 +211,47 @@ const oneScript = (s: string) => (s.match(/\/\/@version=/g) ?? []).length <= 1;
 
 describe('conformance — reference corpus', () => {
   const present = existsSync(DOCS);
-  it.skipIf(!present)('meets the compile+run floor and has zero backend divergences', async () => {
-    const srcs: string[] = [];
-    for (const f of walk(DOCS)) srcs.push(...blocks(readFileSync(f, 'utf8')));
-    const scripts = srcs.filter((s) => isScript(s) && oneScript(s));
-    let ran = 0;
-    const divergences: string[] = [];
-    for (const src of scripts) {
-      let c;
-      try { c = compile(src); } catch { continue; }
-      try {
-        const eng = new Engine(c, new ArrayFeed(bars));
-        await eng.run({ symbol: 'T', timeframe: '60' });
-        ran++;
-      } catch { continue; }
-      // parity: anything that runs on js must match on interp
-      try {
-        const d = await parityDiff(src);
-        if (d) divergences.push(d);
-      } catch { /* interp-only throw is caught as a divergence proxy below */ divergences.push('interp threw'); }
-    }
-    const rate = ran / scripts.length;
-    // eslint-disable-next-line no-console
-    console.log(`corpus: ${ran}/${scripts.length} run (${(rate * 100).toFixed(1)}%), ${divergences.length} divergences`);
-    if (divergences.length) console.log('  first divergences:', divergences.slice(0, 5));
-    expect(rate).toBeGreaterThanOrEqual(FLOOR);
-    expect(divergences.length).toBe(0);
-  }, 60000);
+  it.skipIf(!present)(
+    'meets the compile+run floor and has zero backend divergences',
+    async () => {
+      const srcs: string[] = [];
+      for (const f of walk(DOCS)) srcs.push(...blocks(readFileSync(f, 'utf8')));
+      const scripts = srcs.filter((s) => isScript(s) && oneScript(s));
+      let ran = 0;
+      const divergences: string[] = [];
+      for (const src of scripts) {
+        let c;
+        try {
+          c = compile(src);
+        } catch {
+          continue;
+        }
+        try {
+          const eng = new Engine(c, new ArrayFeed(bars));
+          await eng.run({ symbol: 'T', timeframe: '60' });
+          ran++;
+        } catch {
+          continue;
+        }
+        // parity: anything that runs on js must match on interp
+        try {
+          const d = await parityDiff(src);
+          if (d) divergences.push(d);
+        } catch {
+          /* interp-only throw is caught as a divergence proxy below */ divergences.push(
+            'interp threw',
+          );
+        }
+      }
+      const rate = ran / scripts.length;
+      // eslint-disable-next-line no-console
+      console.log(
+        `corpus: ${ran}/${scripts.length} run (${(rate * 100).toFixed(1)}%), ${divergences.length} divergences`,
+      );
+      if (divergences.length) console.log('  first divergences:', divergences.slice(0, 5));
+      expect(rate).toBeGreaterThanOrEqual(FLOOR);
+      expect(divergences.length).toBe(0);
+    },
+    60000,
+  );
 });

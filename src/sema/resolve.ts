@@ -32,7 +32,9 @@ import type { ImportStmt } from '../parser/ast.js';
  * unknown identity becomes a missing-library CompileError at compile time). May be sync or
  * async, so the same provider works for filesystem, HTTP, and in-memory sources.
  */
-export type AsyncLibrarySource = (identity: LibraryIdentity) => string | undefined | Promise<string | undefined>;
+export type AsyncLibrarySource = (
+  identity: LibraryIdentity,
+) => string | undefined | Promise<string | undefined>;
 
 export interface ResolveClosureOptions {
   /** Sources already in hand (identity → source), consulted before the provider. */
@@ -51,7 +53,8 @@ function importIdentities(source: string): LibraryIdentity[] {
     return [];
   }
   const ids: LibraryIdentity[] = [];
-  for (const s of program.body) if (s.kind === 'Import') ids.push(identityOfImport(s as ImportStmt));
+  for (const s of program.body)
+    if (s.kind === 'Import') ids.push(identityOfImport(s as ImportStmt));
   return ids;
 }
 
@@ -86,7 +89,9 @@ export async function resolveLibraryClosure(
     if (src === undefined) continue; // unknown → compile() raises the missing-library error
     collected.set(id.canonical, src);
     if (collected.size > max) {
-      throw new Error(`resolveLibraryClosure: exceeded maxLibraries (${max}) — check the provider for runaway fan-out`);
+      throw new Error(
+        `resolveLibraryClosure: exceeded maxLibraries (${max}) — check the provider for runaway fan-out`,
+      );
     }
     for (const child of importIdentities(src)) {
       if (!collected.has(child.canonical)) queue.push(child);

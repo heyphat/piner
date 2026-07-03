@@ -14,14 +14,45 @@ import { StrNs } from './builtins/str.js';
 import { ArrayNs } from './builtins/array.js';
 import { MapNs } from './builtins/map.js';
 import { MatrixNs, type Matrix } from './builtins/matrix.js';
-import { DrawingPool, makeLineNs, makeLabelNs, makeBoxNs, makeTableNs, makeLinefillNs, makePolylineNs, type DrawObject } from './builtins/drawing.js';
+import {
+  DrawingPool,
+  makeLineNs,
+  makeLabelNs,
+  makeBoxNs,
+  makeTableNs,
+  makeLinefillNs,
+  makePolylineNs,
+  type DrawObject,
+} from './builtins/drawing.js';
 import { resampleToTimeframe, bucketKey, type BaseBar, type HtfBar } from './builtins/request.js';
 import { StrategyBroker, makeStrategyNs, type StrategySettings } from './builtins/strategy.js';
 import { historicalBarState } from './barstate.js';
 import {
-  PlotNs, ShapeNs, LocationNs, HlineNs, DisplayNs, PositionNs, SizeNs,
-  XlocNs, ExtendNs, FormatNs, FontNs, TextNs, CurrencyNs, BarmergeNs, SessionNs, ScaleNs, OrderNs,
-  YlocNs, AdjustmentNs, EarningsNs, DividendsNs, SplitsNs, AlertNs, BackAdjustmentNs, SettlementNs,
+  PlotNs,
+  ShapeNs,
+  LocationNs,
+  HlineNs,
+  DisplayNs,
+  PositionNs,
+  SizeNs,
+  XlocNs,
+  ExtendNs,
+  FormatNs,
+  FontNs,
+  TextNs,
+  CurrencyNs,
+  BarmergeNs,
+  SessionNs,
+  ScaleNs,
+  OrderNs,
+  YlocNs,
+  AdjustmentNs,
+  EarningsNs,
+  DividendsNs,
+  SplitsNs,
+  AlertNs,
+  BackAdjustmentNs,
+  SettlementNs,
 } from './builtins/constants.js';
 import type { BarState } from './barstate.js';
 
@@ -46,7 +77,10 @@ const TZ_OFFSET_HOUR_MS = 60 * 60 * 1000;
 const TZ_OFFSET_CACHE = new Map<string, number>();
 const TZ_FORMATTER_CACHE = new Map<string, Intl.DateTimeFormat>();
 const FIXED_TZ_OFFSET_CACHE = new Map<string, number | null>();
-const SESSION_PARSE_CACHE = new Map<string, { ranges: Array<[number, number]>; days: Set<number> | null } | null>();
+const SESSION_PARSE_CACHE = new Map<
+  string,
+  { ranges: Array<[number, number]>; days: Set<number> | null } | null
+>();
 
 /** Signed offset (ms) of a timezone from UTC at a given instant. UTC/GMT/±HH:mm + IANA names. */
 function tzOffsetMs(tz: string, atUtcMs: number): number {
@@ -64,8 +98,14 @@ function tzOffsetMs(tz: string, atUtcMs: number): number {
     let formatter = TZ_FORMATTER_CACHE.get(zone);
     if (!formatter) {
       formatter = new Intl.DateTimeFormat('en-US', {
-        timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+        timeZone: zone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
       });
       TZ_FORMATTER_CACHE.set(zone, formatter);
     }
@@ -77,7 +117,9 @@ function tzOffsetMs(tz: string, atUtcMs: number): number {
     if (TZ_OFFSET_CACHE.size > 10_000) TZ_OFFSET_CACHE.clear();
     TZ_OFFSET_CACHE.set(cacheKey, offset);
     return offset;
-  } catch { return 0; }
+  } catch {
+    return 0;
+  }
 }
 
 function fixedTzOffsetMs(tz: string): number | null {
@@ -92,7 +134,9 @@ function fixedTzOffsetMs(tz: string): number | null {
 
 /** Parse a Pine session spec "HHMM-HHMM[,HHMM-HHMM][:days]" → minute-of-day ranges + an
  *  optional day set (Pine days: 1=Sunday … 7=Saturday). Returns null if unparseable. */
-function parseSession(spec: string): { ranges: Array<[number, number]>; days: Set<number> | null } | null {
+function parseSession(
+  spec: string,
+): { ranges: Array<[number, number]>; days: Set<number> | null } | null {
   const cached = SESSION_PARSE_CACHE.get(spec);
   if (cached !== undefined) return cached;
 
@@ -124,8 +168,8 @@ function inSession(timeMs: number, spec: string, tz: string): boolean {
   const local = new Date(timeMs + tzOffsetMs(tz, timeMs)); // bar's wall clock in the session tz
   const mins = local.getUTCHours() * 60 + local.getUTCMinutes();
   if (parsed.days && !parsed.days.has(local.getUTCDay() + 1)) return false; // 1=Sun … 7=Sat
-  return parsed.ranges.some(([start, end]) =>
-    end > start ? mins >= start && mins < end : mins >= start || mins < end, // overnight wrap
+  return parsed.ranges.some(
+    ([start, end]) => (end > start ? mins >= start && mins < end : mins >= start || mins < end), // overnight wrap
   );
 }
 
@@ -295,7 +339,9 @@ export class ExecutionContext {
   };
   /** runtime.* — runtime.error(message) halts the script with the message. */
   readonly runtime = {
-    error: (message: unknown): void => { throw new Error(`Pine runtime error: ${String(message)}`); },
+    error: (message: unknown): void => {
+      throw new Error(`Pine runtime error: ${String(message)}`);
+    },
   };
 
   readonly NA = NA;
@@ -323,7 +369,9 @@ export class ExecutionContext {
   mintick = 0.01;
   resetLoopBudget(): void {
     const budget = Math.floor(this.loopIterationBudget);
-    this.loopIterationsRemaining = Number.isFinite(budget) ? Math.max(0, budget) : Number.POSITIVE_INFINITY;
+    this.loopIterationsRemaining = Number.isFinite(budget)
+      ? Math.max(0, budget)
+      : Number.POSITIVE_INFINITY;
   }
   consumeLoopIteration(): void {
     if (this.loopIterationsRemaining === Number.POSITIVE_INFINITY) return;
@@ -333,28 +381,65 @@ export class ExecutionContext {
     this.loopIterationsRemaining--;
   }
   /** Driver hook: fill pending strategy orders against the current bar (at bar open). */
-  onStrategyBar(): void { this.strategyBroker.onBar(); }
+  onStrategyBar(): void {
+    this.strategyBroker.onBar();
+  }
   /** Driver hook (after the script body): same-bar-close fills for process_orders_on_close. */
-  onStrategyBarClose(): void { this.strategyBroker.onBarClose(); }
-  configureStrategy(s: Partial<StrategySettings>): void { this.strategyBroker.configure(s); }
+  onStrategyBarClose(): void {
+    this.strategyBroker.onBarClose();
+  }
+  configureStrategy(s: Partial<StrategySettings>): void {
+    this.strategyBroker.configure(s);
+  }
 
   // ── built-in series leaves (current-bar values) ───────────
-  get open() { return this.series.get(BuiltinSlot.Open, 0); }
-  get high() { return this.series.get(BuiltinSlot.High, 0); }
-  get low() { return this.series.get(BuiltinSlot.Low, 0); }
-  get close() { return this.series.get(BuiltinSlot.Close, 0); }
-  get volume() { return this.series.get(BuiltinSlot.Volume, 0); }
-  get time() { return this.series.get(BuiltinSlot.Time, 0); }
-  get time_close() { const t = this.series.get(BuiltinSlot.Time, 0); return Number.isNaN(t) ? NaN : t + tfSeconds(this.tfStr) * 1000; }
-  get hl2() { return (this.high + this.low) / 2; }
-  get hlc3() { return (this.high + this.low + this.close) / 3; }
-  get ohlc4() { return (this.open + this.high + this.low + this.close) / 4; }
-  get hlcc4() { return (this.high + this.low + this.close + this.close) / 4; }
-  get bar_index() { return this.idx; }
-  get last_bar_index() { return this.lastBarIndex; }
-  get barstate(): BarState { return this.bar; }
+  get open() {
+    return this.series.get(BuiltinSlot.Open, 0);
+  }
+  get high() {
+    return this.series.get(BuiltinSlot.High, 0);
+  }
+  get low() {
+    return this.series.get(BuiltinSlot.Low, 0);
+  }
+  get close() {
+    return this.series.get(BuiltinSlot.Close, 0);
+  }
+  get volume() {
+    return this.series.get(BuiltinSlot.Volume, 0);
+  }
+  get time() {
+    return this.series.get(BuiltinSlot.Time, 0);
+  }
+  get time_close() {
+    const t = this.series.get(BuiltinSlot.Time, 0);
+    return Number.isNaN(t) ? NaN : t + tfSeconds(this.tfStr) * 1000;
+  }
+  get hl2() {
+    return (this.high + this.low) / 2;
+  }
+  get hlc3() {
+    return (this.high + this.low + this.close) / 3;
+  }
+  get ohlc4() {
+    return (this.open + this.high + this.low + this.close) / 4;
+  }
+  get hlcc4() {
+    return (this.high + this.low + this.close + this.close) / 4;
+  }
+  get bar_index() {
+    return this.idx;
+  }
+  get last_bar_index() {
+    return this.lastBarIndex;
+  }
+  get barstate(): BarState {
+    return this.bar;
+  }
   /** time of the dataset's last bar (UTC ms). */
-  get last_bar_time() { return this.allBars[this.lastBarIndex]?.time ?? this.series.get(BuiltinSlot.Time, 0); }
+  get last_bar_time() {
+    return this.allBars[this.lastBarIndex]?.time ?? this.series.get(BuiltinSlot.Time, 0);
+  }
   /** "now" — deterministic: the last bar's close instant (last_bar_time + one tf),
    *  so both backends agree. Falls back to the current bar's time without a dataset. */
   get timenow() {
@@ -362,7 +447,9 @@ export class ExecutionContext {
     return Number.isFinite(lbt) ? lbt + tfSeconds(this.tfStr) * 1000 : this.time;
   }
   /** start instant (UTC midnight) of the trading day the current bar belongs to. */
-  get time_tradingday() { return this.tradingDayMs(this.time); }
+  get time_tradingday() {
+    return this.tradingDayMs(this.time);
+  }
 
   /** chart.* — two-level namespace (`chart.point.*` builds point records) plus the
    *  chart-type flags, theme colors, and visible-range bar times. */
@@ -372,7 +459,11 @@ export class ExecutionContext {
         new: (time: number, index: number, price: number) => ({ time, index, price }),
         from_index: (index: number, price: number) => ({ index, time: NaN, price }),
         from_time: (time: number, price: number) => ({ time, index: NaN, price }),
-        now: (price?: unknown) => ({ index: this.idx, time: this.time, price: price === undefined || isNa(price) ? this.close : Number(price) }),
+        now: (price?: unknown) => ({
+          index: this.idx,
+          time: this.time,
+          price: price === undefined || isNa(price) ? this.close : Number(price),
+        }),
         copy: (p: unknown) => (p == null || isNa(p) ? NA : { ...(p as object) }),
       },
       is_standard: true,
@@ -400,8 +491,10 @@ export class ExecutionContext {
     const isLast = !Number.isFinite(next) || this.tradingDayMs(next) !== day;
     return {
       ...SessionNs,
-      isfirstbar: isFirst, islastbar: isLast,
-      isfirstbar_regular: isFirst, islastbar_regular: isLast,
+      isfirstbar: isFirst,
+      islastbar: isLast,
+      isfirstbar_regular: isFirst,
+      islastbar_regular: isLast,
     };
   }
 
@@ -416,30 +509,56 @@ export class ExecutionContext {
   private dateField(t: number, f: string): number {
     const d = new Date(t);
     switch (f) {
-      case 'year': return d.getUTCFullYear();
-      case 'month': return d.getUTCMonth() + 1;
-      case 'dayofmonth': return d.getUTCDate();
-      case 'dayofweek': return d.getUTCDay() + 1; // Pine: Sunday = 1
-      case 'hour': return d.getUTCHours();
-      case 'minute': return d.getUTCMinutes();
-      case 'second': return d.getUTCSeconds();
+      case 'year':
+        return d.getUTCFullYear();
+      case 'month':
+        return d.getUTCMonth() + 1;
+      case 'dayofmonth':
+        return d.getUTCDate();
+      case 'dayofweek':
+        return d.getUTCDay() + 1; // Pine: Sunday = 1
+      case 'hour':
+        return d.getUTCHours();
+      case 'minute':
+        return d.getUTCMinutes();
+      case 'second':
+        return d.getUTCSeconds();
       case 'weekofyear': {
         const onejan = Date.UTC(d.getUTCFullYear(), 0, 1);
         return Math.ceil(((t - onejan) / 86400000 + 1) / 7);
       }
-      default: return NaN;
+      default:
+        return NaN;
     }
   }
-  get year() { return this.dateField(this.time, 'year'); }
-  get month() { return this.dateField(this.time, 'month'); }
-  get dayofmonth() { return this.dateField(this.time, 'dayofmonth'); }
-  get dayofweek() { return this.dateField(this.time, 'dayofweek'); }
-  get hour() { return this.dateField(this.time, 'hour'); }
-  get minute() { return this.dateField(this.time, 'minute'); }
-  get second() { return this.dateField(this.time, 'second'); }
-  get weekofyear() { return this.dateField(this.time, 'weekofyear'); }
+  get year() {
+    return this.dateField(this.time, 'year');
+  }
+  get month() {
+    return this.dateField(this.time, 'month');
+  }
+  get dayofmonth() {
+    return this.dateField(this.time, 'dayofmonth');
+  }
+  get dayofweek() {
+    return this.dateField(this.time, 'dayofweek');
+  }
+  get hour() {
+    return this.dateField(this.time, 'hour');
+  }
+  get minute() {
+    return this.dateField(this.time, 'minute');
+  }
+  get second() {
+    return this.dateField(this.time, 'second');
+  }
+  get weekofyear() {
+    return this.dateField(this.time, 'weekofyear');
+  }
   /** Date functions taking a time arg: year(t), month(t), … */
-  dateAt(field: string, t: number): number { return isNa(t) ? NaN : this.dateField(num(t), field); }
+  dateAt(field: string, t: number): number {
+    return isNa(t) ? NaN : this.dateField(num(t), field);
+  }
 
   /**
    * timestamp(...) → epoch ms. Forms: (y, mo, d, h?, mi?, s?),
@@ -447,12 +566,23 @@ export class ExecutionContext {
    * The wall-clock parts are interpreted in the given timezone (default UTC).
    */
   timestamp(...a: unknown[]): number {
-    if (a.length === 1 && typeof a[0] === 'string') { const t = Date.parse(a[0]); return Number.isNaN(t) ? NaN : t; }
-    let i = 0; let tz = 'UTC';
-    if (typeof a[0] === 'string') { tz = a[0]; i = 1; } // leading timezone arg
-    const y = num(a[i]), mo = num(a[i + 1]), d = num(a[i + 2]);
+    if (a.length === 1 && typeof a[0] === 'string') {
+      const t = Date.parse(a[0]);
+      return Number.isNaN(t) ? NaN : t;
+    }
+    let i = 0;
+    let tz = 'UTC';
+    if (typeof a[0] === 'string') {
+      tz = a[0];
+      i = 1;
+    } // leading timezone arg
+    const y = num(a[i]),
+      mo = num(a[i + 1]),
+      d = num(a[i + 2]);
     if ([y, mo, d].some((v) => Number.isNaN(v))) return NaN;
-    const h = a[i + 3] != null ? num(a[i + 3]) : 0, mi = a[i + 4] != null ? num(a[i + 4]) : 0, s = a[i + 5] != null ? num(a[i + 5]) : 0;
+    const h = a[i + 3] != null ? num(a[i + 3]) : 0,
+      mi = a[i + 4] != null ? num(a[i + 4]) : 0,
+      s = a[i + 5] != null ? num(a[i + 5]) : 0;
     const utc = Date.UTC(y, mo - 1, d, h, mi, s);
     return utc - tzOffsetMs(tz, utc);
   }
@@ -485,11 +615,25 @@ export class ExecutionContext {
   // ── syminfo.* / timeframe.* (from the run's symbol + timeframe) ──
   get syminfo() {
     return {
-      tickerid: this.symbol, ticker: this.symbol, prefix: '', root: this.symbol,
-      description: this.symbol, currency: 'USD', basecurrency: 'USD', type: 'crypto',
-      mintick: this.mintick, minmove: 1, pricescale: 100, pointvalue: 1, timezone: 'UTC',
-      session: 'regular', volumetype: 'base',
-      mincontract: 1, country: '', employees: 0, shareholders: 0,
+      tickerid: this.symbol,
+      ticker: this.symbol,
+      prefix: '',
+      root: this.symbol,
+      description: this.symbol,
+      currency: 'USD',
+      basecurrency: 'USD',
+      type: 'crypto',
+      mintick: this.mintick,
+      minmove: 1,
+      pricescale: 100,
+      pointvalue: 1,
+      timezone: 'UTC',
+      session: 'regular',
+      volumetype: 'base',
+      mincontract: 1,
+      country: '',
+      employees: 0,
+      shareholders: 0,
     };
   }
   get timeframe() {
@@ -536,7 +680,13 @@ export class ExecutionContext {
    * symbol. `evalFn(subCtx)` evaluates the requested expression against an HTF
    * sub-context. Result is mapped to chart bars with the lookahead semantics.
    */
-  security(site: number, symbol: string, tf: unknown, lookahead: unknown, evalFn: (sub: ExecutionContext) => unknown): unknown {
+  security(
+    site: number,
+    symbol: string,
+    tf: unknown,
+    lookahead: unknown,
+    evalFn: (sub: ExecutionContext) => unknown,
+  ): unknown {
     let cache = this.secCache.get(site);
     if (!cache) {
       cache = this.computeSecurity(symbol ?? '', String(tf), !!lookahead, evalFn);
@@ -554,7 +704,12 @@ export class ExecutionContext {
    * A scalar expr → one array per chart bar; a tuple expr (`[high, low, volume]`) → a tuple of
    * arrays. No injected bars → [] per chart bar (graceful — the pre-feed behavior).
    */
-  securityLowerTf(site: number, symbol: string, tf: unknown, evalFn: (sub: ExecutionContext) => unknown): unknown[] {
+  securityLowerTf(
+    site: number,
+    symbol: string,
+    tf: unknown,
+    evalFn: (sub: ExecutionContext) => unknown,
+  ): unknown[] {
     const tfStr = String(tf);
     const sym = symbol || this.symbol;
     this.out.recordSecurityRequest(sym, tfStr, true); // declare the dependency
@@ -574,7 +729,11 @@ export class ExecutionContext {
    * concrete one for FETCHING, but keys by what the script asked for). Tuple expressions are
    * transposed: per-intrabar `[h,l,v]` tuples become `[hArr, lArr, vArr]`.
    */
-  private computeLowerTf(symbol: string, tf: string, evalFn: (sub: ExecutionContext) => unknown): unknown[] {
+  private computeLowerTf(
+    symbol: string,
+    tf: string,
+    evalFn: (sub: ExecutionContext) => unknown,
+  ): unknown[] {
     const out: unknown[] = new Array(this.allBars.length);
     const injected = this.securityBars.get(`${symbol}@${tf}`);
     // Choose the intrabar source. Host-injected lower-TF bars win. With none: an EMPTY (auto)
@@ -583,7 +742,10 @@ export class ExecutionContext {
     // bars alone instead of accumulating nothing. An explicitly requested lower tf with no data
     // stays [] (the host genuinely lacks it; the script must wait for injection).
     const ltf = injected && injected.length ? injected : tf === '' ? this.allBars : null;
-    if (!ltf) { out.fill([]); return out; }
+    if (!ltf) {
+      out.fill([]);
+      return out;
+    }
     // value of the expr at each intrabar (reuse the HTF sub-context evaluator).
     const vals = this.evalOverHtf(ltf, tf, symbol, evalFn);
     const arity = Array.isArray(vals[0]) ? (vals[0] as unknown[]).length : 0; // >0 ⇒ tuple expr
@@ -593,7 +755,10 @@ export class ExecutionContext {
       const end = c + 1 < this.allBars.length ? this.allBars[c + 1].time : Infinity;
       while (j < ltf.length && ltf[j].time < start) j++; // drop intrabars before this chart bar
       const bucket: unknown[] = [];
-      while (j < ltf.length && ltf[j].time < end) { bucket.push(vals[j]); j++; }
+      while (j < ltf.length && ltf[j].time < end) {
+        bucket.push(vals[j]);
+        j++;
+      }
       if (arity > 0) {
         const cols: unknown[][] = Array.from({ length: arity }, () => []);
         for (const t of bucket) for (let a = 0; a < arity; a++) cols[a].push((t as unknown[])[a]);
@@ -605,18 +770,26 @@ export class ExecutionContext {
     return out;
   }
 
-  private computeSecurity(symbol: string, tf: string, lookahead: boolean, evalFn: (sub: ExecutionContext) => unknown): unknown[] {
+  private computeSecurity(
+    symbol: string,
+    tf: string,
+    lookahead: boolean,
+    evalFn: (sub: ExecutionContext) => unknown,
+  ): unknown[] {
     const sym = this.symbol;
     this.out.recordSecurityRequest(symbol || sym, tf, false); // declare the dependency (P0)
     // Same-symbol only on exact match or an exchange-prefix boundary ("BINANCE:BTCUSDT"
     // vs "BTCUSDT") — a bare endsWith would misclassify e.g. WETHUSDT as ETHUSDT.
     const sameSymbol =
-      !symbol || (!!sym && (symbol === sym || symbol.endsWith(`:${sym}`) || sym.endsWith(`:${symbol}`)));
+      !symbol ||
+      (!!sym && (symbol === sym || symbol.endsWith(`:${sym}`) || sym.endsWith(`:${symbol}`)));
     if (!sameSymbol) {
       // CROSS-symbol: resolve against host-injected bars; absent → all-na (no feed → Pine's
       // own behavior). Aligned to the chart bars by TIME (the other symbol has its own bars).
       const baseBars = this.securityBars.get(symbol);
-      return baseBars && baseBars.length ? this.computeCrossSecurity(symbol, baseBars, tf, lookahead, evalFn) : [];
+      return baseBars && baseBars.length
+        ? this.computeCrossSecurity(symbol, baseBars, tf, lookahead, evalFn)
+        : [];
     }
     // SAME-symbol: resample the chart's own bars; align by base-bar bucket index.
     const { htf, bucketOf } = resampleToTimeframe(this.allBars, tf);
@@ -635,7 +808,12 @@ export class ExecutionContext {
   }
 
   /** Evaluate the requested expression once per HTF bar in a fresh sub-context. */
-  private evalOverHtf(htf: HtfBar[], tf: string, symbol: string, evalFn: (sub: ExecutionContext) => unknown): unknown[] {
+  private evalOverHtf(
+    htf: HtfBar[],
+    tf: string,
+    symbol: string,
+    evalFn: (sub: ExecutionContext) => unknown,
+  ): unknown[] {
     const sub = new ExecutionContext();
     sub.ensureHistorySlots(this.historySlotCount);
     sub.inputOverrides = this.inputOverrides;
@@ -695,11 +873,19 @@ export class ExecutionContext {
   // `$.get` backs every `x[n]` history read (both backends) — polymorphic so a slot holding a
   // string/color/array/map/UDT reads back the value, not the NaN a numeric column would coerce
   // it to. The built-in OHLCV/time leaves read `this.series.get` directly (numeric fast path).
-  get(slot: number, offset: number): unknown { return this.series.getHist(slot, offset); }
-  set(slot: number, value: unknown): void { this.series.set(slot, value); }
+  get(slot: number, offset: number): unknown {
+    return this.series.getHist(slot, offset);
+  }
+  set(slot: number, value: unknown): void {
+    this.series.set(slot, value);
+  }
 
-  na(v: unknown): boolean { return isNa(v); }
-  nz(v: unknown, replacement = 0): number { return isNa(v) ? replacement : num(v); }
+  na(v: unknown): boolean {
+    return isNa(v);
+  }
+  nz(v: unknown, replacement = 0): number {
+    return isNa(v) ? replacement : num(v);
+  }
 
   fixnan(v: number, site: number): number {
     const prev = this.misc.get(site);
@@ -710,7 +896,9 @@ export class ExecutionContext {
     return prev === undefined ? NaN : (prev as number);
   }
 
-  colorLit(s: string): string { return s; }
+  colorLit(s: string): string {
+    return s;
+  }
 
   private pickInput(key: string, defval: unknown): unknown {
     const v = this.inputOverrides[key];
@@ -735,73 +923,161 @@ export class ExecutionContext {
   /** Current-bar value of a named price source, or undefined if the name isn't a source. */
   private sourceByName(name: string): number | undefined {
     switch (name) {
-      case 'open': return this.open;
-      case 'high': return this.high;
-      case 'low': return this.low;
-      case 'close': return this.close;
-      case 'volume': return this.volume;
-      case 'hl2': return this.hl2;
-      case 'hlc3': return this.hlc3;
-      case 'ohlc4': return this.ohlc4;
-      case 'hlcc4': return this.hlcc4;
-      default: return undefined;
+      case 'open':
+        return this.open;
+      case 'high':
+        return this.high;
+      case 'low':
+        return this.low;
+      case 'close':
+        return this.close;
+      case 'volume':
+        return this.volume;
+      case 'hl2':
+        return this.hl2;
+      case 'hlc3':
+        return this.hlc3;
+      case 'ohlc4':
+        return this.ohlc4;
+      case 'hlcc4':
+        return this.hlcc4;
+      default:
+        return undefined;
     }
   }
 
   // type casts
-  toInt(x: number): number { return isNa(x) ? NaN : Math.trunc(num(x)); }
-  toFloat(x: number): number { return num(x); }
-  toBool(x: unknown): boolean { return isNa(x) ? false : !!x; }
+  toInt(x: number): number {
+    return isNa(x) ? NaN : Math.trunc(num(x));
+  }
+  toFloat(x: number): number {
+    return num(x);
+  }
+  toBool(x: unknown): boolean {
+    return isNa(x) ? false : !!x;
+  }
 
   // ── var / varip ───────────────────────────────────────────
   initVar<T>(id: number, init: () => T): T {
     if (!this.vars.has(id)) this.vars.set(id, init());
     return this.vars.get(id) as T;
   }
-  readVar<T>(id: number): T { return this.vars.get(id) as T; }
-  setVar(id: number, value: unknown): void { this.vars.set(id, value); }
+  readVar<T>(id: number): T {
+    return this.vars.get(id) as T;
+  }
+  setVar(id: number, value: unknown): void {
+    this.vars.set(id, value);
+  }
 
   initVarip<T>(id: number, init: () => T): T {
     if (!this.varips.has(id)) this.varips.set(id, init());
     return this.varips.get(id) as T;
   }
-  readVarip<T>(id: number): T { return this.varips.get(id) as T; }
-  setVarip(id: number, value: unknown): void { this.varips.set(id, value); }
+  readVarip<T>(id: number): T {
+    return this.varips.get(id) as T;
+  }
+  setVarip(id: number, value: unknown): void {
+    this.varips.set(id, value);
+  }
 
   // ── arithmetic (na = NaN propagates) ──────────────────────
-  add(a: number, b: number): number { return num(a) + num(b); }
-  sub(a: number, b: number): number { return num(a) - num(b); }
-  mul(a: number, b: number): number { return num(a) * num(b); }
-  div(a: number, b: number): number { return num(a) / num(b); } // v6: always float division
-  mod(a: number, b: number): number { return num(a) % num(b); }
-  neg(a: number): number { return -num(a); }
-  concat(a: unknown, b: unknown): string { return String(a) + String(b); }
+  add(a: number, b: number): number {
+    return num(a) + num(b);
+  }
+  sub(a: number, b: number): number {
+    return num(a) - num(b);
+  }
+  mul(a: number, b: number): number {
+    return num(a) * num(b);
+  }
+  div(a: number, b: number): number {
+    return num(a) / num(b);
+  } // v6: always float division
+  mod(a: number, b: number): number {
+    return num(a) % num(b);
+  }
+  neg(a: number): number {
+    return -num(a);
+  }
+  concat(a: unknown, b: unknown): string {
+    return String(a) + String(b);
+  }
 
   // ── comparisons (na operand → false, §4.5) ────────────────
-  lt(a: unknown, b: unknown): boolean { return isNa(a) || isNa(b) ? false : (a as number) < (b as number); }
-  le(a: unknown, b: unknown): boolean { return isNa(a) || isNa(b) ? false : (a as number) <= (b as number); }
-  gt(a: unknown, b: unknown): boolean { return isNa(a) || isNa(b) ? false : (a as number) > (b as number); }
-  ge(a: unknown, b: unknown): boolean { return isNa(a) || isNa(b) ? false : (a as number) >= (b as number); }
-  eq(a: unknown, b: unknown): boolean { return isNa(a) || isNa(b) ? false : a === b; }
-  ne(a: unknown, b: unknown): boolean { return isNa(a) || isNa(b) ? false : a !== b; }
-  not(a: unknown): boolean { return !this.toBool(a); } // v6: na bool coerces to false, so `not na` is true
+  lt(a: unknown, b: unknown): boolean {
+    return isNa(a) || isNa(b) ? false : (a as number) < (b as number);
+  }
+  le(a: unknown, b: unknown): boolean {
+    return isNa(a) || isNa(b) ? false : (a as number) <= (b as number);
+  }
+  gt(a: unknown, b: unknown): boolean {
+    return isNa(a) || isNa(b) ? false : (a as number) > (b as number);
+  }
+  ge(a: unknown, b: unknown): boolean {
+    return isNa(a) || isNa(b) ? false : (a as number) >= (b as number);
+  }
+  eq(a: unknown, b: unknown): boolean {
+    return isNa(a) || isNa(b) ? false : a === b;
+  }
+  ne(a: unknown, b: unknown): boolean {
+    return isNa(a) || isNa(b) ? false : a !== b;
+  }
+  not(a: unknown): boolean {
+    return !this.toBool(a);
+  } // v6: na bool coerces to false, so `not na` is true
 
   // ── outputs (the visual IR; per-bar color where applicable) ─
-  plot(id: number, value: number, color?: unknown, title = `plot ${id}`, options: Record<string, unknown> = {}): number {
+  plot(
+    id: number,
+    value: number,
+    color?: unknown,
+    title = `plot ${id}`,
+    options: Record<string, unknown> = {},
+  ): number {
     this.out.declarePlot(id, title, options);
     this.out.plot(id, this.idx, num(value), color === undefined ? undefined : col(color)); // na (NA sentinel) → NaN
     return id; // plot() returns a handle (its id) for fill(plot1, plot2)
   }
   /** plotshape / plotchar / plotarrow — kind/location/glyph are static, color/text per-bar. */
-  marker(id: number, on: unknown, color: unknown, text: unknown, title: string, location: string, glyph: string, kind: 'shape' | 'char' | 'arrow'): void {
+  marker(
+    id: number,
+    on: unknown,
+    color: unknown,
+    text: unknown,
+    title: string,
+    location: string,
+    glyph: string,
+    kind: 'shape' | 'char' | 'arrow',
+  ): void {
     this.out.declareMarker(id, title, kind, location, glyph);
     const shown = !isNa(on) && on !== false && on !== 0;
-    this.out.marker(id, this.idx, shown, { color: col(color), text: isNa(text) ? undefined : String(text) });
+    this.out.marker(id, this.idx, shown, {
+      color: col(color),
+      text: isNa(text) ? undefined : String(text),
+    });
   }
-  plotcandle(id: number, open: number, high: number, low: number, close: number, color?: unknown, wick?: unknown, border?: unknown, title = `candle ${id}`): void {
+  plotcandle(
+    id: number,
+    open: number,
+    high: number,
+    low: number,
+    close: number,
+    color?: unknown,
+    wick?: unknown,
+    border?: unknown,
+    title = `candle ${id}`,
+  ): void {
     this.out.declareCandle(id, title);
-    const ohlc = isNa(open) || isNa(high) || isNa(low) || isNa(close) ? null : { open, high, low, close };
-    this.out.candle(id, this.idx, ohlc, color === undefined ? undefined : col(color), wick === undefined ? undefined : col(wick), border === undefined ? undefined : col(border));
+    const ohlc =
+      isNa(open) || isNa(high) || isNa(low) || isNa(close) ? null : { open, high, low, close };
+    this.out.candle(
+      id,
+      this.idx,
+      ohlc,
+      color === undefined ? undefined : col(color),
+      wick === undefined ? undefined : col(wick),
+      border === undefined ? undefined : col(border),
+    );
   }
   hline(id: number, price: number, title = `hline ${id}`): number {
     this.out.hline(id, price, title);
@@ -811,9 +1087,25 @@ export class ExecutionContext {
     this.out.declareFill(id, plot1, plot2, title, color === undefined ? null : col(color));
     if (color !== undefined) this.out.fillColor(id, this.idx, col(color));
   }
-  fillGradient(id: number, plot1: number, plot2: number, topValue: number, bottomValue: number, topColor: unknown, bottomColor: unknown, title = `fill ${id}`): void {
+  fillGradient(
+    id: number,
+    plot1: number,
+    plot2: number,
+    topValue: number,
+    bottomValue: number,
+    topColor: unknown,
+    bottomColor: unknown,
+    title = `fill ${id}`,
+  ): void {
     this.out.declareFill(id, plot1, plot2, title, null);
-    this.out.fillGradientPoint(id, this.idx, topValue, bottomValue, col(topColor), col(bottomColor));
+    this.out.fillGradientPoint(
+      id,
+      this.idx,
+      topValue,
+      bottomValue,
+      col(topColor),
+      col(bottomColor),
+    );
   }
   bgcolor(id: number, color: unknown): void {
     this.out.bgcolor(id, this.idx, col(color));
@@ -823,10 +1115,9 @@ export class ExecutionContext {
   }
   /** alert(message, freq?) — records the alert. Callable AND a namespace so the
    *  `alert.freq_*` frequency constants resolve as `$.alert.freq_*`. */
-  readonly alert = Object.assign(
-    (message: string, _freq?: unknown): void => { this.out.alert(this.idx, message); },
-    AlertNs,
-  );
+  readonly alert = Object.assign((message: string, _freq?: unknown): void => {
+    this.out.alert(this.idx, message);
+  }, AlertNs);
   alertcondition(condition: boolean, title?: string, message?: string): void {
     if (condition) this.out.alert(this.idx, message ?? title ?? 'alert');
   }
@@ -845,9 +1136,18 @@ export class ExecutionContext {
     if (typeof recv === 'number') {
       const o = this.drawPool.objects.get(recv);
       if (o) {
-        const ns = o.type === 'line' ? this.line : o.type === 'label' ? this.label
-          : o.type === 'box' ? this.box : o.type === 'linefill' ? this.linefill
-          : o.type === 'polyline' ? this.polyline : this.table;
+        const ns =
+          o.type === 'line'
+            ? this.line
+            : o.type === 'label'
+              ? this.label
+              : o.type === 'box'
+                ? this.box
+                : o.type === 'linefill'
+                  ? this.linefill
+                  : o.type === 'polyline'
+                    ? this.polyline
+                    : this.table;
         return (ns as any)[name]?.(recv, ...args) ?? NA;
       }
     }

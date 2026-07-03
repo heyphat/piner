@@ -4,9 +4,25 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0]
+
+### Added
+
+- `ScriptMetadata.securityDependencies` and the exported `SecurityDependency` type:
+  best-effort **static** extraction of each `request.security` / `request.security_lower_tf`
+  call site's symbol and timeframe, so a host can plan cross-symbol and lower-timeframe data
+  fetches from `compile()` alone (no run). `syminfo.tickerid`/`syminfo.ticker`/`""` resolve as
+  symbol self-references (`self`), and `timeframe.period`/`""` as chart-timeframe self-references
+  (`tfSelf`); a symbol or timeframe that cannot be resolved statically — including any variable
+  reassigned via `:=` (a loop body included) or an identifier shadowed by a local or
+  inlined-function parameter — is conservatively flagged `dynamic: true`.
+- `strategy` broker convenience metrics `profitFactor` (gross profit ÷ |gross loss|) and
+  `winRate` (winning ÷ decided trades), computed at the broker for a single source of truth.
+
 ## [0.3.0]
 
 ### Added
+
 - Pine v6 library `import`/`export`: registry-based resolution, transitive graphs,
   UDTs/enums/methods, name mangling + inline-merge, and the Node filesystem/async loaders
   (`@heyphat/piner/node`, `compileAsync`).
@@ -22,6 +38,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `entry_bar_index`, `size`, `entry_id`) read each entry lot individually.
 
 ### Changed (breaking)
+
 - `compile(source)` now **resolves `import` statements**. A script containing imports
   requires every imported library in `options.libraries` (or a `compileAsync` provider);
   an unresolved import is a `CompileError` instead of being silently ignored. Import-free
@@ -38,6 +55,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 **Full-codebase correctness audit (both backends, verified against the v6 manual):**
+
 - `na` was truthy in every condition context (`if`, `while`, ternaries, `and`/`or`,
   subject-less `switch`) — an na bool executed the branch it should have skipped.
   Conditions now coerce na → false per v6, and `not na` is `true`.
@@ -61,6 +79,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   object threw in codegen but was na in the interpreter.
 
 **ta/math numerics:**
+
 - `math.round` rounds ties away from zero (`round(-4.5)` → `-5`, was `-4`; also
   `round_to_mintick`); `math.pow(na, 0)` is na, not 1.
 - One na source value permanently poisoned `ta.bb`'s basis; `ta.kc` used RMA instead of
@@ -73,6 +92,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   overload silently ignored its anchor.
 
 **Collections, strings, parser:**
+
 - `array.sort`/`sort_indices` never sorted string arrays (numeric comparator); negative
   index / out-of-range JS **wraparound** eliminated (`array.insert(a, -1, …)`,
   `array.fill` past the end, `str.substring` negative start); `array.sum([])` is na;
@@ -88,6 +108,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ETHUSDT` chart was answered with the chart's own bars).
 
 **Strategy broker — order handling (first audit pass):**
+
 - `strategy.order` in the opposite direction **nets** against the position instead of
   fully reversing; limit/stop fills are bounded by the bar open on gaps (no impossible
   fill prices); re-submitting an order id replaces the resting order instead of stacking;
@@ -98,6 +119,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   heuristic (extreme nearer the open first).
 
 **Strategy broker — TradingView-faithful rework (per-entry FIFO lots):**
+
 - `strategy.exit` honors `from_entry` (was: always closed the whole position), and its
   `profit`/`loss` ticks are measured from each entry's own fill price, not the position
   average; `position_avg_price` re-prices to the remaining lots after a partial close.
@@ -115,6 +137,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   are computed from intrabar equity extremes, not close-only equity.
 
 **Library import/export:**
+
 - A library body calling one of its **own methods in function form** (`f(receiver, …)` —
   Pine methods "can be used as a function or method") bound to a mangled name no
   declaration carries, so the call silently evaluated to `na` (ZigZag's pivots never
@@ -147,10 +170,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 First public open-source release.
 
 ### Added
+
 - Multiline string literals (`"""…"""` / `'''…'''`).
 - Headless usage example (`examples/headless.ts`).
 
 ### Changed
+
 - Open-sourced under the GNU AGPL-3.0 license.
 - Published to the public npm registry as `@heyphat/piner`
   (previously a private package on GitHub Packages).
@@ -158,9 +183,11 @@ First public open-source release.
 ## [0.1.8]
 
 ### Added
+
 - `ta.requestUpAndDownVolume` (TradingView/ta library).
 
 ### Fixed
+
 - `color.new(na)` returns `na` instead of crashing.
 - `ta.supertrend` matches TradingView's direction sign convention.
 - `fill` detects the gradient overload from positional args.
@@ -168,29 +195,34 @@ First public open-source release.
 ## [0.1.7]
 
 ### Fixed
+
 - Weekly timeframe buckets start on Monday, not Sunday.
 - Inputs capture positional options / `minval` / `maxval` / `step`.
 
 ## [0.1.6]
 
 ### Fixed
+
 - Drawings bind positional styling args and method named-args into opts.
 - Parser recognizes qualified-type var declarations (`chart.point[] x`).
 
 ## [0.1.5]
 
 ### Fixed
+
 - `plotshape` / `plotchar` / `plotarrow` bind positional args.
 
 ## [0.1.4]
 
 ### Fixed
+
 - `ta.highest` / `ta.lowest` warmup gated by bars elapsed, not non-`na` count.
 - Drawing constructors preserve named opts when a positional arg is omitted.
 
 ## [0.1.3]
 
 ### Fixed
+
 - `max_*_count` caps enforced with most-recent-N (FIFO) retention.
 - Parser allows a fundamental-type keyword as a variable name.
 - Empty-timeframe `request.security_lower_tf` falls back to chart bars.
@@ -201,11 +233,13 @@ First public open-source release.
 ## [0.1.2]
 
 ### Fixed
+
 - Parser supports comma-separated statement series on one line.
 
 ## [0.1.1]
 
 ### Added
+
 - Per-bar loop-iteration budget and rejection of reserved-property access (sandboxing).
 - Inline-expression and chained history `(expr)[n]`.
 - Non-numeric series history, `request.security_lower_tf`, qualified-type & UDT-array parsing.
@@ -215,6 +249,7 @@ First public open-source release.
 - `input.source` honors a source-name string override.
 
 ### Fixed
+
 - Descending `for` loops count down in both backends.
 - Parser allows keywords as identifiers, param names, and statement values.
 - `if` / `switch` as a function body returns its value.
@@ -225,6 +260,7 @@ Initial release: clean-room Pine Script v6 engine. `compile(src)` lexes → pars
 → analyzes → emits JS and an interpreter oracle, cross-checked for identical
 output. Real indicators (SMA/EMA cross, RSI, Bollinger, ATR, …) run end-to-end.
 
+[0.4.0]: https://github.com/heyphat/piner/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/heyphat/piner/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/heyphat/piner/compare/v0.1.8...v0.2.1
 [0.1.8]: https://github.com/heyphat/piner/compare/v0.1.7...v0.1.8

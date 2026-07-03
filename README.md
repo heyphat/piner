@@ -86,18 +86,24 @@ registry** you pass to `compile` — no network, no filesystem, fully determinis
 ```ts
 import { compile, Engine, ArrayFeed } from '@heyphat/piner';
 
-const compiled = compile(`//@version=6
+const compiled = compile(
+  `//@version=6
 indicator("uses a library")
 import alice/mathlib/1 as ml
 plot(ml.zscore(close, 20), title="z")
-`, {
-  libraries: [
-    { key: 'alice/mathlib/1', source: `//@version=6
+`,
+  {
+    libraries: [
+      {
+        key: 'alice/mathlib/1',
+        source: `//@version=6
 library("MathLib")
 export zscore(float src, int len) => (src - ta.sma(src, len)) / ta.stdev(src, len)
-` },
-  ],
-});
+`,
+      },
+    ],
+  },
+);
 ```
 
 Registry keys are `"Publisher/Lib/Version"` or `{ user, lib, version }`. Exported
@@ -106,7 +112,7 @@ match exactly; transitive imports resolve (depth cap 32) with cycles rejected;
 export-constraint violations (e.g. `plot` inside an export) are compile errors.
 Imported symbols are inline-merged, so the two backends stay byte-for-byte identical.
 An alias equal to a builtin namespace (e.g. `ta`) is rejected — piner does not
-implement TradingView's builtin-namespace *extension*.
+implement TradingView's builtin-namespace _extension_.
 
 #### Loading libraries from the filesystem (Node)
 

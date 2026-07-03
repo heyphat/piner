@@ -19,11 +19,14 @@ describe('Property 5 — malformed registry keys are rejected', () => {
       fc.tuple(seg, seg).map(([a, b]) => `${a}/${b}`), // two
       fc.tuple(seg, seg, seg, seg).map((s) => s.join('/')), // four
       fc.tuple(seg, seg).map(([a, b]) => `${a}//${b}`), // empty middle
-      fc.constant('//'), fc.constant(''),
+      fc.constant('//'),
+      fc.constant(''),
     );
     fc.assert(
       fc.property(badString, (key) => {
-        expect(() => compile(src, { libraries: [{ key: key as LibraryRegistryKey, source: 'x' }] })).toThrow(CompileError);
+        expect(() =>
+          compile(src, { libraries: [{ key: key as LibraryRegistryKey, source: 'x' }] }),
+        ).toThrow(CompileError);
       }),
       { numRuns: 150 },
     );

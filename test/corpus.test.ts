@@ -17,7 +17,15 @@
 import { describe, it, expect } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { compile, CompileError, ParseError, Engine, ArrayFeed, type Bar, type LibraryRegistry } from '../src/index.js';
+import {
+  compile,
+  CompileError,
+  ParseError,
+  Engine,
+  ArrayFeed,
+  type Bar,
+  type LibraryRegistry,
+} from '../src/index.js';
 
 const DIR = resolve(import.meta.dir, 'pinescripts/corpus');
 
@@ -51,7 +59,9 @@ const bars: Bar[] = Array.from({ length: 150 }, (_, i) => {
 const MIN_VERSION = 5;
 type Stage = 'pass' | 'parse' | 'sema' | 'runtime' | 'divergence' | 'legacy';
 const eqNaN = (a: number, b: number) =>
-  (Number.isNaN(a) && Number.isNaN(b)) || a === b || (typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) < 1e-9);
+  (Number.isNaN(a) && Number.isNaN(b)) ||
+  a === b ||
+  (typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) < 1e-9);
 
 function pineVersion(src: string): number {
   const m = /@version\s*=\s*(\d+)/.exec(src);
@@ -60,17 +70,26 @@ function pineVersion(src: string): number {
 
 async function classify(src: string): Promise<{ stage: Stage; detail: string }> {
   const v = pineVersion(src);
-  if (v < MIN_VERSION) return { stage: 'legacy', detail: `//@version=${v} (pre-v${MIN_VERSION}, out of scope)` };
+  if (v < MIN_VERSION)
+    return { stage: 'legacy', detail: `//@version=${v} (pre-v${MIN_VERSION}, out of scope)` };
   let compiled;
   try {
     compiled = compile(src, { libraries: CORPUS_REGISTRY });
   } catch (e) {
     if (e instanceof ParseError) {
-      return { stage: 'parse', detail: `${e.line}:${e.col} ${e.message.replace(/^Parse error at \d+:\d+:\s*/, '')}` };
+      return {
+        stage: 'parse',
+        detail: `${e.line}:${e.col} ${e.message.replace(/^Parse error at \d+:\d+:\s*/, '')}`,
+      };
     }
     if (e instanceof CompileError) {
       const d = e.diagnostics.find((x) => x.severity === 'error');
-      return { stage: 'sema', detail: d ? `${d.line}:${d.col} ${d.message}` : (e.message.split('\n')[1]?.trim() ?? e.message) };
+      return {
+        stage: 'sema',
+        detail: d
+          ? `${d.line}:${d.col} ${d.message}`
+          : (e.message.split('\n')[1]?.trim() ?? e.message),
+      };
     }
     return { stage: 'sema', detail: (e as Error).message.split('\n')[0] };
   }
@@ -93,10 +112,17 @@ async function classify(src: string): Promise<{ stage: Stage; detail: string }> 
   // both ran — check the two backends produced the same plot series (the §7 invariant)
   for (const [id, jp] of js.outputs.plots) {
     const ipp = ip.outputs.plots.get(id);
-    if (!ipp) return { stage: 'divergence', detail: `plot ${id} ("${jp.title}") present in js, absent in interp` };
+    if (!ipp)
+      return {
+        stage: 'divergence',
+        detail: `plot ${id} ("${jp.title}") present in js, absent in interp`,
+      };
     for (let i = 0; i < jp.data.length; i++) {
       if (!eqNaN(jp.data[i], ipp.data[i])) {
-        return { stage: 'divergence', detail: `plot "${jp.title}" bar ${i}: js=${jp.data[i]} ip=${ipp.data[i]}` };
+        return {
+          stage: 'divergence',
+          detail: `plot "${jp.title}" bar ${i}: js=${jp.data[i]} ip=${ipp.data[i]}`,
+        };
       }
     }
   }
@@ -109,23 +135,36 @@ async function classify(src: string): Promise<{ stage: Stage; detail: string }> 
 const MIN_PASS = 32;
 
 describe('pinescripts corpus — gap classification', () => {
-  const files = readdirSync(DIR).filter((f) => f.endsWith('.pine')).sort();
+  const files = readdirSync(DIR)
+    .filter((f) => f.endsWith('.pine'))
+    .sort();
 
   it('classifies every corpus script and prints the gap backlog', async () => {
     expect(files.length).toBeGreaterThan(0);
 
     const results: { file: string; stage: Stage; detail: string }[] = [];
-    for (const f of files) results.push({ file: f, ...(await classify(readFileSync(resolve(DIR, f), 'utf8'))) });
+    for (const f of files)
+      results.push({ file: f, ...(await classify(readFileSync(resolve(DIR, f), 'utf8'))) });
 
     const order: Stage[] = ['pass', 'parse', 'sema', 'runtime', 'divergence', 'legacy'];
-    const by: Record<Stage, typeof results> = { pass: [], parse: [], sema: [], runtime: [], divergence: [], legacy: [] };
+    const by: Record<Stage, typeof results> = {
+      pass: [],
+      parse: [],
+      sema: [],
+      runtime: [],
+      divergence: [],
+      legacy: [],
+    };
     for (const r of results) by[r.stage].push(r);
 
     const inScope = files.length - by.legacy.length;
     const lines: string[] = [
       `\n===== piner corpus gap backlog — ${files.length} scripts (${inScope} in-scope v${MIN_VERSION}+, ${by.legacy.length} legacy) =====`,
     ];
-    for (const s of order) lines.push(`  ${s.padEnd(11)} ${by[s].length}${s === 'legacy' ? '  (excluded — pre-v' + MIN_VERSION + ')' : ''}`);
+    for (const s of order)
+      lines.push(
+        `  ${s.padEnd(11)} ${by[s].length}${s === 'legacy' ? '  (excluded — pre-v' + MIN_VERSION + ')' : ''}`,
+      );
     // gap backlog: only the in-scope failure stages drive the work
     for (const s of ['parse', 'sema', 'runtime', 'divergence'] as Stage[]) {
       if (!by[s].length) continue;

@@ -2,7 +2,7 @@
 
 A clean-room TypeScript engine to compile and run **TradingView Pine Script v6**
 in any JS environment (browser-first). Designed from the public v6 docs only.
-No PineTS (AGPL) code is used; where this doc names a PineTS *concept* it is for
+No PineTS (AGPL) code is used; where this doc names a PineTS _concept_ it is for
 contrast, and a clean-room alternative is given.
 
 ---
@@ -52,7 +52,7 @@ Two back-ends share everything up to the annotated AST, and both are built:
 - **CodeGen → JS (primary).** Emit JS text, instantiate with `new Function`.
   Fastest; the per-bar body is plain JS the JIT can optimize.
 - **AST interpreter (oracle).** Walk the typed AST directly. Slower, but it is the
-  correctness oracle: the test suite runs *both* on every script and asserts
+  correctness oracle: the test suite runs _both_ on every script and asserts
   byte-for-byte-identical output, so any lowering bug is a test failure.
 
 Both target the **same runtime `$` (`ExecutionContext`) API**, so they're
@@ -123,21 +123,37 @@ Pine v6 types are a **(qualifier, type)** pair. The qualifier is what tells us
 whether history tracking is needed.
 
 ```ts
-export enum Qualifier { Const, Input, Simple, Series } // weakest → strongest
+export enum Qualifier {
+  Const,
+  Input,
+  Simple,
+  Series,
+} // weakest → strongest
 
 export type PineType =
-  | { kind: 'int' } | { kind: 'float' } | { kind: 'bool' }
-  | { kind: 'string' } | { kind: 'color' }
-  | { kind: 'line' } | { kind: 'label' } | { kind: 'box' }
-  | { kind: 'table' } | { kind: 'polyline' } | { kind: 'linefill' }
+  | { kind: 'int' }
+  | { kind: 'float' }
+  | { kind: 'bool' }
+  | { kind: 'string' }
+  | { kind: 'color' }
+  | { kind: 'line' }
+  | { kind: 'label' }
+  | { kind: 'box' }
+  | { kind: 'table' }
+  | { kind: 'polyline' }
+  | { kind: 'linefill' }
   | { kind: 'array'; of: PineType }
   | { kind: 'matrix'; of: PineType }
   | { kind: 'map'; key: PineType; value: PineType }
-  | { kind: 'udt'; name: string }            // user-defined type
+  | { kind: 'udt'; name: string } // user-defined type
   | { kind: 'tuple'; items: PineType[] }
-  | { kind: 'void' } | { kind: 'na' };
+  | { kind: 'void' }
+  | { kind: 'na' };
 
-export interface QualifiedType { qualifier: Qualifier; type: PineType; }
+export interface QualifiedType {
+  qualifier: Qualifier;
+  type: PineType;
+}
 ```
 
 **Why it matters:** only `series`-qualified values can carry history. The checker
@@ -164,24 +180,35 @@ from the store.
 ```ts
 // runtime/series.ts
 export class SeriesStore {
-  private cols: Float64Array[] = [];   // one growable column per numeric slot
-  private len = 0;                     // committed + current bar count
+  private cols: Float64Array[] = []; // one growable column per numeric slot
+  private len = 0; // committed + current bar count
   // object-typed slots (line/label/string ids) use any[][] columns instead
 
-  declareNumericSlot(): number { this.cols.push(new Float64Array(1024)); return this.cols.length - 1; }
+  declareNumericSlot(): number {
+    this.cols.push(new Float64Array(1024));
+    return this.cols.length - 1;
+  }
 
-  set(slot: number, value: number) { this.cols[slot][this.len] = value; }
+  set(slot: number, value: number) {
+    this.cols[slot][this.len] = value;
+  }
 
   /** x[offset] — 0 = current bar, out of range ⇒ NaN (na), never throws */
   get(slot: number, offset: number): number {
-    const i = this.len - offset;            // current bar is at index `len`
-    if (i < 0 || offset < 0) return NaN;     // before history start ⇒ na
+    const i = this.len - offset; // current bar is at index `len`
+    if (i < 0 || offset < 0) return NaN; // before history start ⇒ na
     return this.cols[slot][i];
   }
 
-  beginBar() { this.ensureCapacity(); }       // grow Float64Arrays geometrically
-  commitBar() { this.len++; }                 // advance only when bar confirmed
-  truncateTo(n: number) { this.len = n; }     // ← rollback primitive (§6)
+  beginBar() {
+    this.ensureCapacity();
+  } // grow Float64Arrays geometrically
+  commitBar() {
+    this.len++;
+  } // advance only when bar confirmed
+  truncateTo(n: number) {
+    this.len = n;
+  } // ← rollback primitive (§6)
 }
 ```
 
@@ -197,12 +224,12 @@ slots filled by the feed each bar.
 ### 4.2 Stateful built-in instances
 
 `ta.sma(close, 20)` keeps a rolling window. Two calls = two independent states.
-Each *call site* gets a **state slot**; the builtin receives it and stashes state
+Each _call site_ gets a **state slot**; the builtin receives it and stashes state
 keyed by it.
 
 ```ts
 // codegen output for `ta.sma(close, 20)` at call-site #7
-$.ta.sma($.get(CLOSE, 0), 20, 7)
+$.ta.sma($.get(CLOSE, 0), 20, 7);
 ```
 
 ```ts
@@ -239,7 +266,7 @@ setVar(slot: number, v: any) { this.vars.set(slot, v); }
 Codegen for `var float v = na` / later `v := v + close`:
 
 ```ts
-let v = $.getVar(V_SLOT, () => NaN);     // init-once
+let v = $.getVar(V_SLOT, () => NaN); // init-once
 v = $.add(v, $.get(CLOSE, 0));
 $.setVar(V_SLOT, v);
 ```
@@ -256,24 +283,38 @@ The single object every generated script receives. Fast methods, integer slots.
 ```ts
 // runtime/context.ts
 export class ExecutionContext {
-  idx = 0;            // current bar index (0-based)
-  execTick = 0;       // monotonic; ++ each time a bar STARTS executing → repaint detection
-  bar!: BarState;     // isnew / isconfirmed / islast / ishistory / isrealtime ...
+  idx = 0; // current bar index (0-based)
+  execTick = 0; // monotonic; ++ each time a bar STARTS executing → repaint detection
+  bar!: BarState; // isnew / isconfirmed / islast / ishistory / isrealtime ...
 
   readonly series = new SeriesStore();
-  readonly ta:   Ta;       readonly math: MathNs;   readonly str: StrNs;
-  readonly arr:  ArrayNs;  readonly req:  RequestNs; readonly strat: StrategyNs;
-  readonly out:  OutputCollector;   // plots + drawings sink
+  readonly ta: Ta;
+  readonly math: MathNs;
+  readonly str: StrNs;
+  readonly arr: ArrayNs;
+  readonly req: RequestNs;
+  readonly strat: StrategyNs;
+  readonly out: OutputCollector; // plots + drawings sink
 
   // history & na
-  get(slot: number, off: number) { return this.series.get(slot, off); }
-  set(slot: number, v: number)   { this.series.set(slot, v); }
-  na(v: any)  { return v !== v || v == null || v === NA; }  // NaN-safe
-  nz(v: any, r = 0) { return this.na(v) ? r : v; }
+  get(slot: number, off: number) {
+    return this.series.get(slot, off);
+  }
+  set(slot: number, v: number) {
+    this.series.set(slot, v);
+  }
+  na(v: any) {
+    return v !== v || v == null || v === NA;
+  } // NaN-safe
+  nz(v: any, r = 0) {
+    return this.na(v) ? r : v;
+  }
 
   // arithmetic that propagates na (NaN) — generated code calls these so a single
   // na operand poisons the result, matching the docs.
-  add(a: number, b: number) { return a + b; }   // NaN + x === NaN already
+  add(a: number, b: number) {
+    return a + b;
+  } // NaN + x === NaN already
   // comparisons: SEE §8 open question — do NOT assume na ⇒ false yet.
 }
 ```
@@ -282,8 +323,12 @@ export class ExecutionContext {
 
 ```ts
 export interface BarState {
-  isnew: boolean; isconfirmed: boolean; islast: boolean;
-  ishistory: boolean; isrealtime: boolean; islastconfirmedhistory: boolean;
+  isnew: boolean;
+  isconfirmed: boolean;
+  islast: boolean;
+  ishistory: boolean;
+  isrealtime: boolean;
+  islastconfirmedhistory: boolean;
 }
 ```
 
@@ -293,19 +338,19 @@ export interface BarState {
 
 ```ts
 export class Driver {
-  private committed = 0;   // # of confirmed bars in the SeriesStore
+  private committed = 0; // # of confirmed bars in the SeriesStore
 
   runHistorical(main: ScriptFn, feed: Bar[], $: ExecutionContext) {
     for (let i = 0; i < feed.length; i++) {
       this.beginBar($, feed[i], /*confirmed*/ true);
       main($);
-      this.commitBar($);            // series.commitBar(); committed = ++len
+      this.commitBar($); // series.commitBar(); committed = ++len
     }
   }
 
   /** A realtime update: the open bar gets recomputed from the committed snapshot. */
   onTick(main: ScriptFn, tick: Bar, $: ExecutionContext, isClose: boolean) {
-    this.rollback($);               // truncate everything back to `committed`
+    this.rollback($); // truncate everything back to `committed`
     this.beginBar($, tick, /*confirmed*/ isClose);
     main($);
     if (isClose) this.commitBar($); // confirmed close → bar becomes permanent
@@ -313,16 +358,16 @@ export class Driver {
   }
 
   private rollback($: ExecutionContext) {
-    $.series.truncateTo(this.committed);  // history slots
-    $.ta.restore(this.snapshot);          // stateful builtin states
-    $.restoreVars(this.snapshot);         // `var` store  (varip is NOT restored)
-    $.out.dropUncommitted();              // remove this bar's plots/drawings
+    $.series.truncateTo(this.committed); // history slots
+    $.ta.restore(this.snapshot); // stateful builtin states
+    $.restoreVars(this.snapshot); // `var` store  (varip is NOT restored)
+    $.out.dropUncommitted(); // remove this bar's plots/drawings
   }
 }
 ```
 
 **Why this is correct:** the docs say realtime bars re-execute every tick and the
-script's variables/expressions/outputs are *cleared/reset* before each
+script's variables/expressions/outputs are _cleared/reset_ before each
 recalculation, while `varip` escapes it. Truncating the store to the committed
 length and replaying is exactly that reset. Because realtime `high/low/close`
 mutate per tick (only `open` fixed) and historical bars store only final OHLC,
@@ -340,30 +385,30 @@ is cheap because state objects are small (ring buffers, accumulators).
 Namespaces are plain objects on `$`. Each fn that needs history takes a trailing
 `site: number`. Categories:
 
-| Namespace | Notes |
-|---|---|
-| `ta.*` | **Stateful.** sma/ema/rma/wma/vwma, rsi, atr, macd, bb, stoch, change, mom, highest/lowest, barssince, valuewhen, pivothigh/low, cum, cross/crossover/crossunder. Each call site = independent ring/accumulator. |
-| `math.*` | Pure; trivial. |
-| `str.*` | Pure; format/tostring/split/etc. |
-| `color.*` | Pure; rgb/new/from_gradient. |
-| `array.* / matrix.* / map.*` | Reference objects; ids handed back to script. Stored in object-typed slots so they can be history-referenced and rolled back. |
-| `input.*` | Read once at compile/instantiation; produces the settings panel schema in `ScriptMetadata`. |
-| `plot / plotshape / plotchar / hline / fill / bgcolor / barcolor` | Push to `OutputCollector` per bar (tagged with bar idx so rollback can drop uncommitted). |
-| `line/label/box/table/polyline/linefill` | Drawing objects with create/set/delete; live in object slots; deletions/edits replay deterministically. |
-| `request.security()` | Runs a **nested engine** over HTF data; see §9. |
-| `strategy.*` | Broker simulator; see §10. |
-| `alert / alertcondition` | Uses `execTick` to fire once per confirmed bar; collected as events. |
+| Namespace                                                         | Notes                                                                                                                                                                                                            |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ta.*`                                                            | **Stateful.** sma/ema/rma/wma/vwma, rsi, atr, macd, bb, stoch, change, mom, highest/lowest, barssince, valuewhen, pivothigh/low, cum, cross/crossover/crossunder. Each call site = independent ring/accumulator. |
+| `math.*`                                                          | Pure; trivial.                                                                                                                                                                                                   |
+| `str.*`                                                           | Pure; format/tostring/split/etc.                                                                                                                                                                                 |
+| `color.*`                                                         | Pure; rgb/new/from_gradient.                                                                                                                                                                                     |
+| `array.* / matrix.* / map.*`                                      | Reference objects; ids handed back to script. Stored in object-typed slots so they can be history-referenced and rolled back.                                                                                    |
+| `input.*`                                                         | Read once at compile/instantiation; produces the settings panel schema in `ScriptMetadata`.                                                                                                                      |
+| `plot / plotshape / plotchar / hline / fill / bgcolor / barcolor` | Push to `OutputCollector` per bar (tagged with bar idx so rollback can drop uncommitted).                                                                                                                        |
+| `line/label/box/table/polyline/linefill`                          | Drawing objects with create/set/delete; live in object slots; deletions/edits replay deterministically.                                                                                                          |
+| `request.security()`                                              | Runs a **nested engine** over HTF data; see §9.                                                                                                                                                                  |
+| `strategy.*`                                                      | Broker simulator; see §10.                                                                                                                                                                                       |
+| `alert / alertcondition`                                          | Uses `execTick` to fire once per confirmed bar; collected as events.                                                                                                                                             |
 
 A builtin is registered with metadata so the type checker knows its signature,
 return qualifier, and whether it is stateful (needs a site id):
 
 ```ts
 export interface BuiltinSig {
-  name: string;                 // "ta.sma"
+  name: string; // "ta.sma"
   params: QualifiedType[];
   ret: QualifiedType;
-  stateful: boolean;            // → allocate a state slot at the call site
-  forbidInLoop?: boolean;       // some ta.* may not be called conditionally; checker warns
+  stateful: boolean; // → allocate a state slot at the call site
+  forbidInLoop?: boolean; // some ta.* may not be called conditionally; checker warns
 }
 ```
 
@@ -381,15 +426,15 @@ by tests:
    `na(x)` / `not na(x)`. ⚠️ Note `na(x)` is the **is-na function**, distinct from
    the `na` literal — a real parser fix.
 2. **`request.security()` default lookahead = `barmerge.lookahead_off`** (the
-   non-repainting default since v3). On historical bars a bar sees the *previous
-   confirmed* HTF value; `lookahead_on` exposes the documented future leak.
+   non-repainting default since v3). On historical bars a bar sees the _previous
+   confirmed_ HTF value; `lookahead_on` exposes the documented future leak.
 
 `NA` is a **cloneable sentinel** (not a `Symbol`, so `structuredClone` of a
 reference-typed `var x = na` doesn't throw):
 
 ```ts
 // runtime/series.ts
-export const NA = { __na: true } as const;     // non-numeric na sentinel (cloneable)
+export const NA = { __na: true } as const; // non-numeric na sentinel (cloneable)
 export const isNa = (v: any) => v !== v || v == null || v === NA;
 ```
 
@@ -457,7 +502,14 @@ A deterministic broker simulator driven by the same bar loop.
 
 ```ts
 // engine/feed.ts
-export interface Bar { time: number; open: number; high: number; low: number; close: number; volume: number; }
+export interface Bar {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
 export interface DataFeed {
   history(symbol: string, tf: string): Promise<Bar[]>;
   subscribe?(symbol: string, tf: string, onTick: (b: Bar, isClose: boolean) => void): () => void;
@@ -466,12 +518,12 @@ export interface DataFeed {
 
 ```ts
 // index.ts
-const compiled = compile(pineSource);   // → { main, interpret, source, metadata, diagnostics }
-const engine   = new Engine(compiled, new ArrayFeed(bars) /*, { backend, inputs }*/);
+const compiled = compile(pineSource); // → { main, interpret, source, metadata, diagnostics }
+const engine = new Engine(compiled, new ArrayFeed(bars) /*, { backend, inputs }*/);
 await engine.run({ symbol: 'BTCUSD', timeframe: '60' });
-engine.outputs;             // OutputCollector: .plots / .fills / .hlines / .markers / .alerts
-engine.drawings;            // live line/label/box/table/polyline/linefill objects
-engine.strategy;            // StrategyReport (net/gross PnL, trades, equity curve)
+engine.outputs; // OutputCollector: .plots / .fills / .hlines / .markers / .alerts
+engine.drawings; // live line/label/box/table/polyline/linefill objects
+engine.strategy; // StrategyReport (net/gross PnL, trades, equity curve)
 // browser charting (lightweight-charts etc.) reads these buffers
 ```
 
@@ -499,16 +551,19 @@ so a UI can render the settings panel and wire plots to a chart.
 
 ## 13. Hard-semantics → mechanism map (quick reference)
 
-| Pine semantic (verified) | Engine mechanism |
-|---|---|
-| Whole script runs once per bar, repeatedly per realtime tick | `Driver.runHistorical` loop + `onTick` |
-| `close[1]`, constant offset shifts per bar, out-of-range = `na` | `SeriesStore.get(slot, off)` over a global bar counter |
-| `na` propagates through arithmetic | numerics = JS `NaN`; non-numerics = `NA` sentinel |
-| `var` init-once / persist | `Context.getVar(slot, init)` + `vars` map |
-| `varip` persists across ticks | separate `varips` map, exempt from `rollback()` |
-| Realtime rollback clears vars/exprs/outputs | `truncateTo(committed)` + state restore + drop uncommitted outputs |
-| Repainting (mutable realtime H/L/C) | replay open bar each tick with live tick values |
-| `barstate.isconfirmed` | `= isClose` of the current tick |
-| `request.security()` confirmed vs unconfirmed | nested engine; historical = last confirmed, realtime = developing |
-| `execTick` repaint/alert dedupe | monotonic counter ++ per bar start |
+| Pine semantic (verified)                                        | Engine mechanism                                                   |
+| --------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Whole script runs once per bar, repeatedly per realtime tick    | `Driver.runHistorical` loop + `onTick`                             |
+| `close[1]`, constant offset shifts per bar, out-of-range = `na` | `SeriesStore.get(slot, off)` over a global bar counter             |
+| `na` propagates through arithmetic                              | numerics = JS `NaN`; non-numerics = `NA` sentinel                  |
+| `var` init-once / persist                                       | `Context.getVar(slot, init)` + `vars` map                          |
+| `varip` persists across ticks                                   | separate `varips` map, exempt from `rollback()`                    |
+| Realtime rollback clears vars/exprs/outputs                     | `truncateTo(committed)` + state restore + drop uncommitted outputs |
+| Repainting (mutable realtime H/L/C)                             | replay open bar each tick with live tick values                    |
+| `barstate.isconfirmed`                                          | `= isClose` of the current tick                                    |
+| `request.security()` confirmed vs unconfirmed                   | nested engine; historical = last confirmed, realtime = developing  |
+| `execTick` repaint/alert dedupe                                 | monotonic counter ++ per bar start                                 |
+
+```
+
 ```

@@ -10,7 +10,10 @@
 import type { Program, ImportStmt, Loc } from '../parser/ast.js';
 import { NAMESPACES, type Diagnostic } from './analyze.js';
 import {
-  identityOfImport, RefRewriter, type LibraryIdentity, type ResolvedGraph,
+  identityOfImport,
+  RefRewriter,
+  type LibraryIdentity,
+  type ResolvedGraph,
 } from './library.js';
 
 export class AliasResolver {
@@ -24,7 +27,10 @@ export class AliasResolver {
    * Returns the (validated) alias table and any diagnostics (duplicate alias,
    * namespace shadow, unresolved/private/ambiguous references).
    */
-  bindAndRewrite(program: Program): { aliases: Map<string, LibraryIdentity>; diagnostics: Diagnostic[] } {
+  bindAndRewrite(program: Program): {
+    aliases: Map<string, LibraryIdentity>;
+    diagnostics: Diagnostic[];
+  } {
     const diagnostics: Diagnostic[] = [];
     const aliases = new Map<string, LibraryIdentity>();
     const conflicting = new Set<string>();
@@ -37,12 +43,16 @@ export class AliasResolver {
       const alias = imp.alias ?? imp.lib;
       // Req 3.7: an alias may not shadow a reserved builtin namespace.
       if (this.builtinNamespaces.has(alias)) {
-        diagnostics.push(err(`import alias '${alias}' shadows the reserved builtin namespace '${alias}'`, imp.loc));
+        diagnostics.push(
+          err(`import alias '${alias}' shadows the reserved builtin namespace '${alias}'`, imp.loc),
+        );
         continue;
       }
       // Req 3.6: duplicate alias — neither import binds.
       if (aliases.has(alias) || conflicting.has(alias)) {
-        diagnostics.push(err(`duplicate import alias '${alias}' — neither conflicting import is bound`, imp.loc));
+        diagnostics.push(
+          err(`duplicate import alias '${alias}' — neither conflicting import is bound`, imp.loc),
+        );
         conflicting.add(alias);
         continue;
       }
@@ -56,7 +66,12 @@ export class AliasResolver {
     for (const s of program.body) {
       for (const n of topLevelNames(s)) {
         if (aliases.has(n)) {
-          diagnostics.push(err(`'${n}' is declared at the top level but is also an import alias — rename one of them`, s.loc));
+          diagnostics.push(
+            err(
+              `'${n}' is declared at the top level but is also an import alias — rename one of them`,
+              s.loc,
+            ),
+          );
         }
       }
     }
@@ -86,8 +101,13 @@ function err(message: string, loc?: Loc): Diagnostic {
 /** The names a top-level statement binds into the consumer's module scope. */
 function topLevelNames(s: Program['body'][number]): string[] {
   switch (s.kind) {
-    case 'VarDecl': case 'FuncDef': case 'TypeDef': return [s.name];
-    case 'TupleDecl': return s.names;
-    default: return [];
+    case 'VarDecl':
+    case 'FuncDef':
+    case 'TypeDef':
+      return [s.name];
+    case 'TupleDecl':
+      return s.names;
+    default:
+      return [];
   }
 }

@@ -3,7 +3,10 @@ import { tokenize } from '../src/lexer/lexer.js';
 import { TokenKind } from '../src/lexer/token.js';
 
 const kinds = (src: string) => tokenize(src).tokens.map((t) => t.kind);
-const vals = (src: string) => tokenize(src).tokens.filter((t) => t.kind !== TokenKind.Eof).map((t) => t.value || `<${t.kind}>`);
+const vals = (src: string) =>
+  tokenize(src)
+    .tokens.filter((t) => t.kind !== TokenKind.Eof)
+    .map((t) => t.value || `<${t.kind}>`);
 
 describe('lexer', () => {
   it('captures the version directive and skips comments', () => {
@@ -38,9 +41,19 @@ describe('lexer', () => {
     const k = kinds('if c\n    x = 1\ny = 2\n');
     // if c NEWLINE INDENT x = 1 NEWLINE DEDENT y = 2 NEWLINE EOF
     expect(k).toEqual([
-      TokenKind.Keyword, TokenKind.Ident, TokenKind.Newline,
-      TokenKind.Indent, TokenKind.Ident, TokenKind.Op, TokenKind.Int, TokenKind.Newline,
-      TokenKind.Dedent, TokenKind.Ident, TokenKind.Op, TokenKind.Int, TokenKind.Newline,
+      TokenKind.Keyword,
+      TokenKind.Ident,
+      TokenKind.Newline,
+      TokenKind.Indent,
+      TokenKind.Ident,
+      TokenKind.Op,
+      TokenKind.Int,
+      TokenKind.Newline,
+      TokenKind.Dedent,
+      TokenKind.Ident,
+      TokenKind.Op,
+      TokenKind.Int,
+      TokenKind.Newline,
       TokenKind.Eof,
     ]);
   });
@@ -60,7 +73,9 @@ describe('lexer', () => {
 
   describe('multiline strings (`"""…"""` / `\'\'\'…\'\'\'`, Pine v6 Apr 2026)', () => {
     const strLits = (src: string) =>
-      tokenize(src).tokens.filter((t) => t.kind === TokenKind.String).map((t) => t.literal);
+      tokenize(src)
+        .tokens.filter((t) => t.kind === TokenKind.String)
+        .map((t) => t.literal);
 
     it('lexes a single-line triple-quoted string', () => {
       expect(strLits('x = """hello"""\n')).toEqual(['hello']);
@@ -74,8 +89,13 @@ describe('lexer', () => {
       const k = kinds('x = """a\nb""" + 1\n');
       // Ident = String Op Int NEWLINE EOF — exactly one logical statement.
       expect(k).toEqual([
-        TokenKind.Ident, TokenKind.Op, TokenKind.String, TokenKind.Op, TokenKind.Int,
-        TokenKind.Newline, TokenKind.Eof,
+        TokenKind.Ident,
+        TokenKind.Op,
+        TokenKind.String,
+        TokenKind.Op,
+        TokenKind.Int,
+        TokenKind.Newline,
+        TokenKind.Eof,
       ]);
     });
 

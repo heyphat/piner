@@ -15,7 +15,11 @@ describe('Property 6 — missing imported libraries are rejected', () => {
       fc.property(seg, seg, versionInt, (p, l, v) => {
         const src = `//@version=6\nindicator("c")\nimport ${p}/${l}/${v} as lib\nplot(lib.f(close))\n`;
         let err: unknown;
-        try { compile(src, { libraries: [] }); } catch (e) { err = e; }
+        try {
+          compile(src, { libraries: [] });
+        } catch (e) {
+          err = e;
+        }
         expect(err).toBeInstanceOf(CompileError);
         expect((err as CompileError).message).toContain(`${p}/${l}/${v}`);
       }),

@@ -16,8 +16,18 @@
  * by construction. See docs/compiler-design.md and the feature design doc.
  */
 import type {
-  Program, Stmt, Expr, FuncDef, TypeDef, VarDecl, ImportStmt, Call, Arg,
-  Loc, Member, Ident,
+  Program,
+  Stmt,
+  Expr,
+  FuncDef,
+  TypeDef,
+  VarDecl,
+  ImportStmt,
+  Call,
+  Arg,
+  Loc,
+  Member,
+  Ident,
 } from '../parser/ast.js';
 import type { PineType } from './types.js';
 import { parse } from '../parser/parser.js';
@@ -99,7 +109,10 @@ export function normalizeIdentity(key: LibraryRegistryKey): LibraryIdentity {
     }
     return makeIdentity(user, lib, version);
   }
-  throw malformedKey(keyLabel(key), 'a registry key must be a string or a {user,lib,version} object');
+  throw malformedKey(
+    keyLabel(key),
+    'a registry key must be a string or a {user,lib,version} object',
+  );
 }
 
 function keyLabel(key: unknown): string {
@@ -176,9 +189,7 @@ function declarationCalls(program: Program): Call[] {
 export function classifyDeclaration(program: Program): DeclInfo {
   const decls = declarationCalls(program);
   if (decls.length > 1) {
-    const names = decls
-      .map((c) => (c.callee.kind === 'Ident' ? c.callee.name : '?'))
-      .join(', ');
+    const names = decls.map((c) => (c.callee.kind === 'Ident' ? c.callee.name : '?')).join(', ');
     throw diagError(
       `a script may declare only one of indicator/strategy/library, found ${decls.length}: ${names}`,
       decls[1].loc,
@@ -197,10 +208,16 @@ export function classifyDeclaration(program: Program): DeclInfo {
       throw diagError('library(...) is missing its required title argument', call.loc);
     }
     if (titleArg.value.kind !== 'String') {
-      throw diagError('library(...) title must be a string literal', titleArg.value.loc ?? call.loc);
+      throw diagError(
+        'library(...) title must be a string literal',
+        titleArg.value.loc ?? call.loc,
+      );
     }
     if (titleArg.value.value.length === 0) {
-      throw diagError('library(...) title must be a non-empty string', titleArg.value.loc ?? call.loc);
+      throw diagError(
+        'library(...) title must be a non-empty string',
+        titleArg.value.loc ?? call.loc,
+      );
     }
     return { kind, title: titleArg.value.value, overlay };
   }
@@ -253,7 +270,12 @@ export function mangle(id: LibraryIdentity, symbol: string): string {
  * name from the method's own signature, so they always agree. `$` is illegal in Pine
  * identifiers, so no user symbol or plain-mangled name can collide with this form.
  */
-export function mangleMethod(id: LibraryIdentity, name: string, receiverType: string, arity: number): string {
+export function mangleMethod(
+  id: LibraryIdentity,
+  name: string,
+  receiverType: string,
+  arity: number,
+): string {
   return `__lib$${slug(id)}$${name}$m$${receiverType}$${arity}`;
 }
 
@@ -310,11 +332,16 @@ export interface LibrarySurface {
 function typeDiscriminator(t?: PineType): string {
   if (!t) return '';
   switch (t.kind) {
-    case 'udt': return t.name;
-    case 'array': return `array_${typeDiscriminator(t.of)}`;
-    case 'matrix': return `matrix_${typeDiscriminator(t.of)}`;
-    case 'map': return `map_${typeDiscriminator(t.key)}_${typeDiscriminator(t.value)}`;
-    default: return t.kind;
+    case 'udt':
+      return t.name;
+    case 'array':
+      return `array_${typeDiscriminator(t.of)}`;
+    case 'matrix':
+      return `matrix_${typeDiscriminator(t.of)}`;
+    case 'map':
+      return `map_${typeDiscriminator(t.key)}_${typeDiscriminator(t.value)}`;
+    default:
+      return t.kind;
   }
 }
 
@@ -445,7 +472,13 @@ function returnUdtOf(
 ): UdtOrigin | undefined {
   const last = fn.body[fn.body.length - 1];
   const tail = last?.kind === 'ExprStmt' ? last.expr : undefined;
-  if (!tail || tail.kind !== 'Call' || tail.callee.kind !== 'Member' || tail.callee.property !== 'new') return undefined;
+  if (
+    !tail ||
+    tail.kind !== 'Call' ||
+    tail.callee.kind !== 'Member' ||
+    tail.callee.property !== 'new'
+  )
+    return undefined;
   const recv = tail.callee.object;
   if (recv.kind === 'Ident') {
     return selfNames.has(recv.name) ? { identity: selfId, typeName: recv.name } : undefined;
@@ -463,7 +496,10 @@ export interface ResolvedGraph {
 }
 
 /** All top-level declaration names + all methods (exported and private). */
-function collectAll(program: Program): { allNames: Set<string>; allMethods: Map<string, ExportedMethod[]> } {
+function collectAll(program: Program): {
+  allNames: Set<string>;
+  allMethods: Map<string, ExportedMethod[]>;
+} {
   const allNames = new Set<string>();
   const allMethods = new Map<string, ExportedMethod[]>();
   for (const s of program.body) {
@@ -495,7 +531,11 @@ function collectAll(program: Program): { allNames: Set<string>; allMethods: Map<
 const MAX_IMPORT_DEPTH = 32;
 
 /** Re-stamp every diagnostic of a CompileError with library/importChain attribution. */
-function attribute(err: CompileError, library: LibraryIdentity, chain: LibraryIdentity[]): CompileError {
+function attribute(
+  err: CompileError,
+  library: LibraryIdentity,
+  chain: LibraryIdentity[],
+): CompileError {
   const diags = err.diagnostics.map((d) => ({
     ...d,
     library: d.library ?? library,
@@ -540,7 +580,11 @@ export class LibraryResolver {
    * @param chain   Consumer → … → id (for depth cap + attribution)
    * @param active  ancestors currently being resolved (for cycle detection)
    */
-  private resolveOne(id: LibraryIdentity, chain: LibraryIdentity[], active: LibraryIdentity[]): ResolvedLibrary {
+  private resolveOne(
+    id: LibraryIdentity,
+    chain: LibraryIdentity[],
+    active: LibraryIdentity[],
+  ): ResolvedLibrary {
     // Cycle: re-entering a library still being resolved higher on the stack (Req 8.3).
     const cyc = active.findIndex((a) => a.canonical === id.canonical);
     if (cyc !== -1) {
@@ -554,7 +598,9 @@ export class LibraryResolver {
     if (chain.length > MAX_IMPORT_DEPTH) {
       throw diagError(
         `transitive import nesting exceeded the maximum of ${MAX_IMPORT_DEPTH} levels at ${id.canonical}`,
-        undefined, id, chain,
+        undefined,
+        id,
+        chain,
       );
     }
     // Registry presence. A publisher+lib match with a different version is a version
@@ -566,16 +612,24 @@ export class LibraryResolver {
       if (available && available.length) {
         throw diagError(
           `import of "${id.canonical}" requests version "${id.version}", but the registry provides version(s) ${available.map((v) => `"${v}"`).join(', ')} for ${id.publisher}/${id.lib}`,
-          undefined, id, chain,
+          undefined,
+          id,
+          chain,
         );
       }
       if (chain.length <= 1) {
-        throw diagError(`imported library "${id.canonical}" is not present in the library registry`, undefined, id);
+        throw diagError(
+          `imported library "${id.canonical}" is not present in the library registry`,
+          undefined,
+          id,
+        );
       }
       const importer = chain[chain.length - 2];
       throw diagError(
         `library "${id.canonical}" imported by "${importer.canonical}" is not present in the library registry`,
-        undefined, id, chain,
+        undefined,
+        id,
+        chain,
       );
     }
     // Parse (Req 9.1: attribute a library parse failure to its identity + chain).
@@ -599,7 +653,9 @@ export class LibraryResolver {
     if (metadata.kind !== 'library') {
       throw diagError(
         `imported script "${id.canonical}" is not a library (its top-level declaration is ${metadata.kind}(...))`,
-        program.body.find((s) => s.kind === 'ExprStmt')?.loc, id, chain,
+        program.body.find((s) => s.kind === 'ExprStmt')?.loc,
+        id,
+        chain,
       );
     }
     // Recurse into this library's own imports (scoped to it — Req 8.6).
@@ -613,10 +669,20 @@ export class LibraryResolver {
       // may not share one — otherwise `alias.*` references bind silently to the wrong
       // library (last-win) or shadow a builtin inside this library.
       if (NAMESPACES.has(alias)) {
-        throw diagError(`import alias '${alias}' shadows the reserved builtin namespace '${alias}'`, s.loc, id, chain);
+        throw diagError(
+          `import alias '${alias}' shadows the reserved builtin namespace '${alias}'`,
+          s.loc,
+          id,
+          chain,
+        );
       }
       if (imports.has(alias)) {
-        throw diagError(`duplicate import alias '${alias}' in library ${id.canonical}`, s.loc, id, chain);
+        throw diagError(
+          `duplicate import alias '${alias}' in library ${id.canonical}`,
+          s.loc,
+          id,
+          chain,
+        );
       }
       const childId = identityOfImport(s);
       this.resolveOne(childId, [...chain, childId], nextActive);
@@ -632,7 +698,9 @@ export class LibraryResolver {
       if (allNames.has(alias)) {
         throw diagError(
           `'${alias}' is declared at the top level of library ${id.canonical} but is also an import alias — rename one of them`,
-          undefined, id, chain,
+          undefined,
+          id,
+          chain,
         );
       }
     }
@@ -643,7 +711,17 @@ export class LibraryResolver {
         if (o) returnUdt.set(s.name, o);
       }
     }
-    const resolved: ResolvedLibrary = { identity: id, program, surface, imports, metadata, allNames, allMethods, returnUdt, chain: [...chain] };
+    const resolved: ResolvedLibrary = {
+      identity: id,
+      program,
+      surface,
+      imports,
+      metadata,
+      allNames,
+      allMethods,
+      returnUdt,
+      chain: [...chain],
+    };
     resolveMethodReceivers(resolved);
     this.visited.set(id.canonical, resolved);
     return resolved;
@@ -665,7 +743,12 @@ export interface RewriteOptions {
   /** canonical → resolved library (the whole graph). */
   graph: Map<string, ResolvedLibrary>;
   /** Present when rewriting a library's OWN declarations (intra-lib self-mangling). */
-  self?: { identity: LibraryIdentity; names: Set<string>; methods: Map<string, ExportedMethod[]>; chain: LibraryIdentity[] };
+  self?: {
+    identity: LibraryIdentity;
+    names: Set<string>;
+    methods: Map<string, ExportedMethod[]>;
+    chain: LibraryIdentity[];
+  };
   /** Method names DEFINED in the program being rewritten (a consumer script's own UDF
    *  methods). The downstream inliner dispatches these via dot-call sugar, so the
    *  builtin-receiver fallback must not let an imported library method of the same name
@@ -676,7 +759,12 @@ export interface RewriteOptions {
 }
 
 /** Build a diagnostic, optionally attributed to a library + import chain (Req 9.3, 9.4). */
-function mkDiag(message: string, loc?: Loc, library?: LibraryIdentity, importChain?: LibraryIdentity[]): Diagnostic {
+function mkDiag(
+  message: string,
+  loc?: Loc,
+  library?: LibraryIdentity,
+  importChain?: LibraryIdentity[],
+): Diagnostic {
   const d: Diagnostic = { severity: 'error', message, line: loc?.line ?? 0, col: loc?.col ?? 0 };
   if (library) d.library = library;
   if (importChain && importChain.length) d.importChain = importChain;
@@ -694,28 +782,92 @@ function collectBindingNames(params: string[], body: Stmt[]): Set<string> {
   const names = new Set<string>(params);
   const walkStmt = (s: Stmt): void => {
     switch (s.kind) {
-      case 'VarDecl': names.add(s.name); walkExpr(s.init); break;
-      case 'TupleDecl': s.names.forEach((n) => names.add(n)); walkExpr(s.init); break;
-      case 'Reassign': walkExpr(s.value); break;
-      case 'ExprStmt': walkExpr(s.expr); break;
-      case 'For': names.add(s.varName); walkExpr(s.from); walkExpr(s.to); if (s.step) walkExpr(s.step); s.body.forEach(walkStmt); break;
-      case 'ForIn': if (s.indexName) names.add(s.indexName); names.add(s.valueName); walkExpr(s.iterable); s.body.forEach(walkStmt); break;
-      case 'If': walkExpr(s.cond); s.then.forEach(walkStmt); s.elifs.forEach((el) => { walkExpr(el.cond); el.body.forEach(walkStmt); }); s.else?.forEach(walkStmt); break;
-      case 'Switch': if (s.subject) walkExpr(s.subject); s.cases.forEach((c) => { if (c.test) walkExpr(c.test); c.body.forEach(walkStmt); }); break;
-      case 'While': walkExpr(s.cond); s.body.forEach(walkStmt); break;
+      case 'VarDecl':
+        names.add(s.name);
+        walkExpr(s.init);
+        break;
+      case 'TupleDecl':
+        s.names.forEach((n) => names.add(n));
+        walkExpr(s.init);
+        break;
+      case 'Reassign':
+        walkExpr(s.value);
+        break;
+      case 'ExprStmt':
+        walkExpr(s.expr);
+        break;
+      case 'For':
+        names.add(s.varName);
+        walkExpr(s.from);
+        walkExpr(s.to);
+        if (s.step) walkExpr(s.step);
+        s.body.forEach(walkStmt);
+        break;
+      case 'ForIn':
+        if (s.indexName) names.add(s.indexName);
+        names.add(s.valueName);
+        walkExpr(s.iterable);
+        s.body.forEach(walkStmt);
+        break;
+      case 'If':
+        walkExpr(s.cond);
+        s.then.forEach(walkStmt);
+        s.elifs.forEach((el) => {
+          walkExpr(el.cond);
+          el.body.forEach(walkStmt);
+        });
+        s.else?.forEach(walkStmt);
+        break;
+      case 'Switch':
+        if (s.subject) walkExpr(s.subject);
+        s.cases.forEach((c) => {
+          if (c.test) walkExpr(c.test);
+          c.body.forEach(walkStmt);
+        });
+        break;
+      case 'While':
+        walkExpr(s.cond);
+        s.body.forEach(walkStmt);
+        break;
     }
   };
   const walkExpr = (e: Expr): void => {
     switch (e.kind) {
-      case 'If': case 'Switch': case 'For': case 'ForIn': case 'While': walkStmt(e as unknown as Stmt); break;
-      case 'Call': e.args.forEach((a) => walkExpr(a.value)); walkExpr(e.callee); break;
-      case 'Member': walkExpr(e.object); break;
-      case 'History': walkExpr(e.base); walkExpr(e.offset); break;
-      case 'Unary': walkExpr(e.operand); break;
-      case 'Binary': walkExpr(e.left); walkExpr(e.right); break;
-      case 'Ternary': walkExpr(e.cond); walkExpr(e.then); walkExpr(e.else); break;
-      case 'Tuple': e.items.forEach(walkExpr); break;
-      default: break;
+      case 'If':
+      case 'Switch':
+      case 'For':
+      case 'ForIn':
+      case 'While':
+        walkStmt(e as unknown as Stmt);
+        break;
+      case 'Call':
+        e.args.forEach((a) => walkExpr(a.value));
+        walkExpr(e.callee);
+        break;
+      case 'Member':
+        walkExpr(e.object);
+        break;
+      case 'History':
+        walkExpr(e.base);
+        walkExpr(e.offset);
+        break;
+      case 'Unary':
+        walkExpr(e.operand);
+        break;
+      case 'Binary':
+        walkExpr(e.left);
+        walkExpr(e.right);
+        break;
+      case 'Ternary':
+        walkExpr(e.cond);
+        walkExpr(e.then);
+        walkExpr(e.else);
+        break;
+      case 'Tuple':
+        e.items.forEach(walkExpr);
+        break;
+      default:
+        break;
     }
   };
   body.forEach(walkStmt);
@@ -759,16 +911,22 @@ export class RefRewriter {
       const id = this.aliases.get(alias);
       return id ? { identity: id, typeName: local } : undefined;
     }
-    if (this.self && this.self.names.has(name)) return { identity: this.self.identity, typeName: name };
+    if (this.self && this.self.names.has(name))
+      return { identity: this.self.identity, typeName: name };
     return undefined;
   }
 
   /** The UDT origin produced by a `X.new(...)`/`alias.T.new(...)` constructor call. */
   private constructorOrigin(e: Expr): UdtOrigin | undefined {
-    if (e.kind !== 'Call' || e.callee.kind !== 'Member' || e.callee.property !== 'new') return undefined;
+    if (e.kind !== 'Call' || e.callee.kind !== 'Member' || e.callee.property !== 'new')
+      return undefined;
     const recv = e.callee.object;
     if (recv.kind === 'Ident') return this.typeOrigin(recv.name);
-    if (recv.kind === 'Member' && recv.object.kind === 'Ident' && this.aliases.has(recv.object.name)) {
+    if (
+      recv.kind === 'Member' &&
+      recv.object.kind === 'Ident' &&
+      this.aliases.has(recv.object.name)
+    ) {
       return { identity: this.aliases.get(recv.object.name)!, typeName: recv.property };
     }
     return undefined;
@@ -777,9 +935,23 @@ export class RefRewriter {
   /** Report a bound-alias symbol error with private > unresolved precedence (Req 4.5, 4.4, 4.7). */
   private symbolError(alias: string, lib: ResolvedLibrary, name: string, loc?: Loc): void {
     if (lib.allNames.has(name) || lib.allMethods.has(name)) {
-      this.emit(mkDiag(`'${alias}.${name}' is declared in library ${lib.identity.canonical} but not exported`, loc, this.self?.identity, this.self?.chain));
+      this.emit(
+        mkDiag(
+          `'${alias}.${name}' is declared in library ${lib.identity.canonical} but not exported`,
+          loc,
+          this.self?.identity,
+          this.self?.chain,
+        ),
+      );
     } else {
-      this.emit(mkDiag(`library ${lib.identity.canonical} (alias '${alias}') exports no symbol named '${name}'`, loc, this.self?.identity, this.self?.chain));
+      this.emit(
+        mkDiag(
+          `library ${lib.identity.canonical} (alias '${alias}') exports no symbol named '${name}'`,
+          loc,
+          this.self?.identity,
+          this.self?.chain,
+        ),
+      );
     }
   }
 
@@ -803,10 +975,14 @@ export class RefRewriter {
         }
         return { kind: 'udt', name: mangle(o.identity, o.typeName) };
       }
-      case 'array': return { kind: 'array', of: this.rewriteType(t.of)! };
-      case 'matrix': return { kind: 'matrix', of: this.rewriteType(t.of)! };
-      case 'map': return { kind: 'map', key: this.rewriteType(t.key)!, value: this.rewriteType(t.value)! };
-      default: return t;
+      case 'array':
+        return { kind: 'array', of: this.rewriteType(t.of)! };
+      case 'matrix':
+        return { kind: 'matrix', of: this.rewriteType(t.of)! };
+      case 'map':
+        return { kind: 'map', key: this.rewriteType(t.key)!, value: this.rewriteType(t.value)! };
+      default:
+        return t;
     }
   }
 
@@ -826,7 +1002,9 @@ export class RefRewriter {
     let methodReceiverKey: string | null = null;
     if (s.kind === 'FuncDef' && s.isMethod) {
       const raw = paramTypeName(s);
-      const info = this.self?.methods.get(s.name)?.find((m) => m.receiverType === raw && m.arity === s.params.length);
+      const info = this.self?.methods
+        .get(s.name)
+        ?.find((m) => m.receiverType === raw && m.arity === s.params.length);
       methodReceiverKey = info?.receiverKey ?? raw;
     }
     this.stmt(s);
@@ -897,7 +1075,10 @@ export class RefRewriter {
         }
         // Enter the function scope: its params + locals shadow module-level self names.
         const savedLocals = this.localNames;
-        this.localNames = collectBindingNames(s.params.map((p) => p.name), s.body);
+        this.localNames = collectBindingNames(
+          s.params.map((p) => p.name),
+          s.body,
+        );
         for (const b of s.body) this.stmt(b);
         this.localNames = savedLocals;
         this.typeEnv = savedTypeEnv;
@@ -912,15 +1093,23 @@ export class RefRewriter {
       case 'If':
         s.cond = this.expr(s.cond);
         for (const b of s.then) this.stmt(b);
-        for (const el of s.elifs) { el.cond = this.expr(el.cond); for (const b of el.body) this.stmt(b); }
+        for (const el of s.elifs) {
+          el.cond = this.expr(el.cond);
+          for (const b of el.body) this.stmt(b);
+        }
         if (s.else) for (const b of s.else) this.stmt(b);
         break;
       case 'Switch':
         if (s.subject) s.subject = this.expr(s.subject);
-        for (const c of s.cases) { if (c.test) c.test = this.expr(c.test); for (const b of c.body) this.stmt(b); }
+        for (const c of s.cases) {
+          if (c.test) c.test = this.expr(c.test);
+          for (const b of c.body) this.stmt(b);
+        }
         break;
       case 'For':
-        s.from = this.expr(s.from); s.to = this.expr(s.to); if (s.step) s.step = this.expr(s.step);
+        s.from = this.expr(s.from);
+        s.to = this.expr(s.to);
+        if (s.step) s.step = this.expr(s.step);
         for (const b of s.body) this.stmt(b);
         break;
       case 'ForIn':
@@ -953,17 +1142,40 @@ export class RefRewriter {
   // ── expressions ─────────────────────────────────────────
   private expr(e: Expr): Expr {
     switch (e.kind) {
-      case 'Call': return this.call(e);
-      case 'Member': return this.member(e);
-      case 'Ident': return this.ident(e);
-      case 'History': e.base = this.expr(e.base); e.offset = this.expr(e.offset); return e;
-      case 'Unary': e.operand = this.expr(e.operand); return e;
-      case 'Binary': e.left = this.expr(e.left); e.right = this.expr(e.right); return e;
-      case 'Ternary': e.cond = this.expr(e.cond); e.then = this.expr(e.then); e.else = this.expr(e.else); return e;
-      case 'Tuple': e.items = e.items.map((it) => this.expr(it)); return e;
-      case 'If': case 'Switch': case 'For': case 'ForIn': case 'While':
-        this.stmt(e as unknown as Stmt); return e;
-      default: return e; // literals
+      case 'Call':
+        return this.call(e);
+      case 'Member':
+        return this.member(e);
+      case 'Ident':
+        return this.ident(e);
+      case 'History':
+        e.base = this.expr(e.base);
+        e.offset = this.expr(e.offset);
+        return e;
+      case 'Unary':
+        e.operand = this.expr(e.operand);
+        return e;
+      case 'Binary':
+        e.left = this.expr(e.left);
+        e.right = this.expr(e.right);
+        return e;
+      case 'Ternary':
+        e.cond = this.expr(e.cond);
+        e.then = this.expr(e.then);
+        e.else = this.expr(e.else);
+        return e;
+      case 'Tuple':
+        e.items = e.items.map((it) => this.expr(it));
+        return e;
+      case 'If':
+      case 'Switch':
+      case 'For':
+      case 'ForIn':
+      case 'While':
+        this.stmt(e as unknown as Stmt);
+        return e;
+      default:
+        return e; // literals
     }
   }
 
@@ -979,8 +1191,12 @@ export class RefRewriter {
     const callee = e.callee;
     // alias.fn(...) / alias.method(recv, ...) — but a local/param that shadows the alias
     // name is a plain value, not the namespace, so it must not be hijacked here.
-    if (callee.kind === 'Member' && callee.object.kind === 'Ident' && this.aliases.has(callee.object.name)
-      && !this.localNames?.has(callee.object.name)) {
+    if (
+      callee.kind === 'Member' &&
+      callee.object.kind === 'Ident' &&
+      this.aliases.has(callee.object.name) &&
+      !this.localNames?.has(callee.object.name)
+    ) {
       const alias = callee.object.name;
       const id = this.aliases.get(alias)!;
       const lib = this.lib(id)!;
@@ -994,11 +1210,20 @@ export class RefRewriter {
         // receiver's type). The chosen overload's discriminated name matches its decl.
         const chosen = this.resolveOverload(methods, e.args);
         if (chosen) {
-          e.callee = { kind: 'Ident', name: mangleMethod(id, name, chosen.receiverKey, chosen.arity), loc: callee.loc };
+          e.callee = {
+            kind: 'Ident',
+            name: mangleMethod(id, name, chosen.receiverKey, chosen.arity),
+            loc: callee.loc,
+          };
         } else {
-          this.emit(mkDiag(
-            `no overload of method '${alias}.${name}' in library ${id.canonical} matches a call with ${e.args.length} argument(s)`,
-            callee.loc, this.self?.identity, this.self?.chain));
+          this.emit(
+            mkDiag(
+              `no overload of method '${alias}.${name}' in library ${id.canonical} matches a call with ${e.args.length} argument(s)`,
+              callee.loc,
+              this.self?.identity,
+              this.self?.chain,
+            ),
+          );
         }
       } else {
         this.symbolError(alias, lib, name, callee.loc);
@@ -1007,10 +1232,14 @@ export class RefRewriter {
       return e;
     }
     // alias.Type.new(...)
-    if (callee.kind === 'Member' && callee.property === 'new'
-      && callee.object.kind === 'Member' && callee.object.object.kind === 'Ident'
-      && this.aliases.has(callee.object.object.name)
-      && !this.localNames?.has(callee.object.object.name)) {
+    if (
+      callee.kind === 'Member' &&
+      callee.property === 'new' &&
+      callee.object.kind === 'Member' &&
+      callee.object.object.kind === 'Ident' &&
+      this.aliases.has(callee.object.object.name) &&
+      !this.localNames?.has(callee.object.object.name)
+    ) {
       const alias = callee.object.object.name;
       const id = this.aliases.get(alias)!;
       const lib = this.lib(id)!;
@@ -1024,10 +1253,19 @@ export class RefRewriter {
       return e;
     }
     // self SelfType.new(...) — intra-library constructor (unless the name is locally shadowed).
-    if (this.self && callee.kind === 'Member' && callee.property === 'new'
-      && callee.object.kind === 'Ident' && this.self.names.has(callee.object.name)
-      && !this.localNames?.has(callee.object.name)) {
-      callee.object = { kind: 'Ident', name: mangle(this.self.identity, callee.object.name), loc: callee.object.loc };
+    if (
+      this.self &&
+      callee.kind === 'Member' &&
+      callee.property === 'new' &&
+      callee.object.kind === 'Ident' &&
+      this.self.names.has(callee.object.name) &&
+      !this.localNames?.has(callee.object.name)
+    ) {
+      callee.object = {
+        kind: 'Ident',
+        name: mangle(this.self.identity, callee.object.name),
+        loc: callee.object.loc,
+      };
       this.rewriteArgs(e);
       return e;
     }
@@ -1040,11 +1278,20 @@ export class RefRewriter {
       if (pool) {
         const chosen = this.resolveOverload(pool, e.args);
         if (chosen) {
-          e.callee = { kind: 'Ident', name: mangleMethod(this.self.identity, callee.name, chosen.receiverKey, chosen.arity), loc: callee.loc };
+          e.callee = {
+            kind: 'Ident',
+            name: mangleMethod(this.self.identity, callee.name, chosen.receiverKey, chosen.arity),
+            loc: callee.loc,
+          };
         } else {
-          this.emit(mkDiag(
-            `no overload of method '${callee.name}' in library ${this.self.identity.canonical} matches a call with ${e.args.length} argument(s)`,
-            callee.loc, this.self.identity, this.self.chain));
+          this.emit(
+            mkDiag(
+              `no overload of method '${callee.name}' in library ${this.self.identity.canonical} matches a call with ${e.args.length} argument(s)`,
+              callee.loc,
+              this.self.identity,
+              this.self.chain,
+            ),
+          );
         }
         this.rewriteArgs(e);
         return e;
@@ -1074,11 +1321,20 @@ export class RefRewriter {
   private callReturnOrigin(e: Expr): UdtOrigin | undefined {
     if (e.kind !== 'Call') return undefined;
     const callee = e.callee;
-    if (callee.kind === 'Member' && callee.object.kind === 'Ident'
-      && this.aliases.has(callee.object.name) && !this.localNames?.has(callee.object.name)) {
+    if (
+      callee.kind === 'Member' &&
+      callee.object.kind === 'Ident' &&
+      this.aliases.has(callee.object.name) &&
+      !this.localNames?.has(callee.object.name)
+    ) {
       return this.lib(this.aliases.get(callee.object.name)!)?.returnUdt.get(callee.property);
     }
-    if (this.self && callee.kind === 'Ident' && this.self.names.has(callee.name) && !this.localNames?.has(callee.name)) {
+    if (
+      this.self &&
+      callee.kind === 'Ident' &&
+      this.self.names.has(callee.name) &&
+      !this.localNames?.has(callee.name)
+    ) {
       return this.lib(this.self.identity)?.returnUdt.get(callee.name);
     }
     return undefined;
@@ -1116,15 +1372,21 @@ export class RefRewriter {
   /** Rewrite `recv.method(args)` to the discriminated merged call `mangled(recv, args)`. */
   private bindMethodCall(e: Call, id: LibraryIdentity, m: ExportedMethod): void {
     const callee = e.callee as Member;
-    e.callee = { kind: 'Ident', name: mangleMethod(id, m.def.name, m.receiverKey, m.arity), loc: callee.loc };
+    e.callee = {
+      kind: 'Ident',
+      name: mangleMethod(id, m.def.name, m.receiverKey, m.arity),
+      loc: callee.loc,
+    };
     e.args = [{ value: callee.object }, ...e.args];
   }
 
   /** True when a method's (absolute) receiver type is exactly the given value origin. */
   private static receiverMatches(m: ExportedMethod, origin: UdtOrigin): boolean {
-    return m.receiverOrigin !== undefined
-      && m.receiverOrigin.identity.canonical === origin.identity.canonical
-      && m.receiverOrigin.typeName === origin.typeName;
+    return (
+      m.receiverOrigin !== undefined &&
+      m.receiverOrigin.identity.canonical === origin.identity.canonical &&
+      m.receiverOrigin.typeName === origin.typeName
+    );
   }
 
   /** `recv.method(args)` on a value of a resolved UDT type → direct mangled call (Req 4.3, 4.8). */
@@ -1152,34 +1414,59 @@ export class RefRewriter {
         }
       }
       const matches = cands.filter(({ m }) => arity >= m.minArity && arity <= m.arity);
-      if (matches.length === 1) { this.bindMethodCall(e, matches[0].id, matches[0].m); return; }
+      if (matches.length === 1) {
+        this.bindMethodCall(e, matches[0].id, matches[0].m);
+        return;
+      }
       if (matches.length > 1) {
         // Two libraries export a same-name method on the same type: the current library's
         // own declaration wins inside its own body; otherwise it is a genuine ambiguity.
-        const selfHit = this.self ? matches.find((h) => h.id.canonical === this.self!.identity.canonical) : undefined;
-        if (selfHit) { this.bindMethodCall(e, selfHit.id, selfHit.m); return; }
+        const selfHit = this.self
+          ? matches.find((h) => h.id.canonical === this.self!.identity.canonical)
+          : undefined;
+        if (selfHit) {
+          this.bindMethodCall(e, selfHit.id, selfHit.m);
+          return;
+        }
         const libs = [...new Set(matches.map((h) => h.id.canonical))].join(', ');
-        this.emit(mkDiag(
-          `ambiguous method '${method}' on receiver type '${origin.typeName}': exported by more than one library (${libs}) — call it as \`alias.${method}(receiver, …)\` to disambiguate`,
-          callee.loc, this.self?.identity, this.self?.chain));
+        this.emit(
+          mkDiag(
+            `ambiguous method '${method}' on receiver type '${origin.typeName}': exported by more than one library (${libs}) — call it as \`alias.${method}(receiver, …)\` to disambiguate`,
+            callee.loc,
+            this.self?.identity,
+            this.self?.chain,
+          ),
+        );
         return;
       }
       if (cands.length) {
         // The exact type has this method, but no overload takes this argument count.
-        this.emit(mkDiag(
-          `no method '${method}' matching receiver type '${origin.typeName}' with ${e.args.length} argument(s) in library ${cands[0].id.canonical}`,
-          callee.loc, this.self?.identity, this.self?.chain));
+        this.emit(
+          mkDiag(
+            `no method '${method}' matching receiver type '${origin.typeName}' with ${e.args.length} argument(s) in library ${cands[0].id.canonical}`,
+            callee.loc,
+            this.self?.identity,
+            this.self?.chain,
+          ),
+        );
         return;
       }
       // The type-OWNER declares the name but on a different receiver/arity → a real
       // mismatch worth reporting. Any other unmatched name falls through untouched
       // (it may be a builtin method like `.get`, handled by native dispatch later).
-      const owner = this.self && origin.identity.canonical === this.self.identity.canonical
-        ? this.self.methods : this.lib(origin.identity)?.surface.methods;
+      const owner =
+        this.self && origin.identity.canonical === this.self.identity.canonical
+          ? this.self.methods
+          : this.lib(origin.identity)?.surface.methods;
       if (owner?.has(method)) {
-        this.emit(mkDiag(
-          `no method '${method}' matching receiver type '${origin.typeName}' with ${e.args.length} argument(s) in library ${origin.identity.canonical}`,
-          callee.loc, this.self?.identity, this.self?.chain));
+        this.emit(
+          mkDiag(
+            `no method '${method}' matching receiver type '${origin.typeName}' with ${e.args.length} argument(s) in library ${origin.identity.canonical}`,
+            callee.loc,
+            this.self?.identity,
+            this.self?.chain,
+          ),
+        );
       }
       return;
     }
@@ -1194,25 +1481,41 @@ export class RefRewriter {
         if (!m.receiverIsUdt && arity >= m.minArity && arity <= m.arity) hits.push({ id, m });
       }
     }
-    if (hits.length === 1) { this.bindMethodCall(e, hits[0].id, hits[0].m); return; }
+    if (hits.length === 1) {
+      this.bindMethodCall(e, hits[0].id, hits[0].m);
+      return;
+    }
     if (hits.length > 1) {
       // Prefer the current library's own method when rewriting a library body; otherwise
       // the call is genuinely ambiguous across imported libraries. Report it rather than
       // silently leaving it unresolved (which evaluates to na at runtime with no diagnostic).
-      const selfHit = this.self ? hits.find((h) => h.id.canonical === this.self!.identity.canonical) : undefined;
-      if (selfHit) { this.bindMethodCall(e, selfHit.id, selfHit.m); return; }
+      const selfHit = this.self
+        ? hits.find((h) => h.id.canonical === this.self!.identity.canonical)
+        : undefined;
+      if (selfHit) {
+        this.bindMethodCall(e, selfHit.id, selfHit.m);
+        return;
+      }
       const libs = [...new Set(hits.map((h) => h.id.canonical))].join(', ');
-      this.emit(mkDiag(
-        `ambiguous method '${method}' with ${e.args.length} argument(s): a matching builtin-receiver method is exported by more than one library (${libs}) — call it as \`alias.${method}(receiver, …)\` to disambiguate`,
-        callee.loc, this.self?.identity, this.self?.chain));
+      this.emit(
+        mkDiag(
+          `ambiguous method '${method}' with ${e.args.length} argument(s): a matching builtin-receiver method is exported by more than one library (${libs}) — call it as \`alias.${method}(receiver, …)\` to disambiguate`,
+          callee.loc,
+          this.self?.identity,
+          this.self?.chain,
+        ),
+      );
     }
   }
 
   private member(e: Member): Expr {
     // alias.EnumType.Member  (bare access, compile-time enum constant)
-    if (e.object.kind === 'Member' && e.object.object.kind === 'Ident'
-      && this.aliases.has(e.object.object.name)
-      && !this.localNames?.has(e.object.object.name)) {
+    if (
+      e.object.kind === 'Member' &&
+      e.object.object.kind === 'Ident' &&
+      this.aliases.has(e.object.object.name) &&
+      !this.localNames?.has(e.object.object.name)
+    ) {
       const alias = e.object.object.name;
       const id = this.aliases.get(alias)!;
       const lib = this.lib(id)!;
@@ -1220,7 +1523,14 @@ export class RefRewriter {
       const enumDef = lib.surface.enums.get(enumName);
       if (enumDef) {
         if (!enumDef.fields.some((f) => f.name === e.property)) {
-          this.emit(mkDiag(`enum '${alias}.${enumName}' has no member '${e.property}'`, e.loc, this.self?.identity, this.self?.chain));
+          this.emit(
+            mkDiag(
+              `enum '${alias}.${enumName}' has no member '${e.property}'`,
+              e.loc,
+              this.self?.identity,
+              this.self?.chain,
+            ),
+          );
         }
         e.object = { kind: 'Ident', name: mangle(id, enumName), loc: e.object.loc };
         return e;
@@ -1229,7 +1539,11 @@ export class RefRewriter {
     }
     // alias.name  (single member: bare type/enum ref, or a private/unresolved symbol) —
     // skipped when a local/param shadows the alias name (then it's a plain value).
-    if (e.object.kind === 'Ident' && this.aliases.has(e.object.name) && !this.localNames?.has(e.object.name)) {
+    if (
+      e.object.kind === 'Ident' &&
+      this.aliases.has(e.object.name) &&
+      !this.localNames?.has(e.object.name)
+    ) {
       const alias = e.object.name;
       const id = this.aliases.get(alias)!;
       const lib = this.lib(id)!;
@@ -1245,9 +1559,17 @@ export class RefRewriter {
       return e;
     }
     // self SelfEnum.Member (bare enum access inside its own library, unless locally shadowed)
-    if (this.self && e.object.kind === 'Ident' && this.self.names.has(e.object.name)
-      && !this.localNames?.has(e.object.name)) {
-      e.object = { kind: 'Ident', name: mangle(this.self.identity, e.object.name), loc: e.object.loc };
+    if (
+      this.self &&
+      e.object.kind === 'Ident' &&
+      this.self.names.has(e.object.name) &&
+      !this.localNames?.has(e.object.name)
+    ) {
+      e.object = {
+        kind: 'Ident',
+        name: mangle(this.self.identity, e.object.name),
+        loc: e.object.loc,
+      };
       return e;
     }
     e.object = this.expr(e.object);
@@ -1274,11 +1596,22 @@ export function mergeLibraries(graph: ResolvedGraph): { decls: Stmt[]; diagnosti
     const rewriter = new RefRewriter({
       aliases: lib.imports,
       graph: graph.libraries,
-      self: { identity: lib.identity, names: lib.allNames, methods: lib.allMethods, chain: lib.chain },
+      self: {
+        identity: lib.identity,
+        names: lib.allNames,
+        methods: lib.allMethods,
+        chain: lib.chain,
+      },
       emit: (d) => diagnostics.push(d),
     });
     for (const s of lib.program.body) {
-      if (s.kind !== 'FuncDef' && s.kind !== 'TypeDef' && s.kind !== 'VarDecl' && s.kind !== 'TupleDecl') continue;
+      if (
+        s.kind !== 'FuncDef' &&
+        s.kind !== 'TypeDef' &&
+        s.kind !== 'VarDecl' &&
+        s.kind !== 'TupleDecl'
+      )
+        continue;
       const cloned = clone(s);
       rewriter.rewriteAndMangleDecl(cloned);
       decls.push(cloned);
@@ -1304,7 +1637,14 @@ function checkExportUniqueness(lib: ResolvedLibrary): Diagnostic[] {
   const diags: Diagnostic[] = [];
   const seen = new Set<string>();
   const dup = (kind: string, name: string, loc?: Loc): void => {
-    diags.push(mkDiag(`duplicate export '${name}': a library may export only one ${kind} with a given name`, loc, lib.identity, lib.chain));
+    diags.push(
+      mkDiag(
+        `duplicate export '${name}': a library may export only one ${kind} with a given name`,
+        loc,
+        lib.identity,
+        lib.chain,
+      ),
+    );
   };
   for (const s of lib.program.body) {
     if (s.kind === 'FuncDef' && s.export && s.isMethod) {
@@ -1359,23 +1699,48 @@ export function checkExportConstraints(lib: ResolvedLibrary): Diagnostic[] {
 
   function walkStmt(s: Stmt, exportedName: string, visiting: Set<string>): void {
     switch (s.kind) {
-      case 'VarDecl': walkExpr(s.init, exportedName, visiting); break;
-      case 'TupleDecl': walkExpr(s.init, exportedName, visiting); break;
-      case 'Reassign': walkExpr(s.value, exportedName, visiting); break;
-      case 'ExprStmt': walkExpr(s.expr, exportedName, visiting); break;
+      case 'VarDecl':
+        walkExpr(s.init, exportedName, visiting);
+        break;
+      case 'TupleDecl':
+        walkExpr(s.init, exportedName, visiting);
+        break;
+      case 'Reassign':
+        walkExpr(s.value, exportedName, visiting);
+        break;
+      case 'ExprStmt':
+        walkExpr(s.expr, exportedName, visiting);
+        break;
       case 'If':
         walkExpr(s.cond, exportedName, visiting);
         s.then.forEach((b) => walkStmt(b, exportedName, visiting));
-        s.elifs.forEach((el) => { walkExpr(el.cond, exportedName, visiting); el.body.forEach((b) => walkStmt(b, exportedName, visiting)); });
+        s.elifs.forEach((el) => {
+          walkExpr(el.cond, exportedName, visiting);
+          el.body.forEach((b) => walkStmt(b, exportedName, visiting));
+        });
         s.else?.forEach((b) => walkStmt(b, exportedName, visiting));
         break;
       case 'Switch':
         if (s.subject) walkExpr(s.subject, exportedName, visiting);
-        s.cases.forEach((c) => { if (c.test) walkExpr(c.test, exportedName, visiting); c.body.forEach((b) => walkStmt(b, exportedName, visiting)); });
+        s.cases.forEach((c) => {
+          if (c.test) walkExpr(c.test, exportedName, visiting);
+          c.body.forEach((b) => walkStmt(b, exportedName, visiting));
+        });
         break;
-      case 'For': walkExpr(s.from, exportedName, visiting); walkExpr(s.to, exportedName, visiting); if (s.step) walkExpr(s.step, exportedName, visiting); s.body.forEach((b) => walkStmt(b, exportedName, visiting)); break;
-      case 'ForIn': walkExpr(s.iterable, exportedName, visiting); s.body.forEach((b) => walkStmt(b, exportedName, visiting)); break;
-      case 'While': walkExpr(s.cond, exportedName, visiting); s.body.forEach((b) => walkStmt(b, exportedName, visiting)); break;
+      case 'For':
+        walkExpr(s.from, exportedName, visiting);
+        walkExpr(s.to, exportedName, visiting);
+        if (s.step) walkExpr(s.step, exportedName, visiting);
+        s.body.forEach((b) => walkStmt(b, exportedName, visiting));
+        break;
+      case 'ForIn':
+        walkExpr(s.iterable, exportedName, visiting);
+        s.body.forEach((b) => walkStmt(b, exportedName, visiting));
+        break;
+      case 'While':
+        walkExpr(s.cond, exportedName, visiting);
+        s.body.forEach((b) => walkStmt(b, exportedName, visiting));
+        break;
     }
   }
 
@@ -1386,13 +1751,23 @@ export function checkExportConstraints(lib: ResolvedLibrary): Diagnostic[] {
         if (callee.kind === 'Ident') {
           const name = callee.name;
           if (FORBIDDEN_IN_EXPORT.has(name)) {
-            diags.push(mkDiag(
-              `exported '${exportedName}' calls the global-only builtin '${name}', which is not allowed inside a library export`,
-              e.loc, lib.identity, lib.chain));
+            diags.push(
+              mkDiag(
+                `exported '${exportedName}' calls the global-only builtin '${name}', which is not allowed inside a library export`,
+                e.loc,
+                lib.identity,
+                lib.chain,
+              ),
+            );
           } else if (DECL_CALLS.has(name)) {
-            diags.push(mkDiag(
-              `exported '${exportedName}' contains an '${name}(...)' declaration call, which is not allowed inside a library export`,
-              e.loc, lib.identity, lib.chain));
+            diags.push(
+              mkDiag(
+                `exported '${exportedName}' contains an '${name}(...)' declaration call, which is not allowed inside a library export`,
+                e.loc,
+                lib.identity,
+                lib.chain,
+              ),
+            );
           } else if (funcs.has(name)) {
             walkFn(funcs.get(name)!, exportedName, visiting); // transitive through a private/sibling fn
           }
@@ -1408,33 +1783,71 @@ export function checkExportConstraints(lib: ResolvedLibrary): Diagnostic[] {
           // call to an unrelated private function and rejects a valid library. Match the
           // same exclusions the dispatch layer uses.
           walkExpr(callee.object, exportedName, visiting);
-          const isNamespaceCall = callee.object.kind === 'Ident' && NAMESPACES.has(callee.object.name);
-          if (!isNamespaceCall && !BUILTIN_METHODS.has(callee.property) && funcs.has(callee.property)) {
+          const isNamespaceCall =
+            callee.object.kind === 'Ident' && NAMESPACES.has(callee.object.name);
+          if (
+            !isNamespaceCall &&
+            !BUILTIN_METHODS.has(callee.property) &&
+            funcs.has(callee.property)
+          ) {
             walkFn(funcs.get(callee.property)!, exportedName, visiting);
           }
         }
         e.args.forEach((a) => walkExpr(a.value, exportedName, visiting));
         break;
       }
-      case 'Member': walkExpr(e.object, exportedName, visiting); break;
-      case 'History': walkExpr(e.base, exportedName, visiting); walkExpr(e.offset, exportedName, visiting); break;
-      case 'Unary': walkExpr(e.operand, exportedName, visiting); break;
-      case 'Binary': walkExpr(e.left, exportedName, visiting); walkExpr(e.right, exportedName, visiting); break;
-      case 'Ternary': walkExpr(e.cond, exportedName, visiting); walkExpr(e.then, exportedName, visiting); walkExpr(e.else, exportedName, visiting); break;
-      case 'Tuple': e.items.forEach((it) => walkExpr(it, exportedName, visiting)); break;
+      case 'Member':
+        walkExpr(e.object, exportedName, visiting);
+        break;
+      case 'History':
+        walkExpr(e.base, exportedName, visiting);
+        walkExpr(e.offset, exportedName, visiting);
+        break;
+      case 'Unary':
+        walkExpr(e.operand, exportedName, visiting);
+        break;
+      case 'Binary':
+        walkExpr(e.left, exportedName, visiting);
+        walkExpr(e.right, exportedName, visiting);
+        break;
+      case 'Ternary':
+        walkExpr(e.cond, exportedName, visiting);
+        walkExpr(e.then, exportedName, visiting);
+        walkExpr(e.else, exportedName, visiting);
+        break;
+      case 'Tuple':
+        e.items.forEach((it) => walkExpr(it, exportedName, visiting));
+        break;
       case 'If':
         walkExpr(e.cond, exportedName, visiting);
         e.then.forEach((b) => walkStmt(b, exportedName, visiting));
-        e.elifs.forEach((el) => { walkExpr(el.cond, exportedName, visiting); el.body.forEach((b) => walkStmt(b, exportedName, visiting)); });
+        e.elifs.forEach((el) => {
+          walkExpr(el.cond, exportedName, visiting);
+          el.body.forEach((b) => walkStmt(b, exportedName, visiting));
+        });
         e.else?.forEach((b) => walkStmt(b, exportedName, visiting));
         break;
       case 'Switch':
         if (e.subject) walkExpr(e.subject, exportedName, visiting);
-        e.cases.forEach((c) => { if (c.test) walkExpr(c.test, exportedName, visiting); c.body.forEach((b) => walkStmt(b, exportedName, visiting)); });
+        e.cases.forEach((c) => {
+          if (c.test) walkExpr(c.test, exportedName, visiting);
+          c.body.forEach((b) => walkStmt(b, exportedName, visiting));
+        });
         break;
-      case 'For': walkExpr(e.from, exportedName, visiting); walkExpr(e.to, exportedName, visiting); if (e.step) walkExpr(e.step, exportedName, visiting); e.body.forEach((b) => walkStmt(b, exportedName, visiting)); break;
-      case 'ForIn': walkExpr(e.iterable, exportedName, visiting); e.body.forEach((b) => walkStmt(b, exportedName, visiting)); break;
-      case 'While': walkExpr(e.cond, exportedName, visiting); e.body.forEach((b) => walkStmt(b, exportedName, visiting)); break;
+      case 'For':
+        walkExpr(e.from, exportedName, visiting);
+        walkExpr(e.to, exportedName, visiting);
+        if (e.step) walkExpr(e.step, exportedName, visiting);
+        e.body.forEach((b) => walkStmt(b, exportedName, visiting));
+        break;
+      case 'ForIn':
+        walkExpr(e.iterable, exportedName, visiting);
+        e.body.forEach((b) => walkStmt(b, exportedName, visiting));
+        break;
+      case 'While':
+        walkExpr(e.cond, exportedName, visiting);
+        e.body.forEach((b) => walkStmt(b, exportedName, visiting));
+        break;
     }
   }
 

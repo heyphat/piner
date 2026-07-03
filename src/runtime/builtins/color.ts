@@ -38,9 +38,12 @@ export const ColorNs = {
     if (isNa(col) || typeof col !== 'string') return NA;
     const rgb = col.slice(1, 7);
     // Omitted/na transp keeps the input's alpha (opaque when it has none) — never "NaN".
-    const alpha = transp == null || isNa(transp)
-      ? (col.length >= 9 ? col.slice(7, 9) : 'FF')
-      : alphaFromTransp(transp);
+    const alpha =
+      transp == null || isNa(transp)
+        ? col.length >= 9
+          ? col.slice(7, 9)
+          : 'FF'
+        : alphaFromTransp(transp);
     return `#${rgb}${alpha}`;
   },
   rgb(r: number, g: number, b: number, transp = 0): string {

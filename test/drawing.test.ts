@@ -1,9 +1,19 @@
 import { describe, it, expect } from 'bun:test';
 import { compile, Engine, ArrayFeed, DrawingPool, isNa, type Bar } from '../src/index.js';
-import { makeLineNs, makeLabelNs, makeBoxNs, makeTableNs } from '../src/runtime/builtins/drawing.js';
+import {
+  makeLineNs,
+  makeLabelNs,
+  makeBoxNs,
+  makeTableNs,
+} from '../src/runtime/builtins/drawing.js';
 
 const bars: Bar[] = Array.from({ length: 8 }, (_, i) => ({
-  time: i * 60000, open: 100 + i, high: 110 + i, low: 90 + i, close: 100 + i, volume: 1,
+  time: i * 60000,
+  open: 100 + i,
+  high: 110 + i,
+  low: 90 + i,
+  close: 100 + i,
+  volume: 1,
 }));
 
 const run = async (src: string, backend: 'js' | 'interp' = 'js') => {
@@ -42,10 +52,18 @@ describe('drawing namespace methods (full setter/getter coverage)', () => {
     const p = new DrawingPool();
     const line = makeLineNs(p);
     const id = line.new(0, 1, 2, 3, { color: '#111111FF' });
-    line.set_x1(id, 10); line.set_y1(id, 11); line.set_x2(id, 12); line.set_y2(id, 13);
-    line.set_color(id, '#222222FF'); line.set_width(id, 4); line.set_style(id, 'dashed');
-    expect([line.get_x1(id), line.get_y1(id), line.get_x2(id), line.get_y2(id)]).toEqual([10, 11, 12, 13]);
-    line.set_xy1(id, 1, 2); line.set_xy2(id, 3, 4);
+    line.set_x1(id, 10);
+    line.set_y1(id, 11);
+    line.set_x2(id, 12);
+    line.set_y2(id, 13);
+    line.set_color(id, '#222222FF');
+    line.set_width(id, 4);
+    line.set_style(id, 'dashed');
+    expect([line.get_x1(id), line.get_y1(id), line.get_x2(id), line.get_y2(id)]).toEqual([
+      10, 11, 12, 13,
+    ]);
+    line.set_xy1(id, 1, 2);
+    line.set_xy2(id, 3, 4);
     expect([line.get_x1(id), line.get_y2(id)]).toEqual([1, 4]);
     line.delete(id);
     expect(p.objects.size).toBe(0);
@@ -54,9 +72,14 @@ describe('drawing namespace methods (full setter/getter coverage)', () => {
     const p = new DrawingPool();
     const label = makeLabelNs(p);
     const id = label.new(0, 0, 'a');
-    label.set_x(id, 5); label.set_y(id, 6); label.set_xy(id, 7, 8);
-    label.set_text(id, 't'); label.set_color(id, '#1'); label.set_textcolor(id, '#2');
-    label.set_style(id, 's'); label.set_size(id, 'large');
+    label.set_x(id, 5);
+    label.set_y(id, 6);
+    label.set_xy(id, 7, 8);
+    label.set_text(id, 't');
+    label.set_color(id, '#1');
+    label.set_textcolor(id, '#2');
+    label.set_style(id, 's');
+    label.set_size(id, 'large');
     expect([label.get_x(id), label.get_y(id)]).toEqual([7, 8]);
     label.delete(id);
     expect(p.objects.size).toBe(0);
@@ -65,8 +88,10 @@ describe('drawing namespace methods (full setter/getter coverage)', () => {
     const p = new DrawingPool();
     const box = makeBoxNs(p);
     const bid = box.new(0, 1, 2, 3);
-    box.set_lefttop(bid, 4, 5); box.set_rightbottom(bid, 6, 7);
-    box.set_bgcolor(bid, '#a'); box.set_border_color(bid, '#b');
+    box.set_lefttop(bid, 4, 5);
+    box.set_rightbottom(bid, 6, 7);
+    box.set_bgcolor(bid, '#a');
+    box.set_border_color(bid, '#b');
     expect(p.get(bid, 'left')).toBe(4);
     box.delete(bid);
 
@@ -191,8 +216,8 @@ plot(close)
     const box = eng.drawings.find((d) => d.type === 'box')!;
     expect(typeof box.props.left).toBe('number');
     expect(box.props.bgcolor).toMatch(/^#[0-9A-F]{8}$/); // the named bgcolor survives
-    expect(isNa(box.props.border_color)).toBe(true);      // 5th positional na → border_color
-    expect('__na' in box.props).toBe(false);              // not spread into the box itself
+    expect(isNa(box.props.border_color)).toBe(true); // 5th positional na → border_color
+    expect('__na' in box.props).toBe(false); // not spread into the box itself
     const ip = await run(src, 'interp');
     expect(JSON.stringify(ip.drawings)).toBe(JSON.stringify(eng.drawings));
   });
@@ -249,7 +274,9 @@ plot(close)
 
 describe('drawing objects roll back on realtime ticks', () => {
   it('a per-bar line.new does not permanently accumulate across ticks; ids are stable', async () => {
-    const c = compile('//@version=6\nindicator("d")\nline.new(bar_index, low, bar_index, high)\nplot(close)\n');
+    const c = compile(
+      '//@version=6\nindicator("d")\nline.new(bar_index, low, bar_index, high)\nplot(close)\n',
+    );
     const eng = new Engine(c, new ArrayFeed(bars));
     await eng.run({ symbol: 'T', timeframe: '1' });
     expect(eng.drawings.length).toBe(bars.length); // one per historical bar

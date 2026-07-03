@@ -31,10 +31,16 @@ function orderTrigger(limit?: number, stop?: number): Pick<Order, 'otype' | 'pri
   return { otype: 'market', price: undefined };
 }
 /** Coerce an optional numeric arg: na/undefined → undefined (not set). */
-const opt = (x: unknown): number | undefined => (x === undefined || isNa(x) ? undefined : Number(x));
+const opt = (x: unknown): number | undefined =>
+  x === undefined || isNa(x) ? undefined : Number(x);
 
 export interface StrategyHost {
-  open: number; high: number; low: number; close: number; time: number; idx: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  time: number;
+  idx: number;
   mintick: number;
 }
 
@@ -161,10 +167,24 @@ export class StrategyBroker {
   private static readonly SNAP_DEEP = ['pending', 'exits', 'entryLots'] as const;
   private static readonly SNAP_APPEND = ['closedTrades', 'equityCurve'] as const;
   private static readonly SNAP_SCALARS = [
-    'size', 'entryId', 'entryCount',
-    'realized', 'grossProfit', 'grossLoss', 'wins', 'losses', 'evens',
-    'peakEquity', 'valleyEquity', 'maxDrawdown', 'maxDrawdownPercent', 'maxRunup', 'maxRunupPercent',
-    'maxContractsAll', 'maxContractsLong', 'maxContractsShort',
+    'size',
+    'entryId',
+    'entryCount',
+    'realized',
+    'grossProfit',
+    'grossLoss',
+    'wins',
+    'losses',
+    'evens',
+    'peakEquity',
+    'valleyEquity',
+    'maxDrawdown',
+    'maxDrawdownPercent',
+    'maxRunup',
+    'maxRunupPercent',
+    'maxContractsAll',
+    'maxContractsLong',
+    'maxContractsShort',
   ] as const;
   snapshot(): unknown {
     const s: Record<string, unknown> = {};
@@ -189,20 +209,47 @@ export class StrategyBroker {
   }
 
   // ── live read-backs ───────────────────────────────────────
-  get equity(): number { return this.settings.initialCapital + this.realized + this.openProfit; }
-  get openProfit(): number { return this.size === 0 ? 0 : this.size * (this.host.close - this.avgPrice); }
-  get netProfit(): number { return this.realized; }
+  get equity(): number {
+    return this.settings.initialCapital + this.realized + this.openProfit;
+  }
+  get openProfit(): number {
+    return this.size === 0 ? 0 : this.size * (this.host.close - this.avgPrice);
+  }
+  get netProfit(): number {
+    return this.realized;
+  }
+  /** Profit factor: gross profit / |gross loss| (Infinity when there are no losing
+   *  trades, 0 when flat). Not a Pine `strategy.*` builtin — a convenience metric
+   *  computed here so consumers don't recompute it inconsistently. */
+  get profitFactor(): number {
+    const gl = Math.abs(this.grossLoss);
+    return gl > 0 ? this.grossProfit / gl : this.grossProfit > 0 ? Infinity : 0;
+  }
+  /** Win rate: winning / decided (win+loss) closed trades, 0..1. Convenience metric
+   *  (not a Pine builtin), computed here for a single source of truth. */
+  get winRate(): number {
+    const decided = this.wins + this.losses;
+    return decided > 0 ? this.wins / decided : 0;
+  }
   /** Weighted average fill price of the OPEN lots (NaN while flat). Derived from the
    *  lots so a partial FIFO close re-prices the remainder, as TradingView does. */
   get avgPrice(): number {
-    let q = 0, pq = 0;
-    for (const lt of this.entryLots) { q += lt.qty; pq += lt.qty * lt.price; }
+    let q = 0,
+      pq = 0;
+    for (const lt of this.entryLots) {
+      q += lt.qty;
+      pq += lt.qty * lt.price;
+    }
     return q > 0 ? pq / q : NaN;
   }
   /** Open-trade count: one per open entry lot (TradingView's strategy.opentrades). */
-  get openTradeCount(): number { return this.entryLots.length; }
+  get openTradeCount(): number {
+    return this.entryLots.length;
+  }
   /** The entry id that opened the live position (empty while flat). */
-  get positionEntryName(): string { return this.size === 0 ? '' : this.entryId; }
+  get positionEntryName(): string {
+    return this.size === 0 ? '' : this.entryId;
+  }
 
   // ── trade-return statistics (computed from the closed-trade list) ─
   private pct(t: ClosedTrade): number {
@@ -214,16 +261,24 @@ export class StrategyBroker {
     if (!xs.length) return 0;
     return (signFactor * xs.reduce((a, t) => a + this.pct(t), 0)) / xs.length;
   }
-  avgTradePercent(): number { return this.meanPct(() => true); }
-  avgWinningTradePercent(): number { return this.meanPct((t) => t.profit > 0); }
-  avgLosingTradePercent(): number { return this.meanPct((t) => t.profit < 0, -1); }
+  avgTradePercent(): number {
+    return this.meanPct(() => true);
+  }
+  avgWinningTradePercent(): number {
+    return this.meanPct((t) => t.profit > 0);
+  }
+  avgLosingTradePercent(): number {
+    return this.meanPct((t) => t.profit < 0, -1);
+  }
 
   /** `strategy.closedtrades.first_index` / `strategy.opentrades.capital_held` —
    *  the two bare scalar stats hanging off the trade collections. */
   tradeStat(scope: string, field: string): number {
-    if (scope === 'closedtrades' && field === 'first_index') return this.closedTrades.length > 0 ? 0 : NaN;
+    if (scope === 'closedtrades' && field === 'first_index')
+      return this.closedTrades.length > 0 ? 0 : NaN;
     // capital allocated to the open position (cost basis); 0 while flat.
-    if (scope === 'opentrades' && field === 'capital_held') return this.size === 0 ? 0 : Math.abs(this.size * this.avgPrice);
+    if (scope === 'opentrades' && field === 'capital_held')
+      return this.size === 0 ? 0 : Math.abs(this.size * this.avgPrice);
     return NaN;
   }
 
@@ -259,8 +314,11 @@ export class StrategyBroker {
   // ── order entry points (called from the script) ──────────
   /** Pine keys orders by id — re-submitting replaces the unfilled pending order in place. */
   private submit(o: Order): void {
-    const i = this.pending.findIndex((p) => p.id === o.id && (p.kind === 'entry' || p.kind === 'order'));
-    if (i >= 0) this.pending[i] = o; else this.pending.push(o);
+    const i = this.pending.findIndex(
+      (p) => p.id === o.id && (p.kind === 'entry' || p.kind === 'order'),
+    );
+    if (i >= 0) this.pending[i] = o;
+    else this.pending.push(o);
   }
   entry(id: string, dir: number, qty?: number, limit?: number, stop?: number): void {
     if (!this.active) return;
@@ -278,14 +336,39 @@ export class StrategyBroker {
     if (!this.active) return;
     this.pending.push({ id: '', dir: 0, kind: 'closeAll', otype: 'market' });
   }
-  exit(id: string, fromEntry?: string, qty?: number, profit?: number, loss?: number, stop?: number, limit?: number,
-    trailPrice?: number, trailPoints?: number, trailOffset?: number): void {
+  exit(
+    id: string,
+    fromEntry?: string,
+    qty?: number,
+    profit?: number,
+    loss?: number,
+    stop?: number,
+    limit?: number,
+    trailPrice?: number,
+    trailPoints?: number,
+    trailOffset?: number,
+  ): void {
     if (!this.active) return;
     // Pine keys exit brackets by id — re-submitting the same id updates in place
     // rather than stacking duplicates while the position is held open.
-    const bracket: ExitBracket = { id, fromEntry: fromEntry ?? '', qty, profit, loss, stop, limit, trailPrice, trailPoints, trailOffset, trailStop: NaN };
+    const bracket: ExitBracket = {
+      id,
+      fromEntry: fromEntry ?? '',
+      qty,
+      profit,
+      loss,
+      stop,
+      limit,
+      trailPrice,
+      trailPoints,
+      trailOffset,
+      trailStop: NaN,
+    };
     const i = this.exits.findIndex((e) => e.id === id);
-    if (i >= 0) { bracket.trailStop = this.exits[i].trailStop; this.exits[i] = bracket; } else this.exits.push(bracket); // keep the trailing ratchet
+    if (i >= 0) {
+      bracket.trailStop = this.exits[i].trailStop;
+      this.exits[i] = bracket;
+    } else this.exits.push(bracket); // keep the trailing ratchet
   }
 
   /** A closed trade's field, or an open entry lot's (one open trade per lot). */
@@ -295,27 +378,43 @@ export class StrategyBroker {
       const t = this.closedTrades[k];
       if (!t) return NaN;
       switch (field) {
-        case 'profit': return t.profit;
-        case 'entry_price': return t.entryPrice;
-        case 'exit_price': return t.exitPrice;
-        case 'entry_bar_index': return t.entryBar;
-        case 'exit_bar_index': return t.exitBar;
-        case 'size': return t.dir * t.qty;
-        case 'entry_id': return t.entryId;
-        case 'cumprofit': case 'cumulative_profit': return t.cumProfit;
-        default: return NaN; // commission / max_runup / *_comment etc. not tracked in v1
+        case 'profit':
+          return t.profit;
+        case 'entry_price':
+          return t.entryPrice;
+        case 'exit_price':
+          return t.exitPrice;
+        case 'entry_bar_index':
+          return t.entryBar;
+        case 'exit_bar_index':
+          return t.exitBar;
+        case 'size':
+          return t.dir * t.qty;
+        case 'entry_id':
+          return t.entryId;
+        case 'cumprofit':
+        case 'cumulative_profit':
+          return t.cumProfit;
+        default:
+          return NaN; // commission / max_runup / *_comment etc. not tracked in v1
       }
     }
     const lot = this.entryLots[k];
     if (!lot) return NaN;
     const dir = sign(this.size);
     switch (field) {
-      case 'profit': return dir * (this.host.close - lot.price) * lot.qty;
-      case 'entry_price': return lot.price;
-      case 'entry_bar_index': return lot.bar;
-      case 'size': return dir * lot.qty;
-      case 'entry_id': return lot.id;
-      default: return NaN;
+      case 'profit':
+        return dir * (this.host.close - lot.price) * lot.qty;
+      case 'entry_price':
+        return lot.price;
+      case 'entry_bar_index':
+        return lot.bar;
+      case 'size':
+        return dir * lot.qty;
+      case 'entry_id':
+        return lot.id;
+      default:
+        return NaN;
     }
   }
   /** Market orders can't be canceled (they execute on the next tick regardless);
@@ -371,7 +470,8 @@ export class StrategyBroker {
         if (or.dir === DIR_LONG ? o >= p : o <= p) this.fill(or, o + or.dir * slip);
         else if (or.dir === DIR_LONG ? h >= p : l <= p) this.fill(or, p + or.dir * slip);
         else stillPending.push(or);
-      } else { // stoplimit: the stop arms a resting limit, which then fills at the limit price
+      } else {
+        // stoplimit: the stop arms a resting limit, which then fills at the limit price
         const wasTriggered = or.triggered;
         if (!or.triggered) {
           const stopHit = or.dir === DIR_LONG ? h >= or.price! : l <= or.price!;
@@ -416,10 +516,12 @@ export class StrategyBroker {
       if (v < this.valleyEquity) this.valleyEquity = v;
       const dd = this.peakEquity - v;
       if (dd > this.maxDrawdown) this.maxDrawdown = dd;
-      if (this.peakEquity > 0) this.maxDrawdownPercent = Math.max(this.maxDrawdownPercent, (dd / this.peakEquity) * 100);
+      if (this.peakEquity > 0)
+        this.maxDrawdownPercent = Math.max(this.maxDrawdownPercent, (dd / this.peakEquity) * 100);
       const ru = v - this.valleyEquity;
       if (ru > this.maxRunup) this.maxRunup = ru;
-      if (this.valleyEquity > 0) this.maxRunupPercent = Math.max(this.maxRunupPercent, (ru / this.valleyEquity) * 100);
+      if (this.valleyEquity > 0)
+        this.maxRunupPercent = Math.max(this.maxRunupPercent, (ru / this.valleyEquity) * 100);
     }
     this.recordExposure();
   }
@@ -432,7 +534,11 @@ export class StrategyBroker {
     // Pine: when BOTH an absolute price and a tick-distance resolve the same side
     // (stop+loss, limit+profit), the level expected to trigger FIRST wins — i.e. the
     // one nearer the market (long stop: the higher; long limit: the lower).
-    const firstOf = (a: number | undefined, b: number | undefined, wantHigh: boolean): number | undefined =>
+    const firstOf = (
+      a: number | undefined,
+      b: number | undefined,
+      wantHigh: boolean,
+    ): number | undefined =>
       a == null ? b : b == null ? a : wantHigh ? Math.max(a, b) : Math.min(a, b);
     const keep: ExitBracket[] = [];
     for (const ex of this.exits) {
@@ -448,29 +554,55 @@ export class StrategyBroker {
       // measured from that lot's fill price (absolute stop/limit prices are shared).
       for (const lot of this.entryLots.filter((lt) => !ex.fromEntry || lt.id === ex.fromEntry)) {
         if (remaining <= 0 || this.size === 0) break;
-        const stopPx = firstOf(ex.stop, ex.loss != null ? lot.price - dir * ex.loss * mt : undefined, dir === DIR_LONG);
-        const limitPx = firstOf(ex.limit, ex.profit != null ? lot.price + dir * ex.profit * mt : undefined, dir === DIR_SHORT);
+        const stopPx = firstOf(
+          ex.stop,
+          ex.loss != null ? lot.price - dir * ex.loss * mt : undefined,
+          dir === DIR_LONG,
+        );
+        const limitPx = firstOf(
+          ex.limit,
+          ex.profit != null ? lot.price + dir * ex.profit * mt : undefined,
+          dir === DIR_SHORT,
+        );
         const take = Math.min(lot.qty, remaining);
         // open-gap fills happen on the tick's first price and pre-empt the intrabar path;
         // a gap through the level fills at the open (stop: worse + slippage, limit: better)
-        if (stopPx != null && (dir === DIR_LONG ? o <= stopPx : o >= stopPx)) { book(lot, take, o - dir * slip); continue; }
-        if (limitPx != null && (dir === DIR_LONG ? o >= limitPx : o <= limitPx)) { book(lot, take, o); continue; }
+        if (stopPx != null && (dir === DIR_LONG ? o <= stopPx : o >= stopPx)) {
+          book(lot, take, o - dir * slip);
+          continue;
+        }
+        if (limitPx != null && (dir === DIR_LONG ? o >= limitPx : o <= limitPx)) {
+          book(lot, take, o);
+          continue;
+        }
         const stopHit = stopPx != null && (dir === DIR_LONG ? l <= stopPx : h >= stopPx);
         const limitHit = limitPx != null && (dir === DIR_LONG ? h >= limitPx : l <= limitPx);
         // for a long the stop sits on the low side, the limit on the high side (short: swapped)
         const stopFirst = dir === DIR_LONG ? !highFirst : highFirst;
-        if (stopHit && (stopFirst || !limitHit)) { book(lot, take, stopPx! - dir * slip); continue; }
+        if (stopHit && (stopFirst || !limitHit)) {
+          book(lot, take, stopPx! - dir * slip);
+          continue;
+        }
         if (limitHit) book(lot, take, limitPx!);
       }
       // trailing stop (position-aggregate): arm at trail_price (or entry ± trail_points·tick),
       // ratchet trail_offset ticks behind the favorable extreme, fill where the path crosses it.
-      if (this.size !== 0 && remaining > 0 && ex.trailOffset != null && (ex.trailPoints != null || ex.trailPrice != null)) {
+      if (
+        this.size !== 0 &&
+        remaining > 0 &&
+        ex.trailOffset != null &&
+        (ex.trailPoints != null || ex.trailPrice != null)
+      ) {
         const fillPx = this.trailFill(ex, sign(this.size), o, h, l);
         if (fillPx != null) {
           const px = fillPx - sign(this.size) * slip; // a stop order → adverse slippage
           const lots = this.entryLots.filter((lt) => !ex.fromEntry || lt.id === ex.fromEntry);
-          const group = Math.min(remaining, lots.reduce((a, lt) => a + lt.qty, 0));
-          for (const lot of lots) { // one stop order → one order-level fee, pro-rated
+          const group = Math.min(
+            remaining,
+            lots.reduce((a, lt) => a + lt.qty, 0),
+          );
+          for (const lot of lots) {
+            // one stop order → one order-level fee, pro-rated
             if (remaining <= 0) break;
             const take = Math.min(lot.qty, remaining);
             book(lot, take, px, this.commission(group, px) * (take / group));
@@ -481,7 +613,8 @@ export class StrategyBroker {
       // an unfilled one — or one still holding eligible lots — stays armed. A bracket with
       // no matching lots yet (its from_entry hasn't filled) waits for the entry.
       const anyLeft = this.entryLots.some((lt) => !ex.fromEntry || lt.id === ex.fromEntry);
-      const spent = (ex.filled ?? 0) > 0 && (!anyLeft || (ex.qty != null && (ex.filled ?? 0) >= ex.qty - 1e-9));
+      const spent =
+        (ex.filled ?? 0) > 0 && (!anyLeft || (ex.qty != null && (ex.filled ?? 0) >= ex.qty - 1e-9));
       if (!spent) keep.push(ex);
     }
     this.exits = this.size === 0 ? [] : keep;
@@ -496,10 +629,17 @@ export class StrategyBroker {
    * the path hasn't reached yet. Mutates `ex.trailStop`. Returns the fill price
    * (the stop level, or the open on a gap-through), else undefined.
    */
-  private trailFill(ex: ExitBracket, dir: number, o: number, h: number, l: number): number | undefined {
+  private trailFill(
+    ex: ExitBracket,
+    dir: number,
+    o: number,
+    h: number,
+    l: number,
+  ): number | undefined {
     const mt = this.host.mintick;
     const off = ex.trailOffset! * mt;
-    const act = ex.trailPrice != null ? ex.trailPrice : this.avgPrice + dir * (ex.trailPoints ?? 0) * mt;
+    const act =
+      ex.trailPrice != null ? ex.trailPrice : this.avgPrice + dir * (ex.trailPoints ?? 0) * mt;
     const path = h - o < o - l ? [o, h, l, this.host.close] : [o, l, h, this.host.close];
     let stop = ex.trailStop!; // NaN until armed
     for (let i = 0; i < path.length; i++) {
@@ -620,24 +760,44 @@ export class StrategyBroker {
    * lot's carried entry fee. The entry side was already charged to `realized` at fill
    * time, so only the exit side moves realized here.
    */
-  private closeLot(lot: Lot, take: number, price: number, exitFee = this.commission(take, price)): void {
+  private closeLot(
+    lot: Lot,
+    take: number,
+    price: number,
+    exitFee = this.commission(take, price),
+  ): void {
     const dir = sign(this.size);
     const entryFee = lot.fee * (take / lot.qty);
     lot.fee -= entryFee;
     const profit = dir * (price - lot.price) * take - exitFee - entryFee;
     this.realized += profit + entryFee;
-    if (profit > 0) { this.grossProfit += profit; this.wins++; }
-    else if (profit < 0) { this.grossLoss += -profit; this.losses++; }
-    else this.evens++;
+    if (profit > 0) {
+      this.grossProfit += profit;
+      this.wins++;
+    } else if (profit < 0) {
+      this.grossLoss += -profit;
+      this.losses++;
+    } else this.evens++;
     this.closedTrades.push({
-      entryId: lot.id, dir, qty: take, entryPrice: lot.price, exitPrice: price,
-      entryBar: lot.bar, exitBar: this.host.idx, profit, cumProfit: this.realized,
+      entryId: lot.id,
+      dir,
+      qty: take,
+      entryPrice: lot.price,
+      exitPrice: price,
+      entryBar: lot.bar,
+      exitBar: this.host.idx,
+      profit,
+      cumProfit: this.realized,
     });
     lot.qty -= take;
     if (lot.qty <= 1e-9) this.entryLots.splice(this.entryLots.indexOf(lot), 1);
     this.size = dir * (Math.abs(this.size) - take);
     if (Math.abs(this.size) <= 1e-9 || this.entryLots.length === 0) {
-      this.size = 0; this.entryId = ''; this.entryCount = 0; this.entryLots = []; this.exits = [];
+      this.size = 0;
+      this.entryId = '';
+      this.entryCount = 0;
+      this.entryLots = [];
+      this.exits = [];
     }
   }
 }
@@ -647,72 +807,180 @@ export class StrategyBroker {
  * coercion), live read-back getters, and the direction/qty/commission constants.
  */
 export function makeStrategyNs(b: StrategyBroker) {
-  const gated = (when: unknown, fn: () => void) => { if (when !== false) fn(); };
+  const gated = (when: unknown, fn: () => void) => {
+    if (when !== false) fn();
+  };
   return {
     long: DIR_LONG,
     short: DIR_SHORT,
     fixed: 'fixed' as const,
     cash: 'cash' as const,
     percent_of_equity: 'percent_of_equity' as const,
-    commission: { percent: 'percent', cash_per_contract: 'cash_per_contract', cash_per_order: 'cash_per_order' },
+    commission: {
+      percent: 'percent',
+      cash_per_contract: 'cash_per_contract',
+      cash_per_order: 'cash_per_order',
+    },
     oca: { none: 'none', cancel: 'cancel', reduce: 'reduce' },
     direction: { all: 'all', long: 'long', short: 'short' },
 
-    entry: (id: unknown, dir: unknown, qty?: unknown, limit?: unknown, stop?: unknown, when?: unknown) =>
-      gated(when, () => b.entry(String(id), Number(dir), opt(qty), opt(limit), opt(stop))),
-    order: (id: unknown, dir: unknown, qty?: unknown, limit?: unknown, stop?: unknown, when?: unknown) =>
-      gated(when, () => b.order(String(id), Number(dir), opt(qty), opt(limit), opt(stop))),
+    entry: (
+      id: unknown,
+      dir: unknown,
+      qty?: unknown,
+      limit?: unknown,
+      stop?: unknown,
+      when?: unknown,
+    ) => gated(when, () => b.entry(String(id), Number(dir), opt(qty), opt(limit), opt(stop))),
+    order: (
+      id: unknown,
+      dir: unknown,
+      qty?: unknown,
+      limit?: unknown,
+      stop?: unknown,
+      when?: unknown,
+    ) => gated(when, () => b.order(String(id), Number(dir), opt(qty), opt(limit), opt(stop))),
     close: (id: unknown, qty?: unknown, when?: unknown) =>
       gated(when, () => b.close(String(id), opt(qty))),
     close_all: (when?: unknown) => gated(when, () => b.close_all()),
-    exit: (id: unknown, fromEntry?: unknown, qty?: unknown, profit?: unknown, loss?: unknown, stop?: unknown, limit?: unknown,
-      trailPrice?: unknown, trailPoints?: unknown, trailOffset?: unknown, when?: unknown) =>
-      gated(when, () => b.exit(String(id), fromEntry == null || isNa(fromEntry) ? undefined : String(fromEntry),
-        opt(qty), opt(profit), opt(loss), opt(stop), opt(limit), opt(trailPrice), opt(trailPoints), opt(trailOffset))),
+    exit: (
+      id: unknown,
+      fromEntry?: unknown,
+      qty?: unknown,
+      profit?: unknown,
+      loss?: unknown,
+      stop?: unknown,
+      limit?: unknown,
+      trailPrice?: unknown,
+      trailPoints?: unknown,
+      trailOffset?: unknown,
+      when?: unknown,
+    ) =>
+      gated(when, () =>
+        b.exit(
+          String(id),
+          fromEntry == null || isNa(fromEntry) ? undefined : String(fromEntry),
+          opt(qty),
+          opt(profit),
+          opt(loss),
+          opt(stop),
+          opt(limit),
+          opt(trailPrice),
+          opt(trailPoints),
+          opt(trailOffset),
+        ),
+      ),
     /** strategy.closedtrades.X(i) / strategy.opentrades.X(i) — per-trade introspection. */
-    tradeField: (scope: unknown, field: unknown, i: unknown) => b.tradeField(String(scope), String(field), opt(i) ?? 0),
+    tradeField: (scope: unknown, field: unknown, i: unknown) =>
+      b.tradeField(String(scope), String(field), opt(i) ?? 0),
     /** strategy.closedtrades.first_index / strategy.opentrades.capital_held — bare scalar stats. */
     tradeStat: (scope: unknown, field: unknown) => b.tradeStat(String(scope), String(field)),
     default_entry_qty: (price: unknown) => b.defaultQty(opt(price) ?? b.host.close),
     cancel: (id: unknown, when?: unknown) => gated(when, () => b.cancel(String(id))),
     cancel_all: (when?: unknown) => gated(when, () => b.cancel_all()),
 
-    get position_size() { return b.size; },
-    get position_avg_price() { return b.size === 0 ? NaN : b.avgPrice; },
-    get equity() { return b.equity; },
-    get openprofit() { return b.openProfit; },
-    get netprofit() { return b.netProfit; },
-    get grossprofit() { return b.grossProfit; },
-    get grossloss() { return b.grossLoss; },
-    get wintrades() { return b.wins; },
-    get losstrades() { return b.losses; },
-    get eventrades() { return b.evens; },
-    get closedtrades() { return b.closedTrades.length; },
-    get opentrades() { return b.openTradeCount; },
-    get initial_capital() { return b.settings.initialCapital; },
-    get max_drawdown() { return b.maxDrawdown; },
-    get account_currency() { return 'USD'; },
+    get position_size() {
+      return b.size;
+    },
+    get position_avg_price() {
+      return b.size === 0 ? NaN : b.avgPrice;
+    },
+    get equity() {
+      return b.equity;
+    },
+    get openprofit() {
+      return b.openProfit;
+    },
+    get netprofit() {
+      return b.netProfit;
+    },
+    get grossprofit() {
+      return b.grossProfit;
+    },
+    get grossloss() {
+      return b.grossLoss;
+    },
+    get wintrades() {
+      return b.wins;
+    },
+    get losstrades() {
+      return b.losses;
+    },
+    get eventrades() {
+      return b.evens;
+    },
+    get closedtrades() {
+      return b.closedTrades.length;
+    },
+    get opentrades() {
+      return b.openTradeCount;
+    },
+    get initial_capital() {
+      return b.settings.initialCapital;
+    },
+    get max_drawdown() {
+      return b.maxDrawdown;
+    },
+    get account_currency() {
+      return 'USD';
+    },
 
     // ── performance statistics (percent / averages / extremes) ──
-    get netprofit_percent() { return b.settings.initialCapital ? (b.netProfit / b.settings.initialCapital) * 100 : 0; },
-    get openprofit_percent() { return b.settings.initialCapital ? (b.openProfit / b.settings.initialCapital) * 100 : 0; },
-    get grossprofit_percent() { return b.settings.initialCapital ? (b.grossProfit / b.settings.initialCapital) * 100 : 0; },
-    get grossloss_percent() { return b.settings.initialCapital ? (b.grossLoss / b.settings.initialCapital) * 100 : 0; },
-    get max_drawdown_percent() { return b.maxDrawdownPercent; },
-    get max_runup() { return b.maxRunup; },
-    get max_runup_percent() { return b.maxRunupPercent; },
-    get avg_trade() { return b.closedTrades.length ? b.netProfit / b.closedTrades.length : 0; },
-    get avg_trade_percent() { return b.avgTradePercent(); },
-    get avg_winning_trade() { return b.wins ? b.grossProfit / b.wins : 0; },
-    get avg_winning_trade_percent() { return b.avgWinningTradePercent(); },
-    get avg_losing_trade() { return b.losses ? b.grossLoss / b.losses : 0; },
-    get avg_losing_trade_percent() { return b.avgLosingTradePercent(); },
-    get max_contracts_held_all() { return b.maxContractsAll; },
-    get max_contracts_held_long() { return b.maxContractsLong; },
-    get max_contracts_held_short() { return b.maxContractsShort; },
-    get position_entry_name() { return b.positionEntryName; },
+    get netprofit_percent() {
+      return b.settings.initialCapital ? (b.netProfit / b.settings.initialCapital) * 100 : 0;
+    },
+    get openprofit_percent() {
+      return b.settings.initialCapital ? (b.openProfit / b.settings.initialCapital) * 100 : 0;
+    },
+    get grossprofit_percent() {
+      return b.settings.initialCapital ? (b.grossProfit / b.settings.initialCapital) * 100 : 0;
+    },
+    get grossloss_percent() {
+      return b.settings.initialCapital ? (b.grossLoss / b.settings.initialCapital) * 100 : 0;
+    },
+    get max_drawdown_percent() {
+      return b.maxDrawdownPercent;
+    },
+    get max_runup() {
+      return b.maxRunup;
+    },
+    get max_runup_percent() {
+      return b.maxRunupPercent;
+    },
+    get avg_trade() {
+      return b.closedTrades.length ? b.netProfit / b.closedTrades.length : 0;
+    },
+    get avg_trade_percent() {
+      return b.avgTradePercent();
+    },
+    get avg_winning_trade() {
+      return b.wins ? b.grossProfit / b.wins : 0;
+    },
+    get avg_winning_trade_percent() {
+      return b.avgWinningTradePercent();
+    },
+    get avg_losing_trade() {
+      return b.losses ? b.grossLoss / b.losses : 0;
+    },
+    get avg_losing_trade_percent() {
+      return b.avgLosingTradePercent();
+    },
+    get max_contracts_held_all() {
+      return b.maxContractsAll;
+    },
+    get max_contracts_held_long() {
+      return b.maxContractsLong;
+    },
+    get max_contracts_held_short() {
+      return b.maxContractsShort;
+    },
+    get position_entry_name() {
+      return b.positionEntryName;
+    },
     /** Margin liquidation price — piner does not model margin, so na (matches Pine
      *  when the strategy declares no margin_long/short). */
-    get margin_liquidation_price() { return NaN; },
+    get margin_liquidation_price() {
+      return NaN;
+    },
   };
 }

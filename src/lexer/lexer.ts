@@ -9,7 +9,11 @@
 import { TokenKind, KEYWORDS, MULTI_OPS, SINGLE_OPS, PUNCT, type Token } from './token.js';
 
 export class LexError extends Error {
-  constructor(message: string, readonly line: number, readonly col: number) {
+  constructor(
+    message: string,
+    readonly line: number,
+    readonly col: number,
+  ) {
     super(`Lex error at ${line}:${col}: ${message}`);
     this.name = 'LexError';
   }
@@ -38,7 +42,8 @@ class Lexer {
   // seen yet. While set, physical lines are swallowed as raw string content (joined by
   // newlines) and all layout logic is suspended — like an open bracket. `value` is the
   // RAW content; escapes are decoded once at close.
-  private mlString: { value: string; quote: string; startLine: number; startCol: number } | null = null;
+  private mlString: { value: string; quote: string; startLine: number; startCol: number } | null =
+    null;
 
   constructor(source: string) {
     // Normalize line endings; keep physical lines.
@@ -50,7 +55,11 @@ class Lexer {
       this.processLine(this.lines[i], i + 1);
     }
     if (this.mlString) {
-      throw new LexError('unterminated multiline string literal', this.mlString.startLine, this.mlString.startCol);
+      throw new LexError(
+        'unterminated multiline string literal',
+        this.mlString.startLine,
+        this.mlString.startCol,
+      );
     }
     if (this.pendingNewline) this.emit(TokenKind.Newline, '', this.lines.length + 1, 1);
     while (this.indentStack.length > 1) {
@@ -177,7 +186,12 @@ class Lexer {
           const close = this.findTripleClose(line, i + 3, c);
           if (close < 0) {
             // Opens here; the rest of the line (and following lines) is content.
-            this.mlString = { value: line.slice(i + 3), quote: c, startLine: lineNo, startCol: col };
+            this.mlString = {
+              value: line.slice(i + 3),
+              quote: c,
+              startLine: lineNo,
+              startCol: col,
+            };
             return;
           }
           const value = this.unescape(line.slice(i + 3, close));
@@ -261,7 +275,7 @@ class Lexer {
       const ch = line[i];
       if (ch === '\\') {
         const next = line[i + 1];
-        out += next === 'n' ? '\n' : next === 't' ? '\t' : next ?? '';
+        out += next === 'n' ? '\n' : next === 't' ? '\t' : (next ?? '');
         i += 2;
         continue;
       }
@@ -291,7 +305,7 @@ class Lexer {
     for (let i = 0; i < s.length; i++) {
       if (s[i] === '\\') {
         const next = s[i + 1];
-        out += next === 'n' ? '\n' : next === 't' ? '\t' : next ?? '';
+        out += next === 'n' ? '\n' : next === 't' ? '\t' : (next ?? '');
         i++;
         continue;
       }
@@ -332,7 +346,13 @@ class Lexer {
     return { end: i, isInt };
   }
 
-  private push(kind: TokenKind, value: string, line: number, col: number, literal?: number | string | boolean): void {
+  private push(
+    kind: TokenKind,
+    value: string,
+    line: number,
+    col: number,
+    literal?: number | string | boolean,
+  ): void {
     this.seenCode = true;
     this.tokens.push({ kind, value, line, col, literal });
   }

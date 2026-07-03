@@ -14,6 +14,8 @@ const file = new URL('../dist/node.cjs', import.meta.url);
 const src = readFileSync(file, 'utf8');
 const out = src.replace(/require\("\.\/index\.js"\)/g, 'require("./index.cjs")');
 if (out === src) {
-  throw new Error('postbuild-node-cjs: expected require("./index.js") in dist/node.cjs — did the build/external flag change?');
+  throw new Error(
+    'postbuild-node-cjs: expected require("./index.js") in dist/node.cjs — did the build/external flag change?',
+  );
 }
 writeFileSync(file, out);

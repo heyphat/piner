@@ -7,8 +7,14 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
-  compile, compileAsync, resolveLibraryClosure, CompileError,
-  Engine, ArrayFeed, type Bar, type LibraryIdentity,
+  compile,
+  compileAsync,
+  resolveLibraryClosure,
+  CompileError,
+  Engine,
+  ArrayFeed,
+  type Bar,
+  type LibraryIdentity,
 } from '../src/index.js';
 import { fsLibrarySource } from '../src/node.js';
 
@@ -26,7 +32,8 @@ async function bothAgree(compiled: Awaited<ReturnType<typeof compileAsync>>) {
   for (const [id, jp] of js.outputs.plots) {
     const ipp = ip.outputs.plots.get(id)!;
     for (let i = 0; i < jp.data.length; i++) {
-      if (!eqNaN(jp.data[i], ipp.data[i])) throw new Error(`plot ${id} bar ${i}: js=${jp.data[i]} ip=${ipp.data[i]}`);
+      if (!eqNaN(jp.data[i], ipp.data[i]))
+        throw new Error(`plot ${id} bar ${i}: js=${jp.data[i]} ip=${ipp.data[i]}`);
     }
   }
   return js;
@@ -35,7 +42,8 @@ async function bothAgree(compiled: Awaited<ReturnType<typeof compileAsync>>) {
 // A simulated "remote registry" of library sources, keyed by canonical identity.
 const REMOTE: Record<string, string> = {
   'acme/base/1': '//@version=6\nlibrary("Base")\nexport inc(float x) => x + 1.0\n',
-  'acme/mid/1': '//@version=6\nlibrary("Mid")\nimport acme/base/1 as b\nexport twice(float x) => b.inc(x) * 2.0\n',
+  'acme/mid/1':
+    '//@version=6\nlibrary("Mid")\nimport acme/base/1 as b\nexport twice(float x) => b.inc(x) * 2.0\n',
   'acme/unused/1': '//@version=6\nlibrary("Unused")\nexport nope(float x) => x\n',
 };
 const consumer = `//@version=6
@@ -74,7 +82,10 @@ describe('async/lazy library resolution — resolveLibraryClosure', () => {
 
   it('honors a seed registry (provider not called for seeded identities)', async () => {
     const fetched: string[] = [];
-    const provider = async (id: LibraryIdentity) => { fetched.push(id.canonical); return REMOTE[id.canonical]; };
+    const provider = async (id: LibraryIdentity) => {
+      fetched.push(id.canonical);
+      return REMOTE[id.canonical];
+    };
     const registry = await resolveLibraryClosure(consumer, provider, {
       seed: [{ key: 'acme/mid/1', source: REMOTE['acme/mid/1'] }],
     });
@@ -97,7 +108,9 @@ describe('async/lazy library resolution — compileAsync', () => {
 
   it('a provider returning undefined yields a missing-library CompileError', async () => {
     const provider = async () => undefined;
-    await expect(compileAsync(consumer, { resolveLibrary: provider })).rejects.toThrow(CompileError);
+    await expect(compileAsync(consumer, { resolveLibrary: provider })).rejects.toThrow(
+      CompileError,
+    );
   });
 
   it('without resolveLibrary it is exactly compile()', async () => {
@@ -122,7 +135,11 @@ describe('async/lazy library resolution — fsLibrarySource (Node, lazy)', () =>
   it('reads only the imported files on demand (lazy)', async () => {
     const base = fsLibrarySource(root);
     const read: string[] = [];
-    const counting = (id: LibraryIdentity) => { const s = base(id); if (s !== undefined) read.push(id.canonical); return s; };
+    const counting = (id: LibraryIdentity) => {
+      const s = base(id);
+      if (s !== undefined) read.push(id.canonical);
+      return s;
+    };
     const compiled = await compileAsync(consumer, { resolveLibrary: counting });
     expect(read.sort()).toEqual(['acme/base/1', 'acme/mid/1']); // unused not read
     await bothAgree(compiled);
@@ -130,6 +147,8 @@ describe('async/lazy library resolution — fsLibrarySource (Node, lazy)', () =>
 
   it('returns undefined for an unknown identity', () => {
     const provider = fsLibrarySource(root);
-    expect(provider({ publisher: 'no', lib: 'such', version: '9', canonical: 'no/such/9' })).toBeUndefined();
+    expect(
+      provider({ publisher: 'no', lib: 'such', version: '9', canonical: 'no/such/9' }),
+    ).toBeUndefined();
   });
 });

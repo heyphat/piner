@@ -31,7 +31,10 @@ const eqNaN = (a: unknown, b: unknown) =>
 const bars = makeBars(200);
 
 /** Compile a real script, run both backends, and assert byte-for-byte plot + drawing parity. */
-function runReal(file: string, opts: { bars?: Bar[]; inputs?: Record<string, unknown>; libraries?: LibraryRegistry } = {}) {
+function runReal(
+  file: string,
+  opts: { bars?: Bar[]; inputs?: Record<string, unknown>; libraries?: LibraryRegistry } = {},
+) {
   const data = opts.bars ?? bars;
   const src = readFileSync(join(HERE, 'pinescripts', file), 'utf8');
   const c = compile(src, opts.libraries ? { libraries: opts.libraries } : undefined);
@@ -45,15 +48,21 @@ function runReal(file: string, opts: { bars?: Bar[]; inputs?: Record<string, unk
       expect(jp.data.length).toBe(ipp.data.length);
       for (let i = 0; i < jp.data.length; i++) {
         if (!eqNaN(jp.data[i], ipp.data[i])) {
-          throw new Error(`backend divergence in plot ${id} ("${jp.title}") at bar ${i}: js=${jp.data[i]} interp=${ipp.data[i]}`);
+          throw new Error(
+            `backend divergence in plot ${id} ("${jp.title}") at bar ${i}: js=${jp.data[i]} interp=${ipp.data[i]}`,
+          );
         }
       }
     }
     if (JSON.stringify(js.drawings) !== JSON.stringify(ip.drawings)) {
-      throw new Error(`backend divergence in drawings (${js.drawings.length} js vs ${ip.drawings.length} interp)`);
+      throw new Error(
+        `backend divergence in drawings (${js.drawings.length} js vs ${ip.drawings.length} interp)`,
+      );
     }
     if (c.metadata.isStrategy && JSON.stringify(js.strategy) !== JSON.stringify(ip.strategy)) {
-      throw new Error(`backend divergence in the strategy report (${js.strategy.closedTrades.length} js vs ${ip.strategy.closedTrades.length} interp trades)`);
+      throw new Error(
+        `backend divergence in the strategy report (${js.strategy.closedTrades.length} js vs ${ip.strategy.closedTrades.length} interp trades)`,
+      );
     }
     return { c, js };
   });
@@ -86,9 +95,19 @@ describe('real published TradingView scripts', () => {
     // A strong uptrend leaves bullish FVGs unmitigated so the `box[]` store fills.
     const trend: Bar[] = Array.from({ length: 120 }, (_, i) => {
       const p = 100 + i * 2;
-      return { time: Date.UTC(2021, 0, 4) + i * 3_600_000, open: p, high: p + 3, low: p + 0.5, close: p + 2.5, volume: 1000 + (i % 11) * 120 };
+      return {
+        time: Date.UTC(2021, 0, 4) + i * 3_600_000,
+        open: p,
+        high: p + 3,
+        low: p + 0.5,
+        close: p + 2.5,
+        volume: 1000 + (i % 11) * 120,
+      };
     });
-    const { c, js } = await runReal('fvg.pine', { bars: trend, inputs: { 'Filter by ATR': false } });
+    const { c, js } = await runReal('fvg.pine', {
+      bars: trend,
+      inputs: { 'Filter by ATR': false },
+    });
     expect(c.metadata.title).toBe('Fair Value Gap (FVG)');
     const byType = drawCounts(js);
     expect(byType.box).toBeGreaterThan(0); // FVG zones
@@ -114,20 +133,23 @@ describe('real published TradingView scripts', () => {
     // the pitchfork median/levels + linefills from the last three pivots. Its output is
     // exclusively drawings — runReal asserts they are byte-for-byte identical across
     // backends.
-    const zigzag: LibraryRegistry = [{
-      key: 'TradingView/ZigZag/7',
-      source: readFileSync(join(HERE, 'pinescripts/libraries/tradingview-zigzag-7.pine'), 'utf8'),
-    }];
+    const zigzag: LibraryRegistry = [
+      {
+        key: 'TradingView/ZigZag/7',
+        source: readFileSync(join(HERE, 'pinescripts/libraries/tradingview-zigzag-7.pine'), 'utf8'),
+      },
+    ];
     const { c, js } = await runReal('auto-pitchfork.pine', { libraries: zigzag });
     expect(c.metadata.title).toBe('Auto Pitchfork');
     const byType = drawCounts(js);
-    expect(byType.line).toBeGreaterThan(0);     // median + tines
+    expect(byType.line).toBeGreaterThan(0); // median + tines
     expect(byType.linefill).toBeGreaterThan(0); // level bands
   });
 });
 
 function drawCounts(eng: Engine): Record<string, number> {
-  const pool = (eng as unknown as { ctx: { drawPool: { objects: Map<number, { type: string }> } } }).ctx.drawPool;
+  const pool = (eng as unknown as { ctx: { drawPool: { objects: Map<number, { type: string }> } } })
+    .ctx.drawPool;
   const byType: Record<string, number> = {};
   for (const o of pool.objects.values()) byType[o.type] = (byType[o.type] ?? 0) + 1;
   return byType;
@@ -151,9 +173,14 @@ describe('realistic strategy corpus (test/pinescripts/strategies)', () => {
       const close = px + move;
       const wickU = rnd() * vol * (shock !== 0 ? 0.15 : 0.9);
       const wickD = rnd() * vol * (shock !== 0 ? 0.15 : 0.9);
-      out.push({ time: start + i * 3_600_000, open, close,
-        high: Math.max(open, close) + wickU, low: Math.min(open, close) - wickD,
-        volume: 1000 + Math.floor(rnd() * 900) });
+      out.push({
+        time: start + i * 3_600_000,
+        open,
+        close,
+        high: Math.max(open, close) + wickU,
+        low: Math.min(open, close) - wickD,
+        volume: 1000 + Math.floor(rnd() * 900),
+      });
       px = close;
     }
     return out;

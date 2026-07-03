@@ -59,31 +59,77 @@ export const PositionNs = {
 };
 
 export const SizeNs = {
-  auto: 'auto', tiny: 'tiny', small: 'small', normal: 'normal', large: 'large', huge: 'huge',
+  auto: 'auto',
+  tiny: 'tiny',
+  small: 'small',
+  normal: 'normal',
+  large: 'large',
+  huge: 'huge',
 };
 
 export const XlocNs = { bar_index: 'bar_index', bar_time: 'bar_time' };
 export const ExtendNs = { none: 'none', right: 'right', left: 'left', both: 'both' };
 export const FormatNs = {
-  price: 'price', volume: 'volume', percent: 'percent', mintick: 'mintick', inherit: 'inherit',
+  price: 'price',
+  volume: 'volume',
+  percent: 'percent',
+  mintick: 'mintick',
+  inherit: 'inherit',
 };
 export const FontNs = { family_default: 'Default', family_monospace: 'Monospace' };
 export const TextNs = {
-  align_left: 'left', align_center: 'center', align_right: 'right',
-  align_top: 'top', align_bottom: 'bottom', wrap_auto: 'auto', wrap_none: 'none',
-  format_bold: 'bold', format_italic: 'italic', format_none: 'none',
+  align_left: 'left',
+  align_center: 'center',
+  align_right: 'right',
+  align_top: 'top',
+  align_bottom: 'bottom',
+  wrap_auto: 'auto',
+  wrap_none: 'none',
+  format_bold: 'bold',
+  format_italic: 'italic',
+  format_none: 'none',
 };
 export const CurrencyNs = {
-  NONE: '', USD: 'USD', EUR: 'EUR', GBP: 'GBP', JPY: 'JPY', CHF: 'CHF', AUD: 'AUD',
-  CAD: 'CAD', NZD: 'NZD', HKD: 'HKD', SGD: 'SGD', BTC: 'BTC', ETH: 'ETH', USDT: 'USDT',
-  EGP: 'EGP', INR: 'INR', KRW: 'KRW', MYR: 'MYR', NOK: 'NOK', PKR: 'PKR',
-  PLN: 'PLN', RUB: 'RUB', SEK: 'SEK', TRY: 'TRY', ZAR: 'ZAR',
+  NONE: '',
+  USD: 'USD',
+  EUR: 'EUR',
+  GBP: 'GBP',
+  JPY: 'JPY',
+  CHF: 'CHF',
+  AUD: 'AUD',
+  CAD: 'CAD',
+  NZD: 'NZD',
+  HKD: 'HKD',
+  SGD: 'SGD',
+  BTC: 'BTC',
+  ETH: 'ETH',
+  USDT: 'USDT',
+  EGP: 'EGP',
+  INR: 'INR',
+  KRW: 'KRW',
+  MYR: 'MYR',
+  NOK: 'NOK',
+  PKR: 'PKR',
+  PLN: 'PLN',
+  RUB: 'RUB',
+  SEK: 'SEK',
+  TRY: 'TRY',
+  ZAR: 'ZAR',
 };
 export const DayofweekNs = {
-  sunday: 1, monday: 2, tuesday: 3, wednesday: 4, thursday: 5, friday: 6, saturday: 7,
+  sunday: 1,
+  monday: 2,
+  tuesday: 3,
+  wednesday: 4,
+  thursday: 5,
+  friday: 6,
+  saturday: 7,
 };
 export const BarmergeNs = {
-  lookahead_on: true, lookahead_off: false, gaps_on: true, gaps_off: false,
+  lookahead_on: true,
+  lookahead_off: false,
+  gaps_on: true,
+  gaps_off: false,
 };
 export const SessionNs = { regular: 'regular', extended: 'extended' };
 export const ScaleNs = { right: 'right', left: 'left', none: 'none' };
@@ -99,7 +145,11 @@ export const DisplayNs = {
 };
 
 export const YlocNs = { price: 'price', abovebar: 'abovebar', belowbar: 'belowbar' };
-export const AdjustmentNs = { none: 'adjustment_none', splits: 'adjustment_splits', dividends: 'adjustment_dividends' };
+export const AdjustmentNs = {
+  none: 'adjustment_none',
+  splits: 'adjustment_splits',
+  dividends: 'adjustment_dividends',
+};
 export const BackAdjustmentNs = { on: 'on', off: 'off', inherit: 'inherit' };
 export const SettlementNs = { on: 'on', off: 'off', inherit: 'inherit' };
 // request.* enum selectors (data families are na-stubbed; the selectors still resolve).
@@ -107,5 +157,7 @@ export const EarningsNs = { actual: 'actual', estimate: 'estimate', standardized
 export const DividendsNs = { gross: 'gross', net: 'net' };
 export const SplitsNs = { denominator: 'denominator', numerator: 'numerator' };
 export const AlertNs = {
-  freq_all: 'all', freq_once_per_bar: 'once_per_bar', freq_once_per_bar_close: 'once_per_bar_close',
+  freq_all: 'all',
+  freq_once_per_bar: 'once_per_bar',
+  freq_once_per_bar_close: 'once_per_bar_close',
 };

@@ -5,10 +5,20 @@
 import { tokenize } from '../lexer/lexer.js';
 import { parse } from '../parser/parser.js';
 import { inlineUserFunctions } from '../sema/inline.js';
-import { analyze, CompileError, type Diagnostic, type InputDecl } from '../sema/analyze.js';
 import {
-  indexRegistry, LibraryResolver, mergeLibraries, checkExportConstraints,
-  classifyDeclaration, type CompileOptions,
+  analyze,
+  CompileError,
+  type Diagnostic,
+  type InputDecl,
+  type SecurityDependency,
+} from '../sema/analyze.js';
+import {
+  indexRegistry,
+  LibraryResolver,
+  mergeLibraries,
+  checkExportConstraints,
+  classifyDeclaration,
+  type CompileOptions,
 } from '../sema/library.js';
 import { AliasResolver } from '../sema/alias.js';
 import { resolveLibraryClosure, type AsyncLibrarySource } from '../sema/resolve.js';
@@ -30,6 +40,10 @@ export interface ScriptMetadata {
   varSlotCount: number;
   /** `input.*` settings schema (title/type/default/min/max/options), in order. */
   inputs: InputDecl[];
+  /** Best-effort static request.security[_lower_tf] dependencies (one per call site).
+   *  A host can read these after `compile()` (no run needed) to plan cross-symbol /
+   *  lower-TF data fetches; entries with `dynamic: true` need a run to resolve. */
+  securityDependencies: SecurityDependency[];
   /** Drawing-object caps from indicator()/strategy() (Pine defaults: lines/labels/boxes = 50,
    *  polylines = 100). Consumers FIFO-trim each drawing type to these limits. */
   maxLinesCount: number;
@@ -92,7 +106,8 @@ export function compile(source: string, options?: CompileOptions): CompiledScrip
 
     // Req 7: enforce export constraints across ALL libraries; report every violation.
     const constraintDiags: Diagnostic[] = [];
-    for (const lib of graph.libraries.values()) constraintDiags.push(...checkExportConstraints(lib));
+    for (const lib of graph.libraries.values())
+      constraintDiags.push(...checkExportConstraints(lib));
     throwIfErrors(constraintDiags);
 
     // Req 3/4: bind consumer aliases + rewrite `alias.*` references in place.
@@ -125,6 +140,7 @@ export function compile(source: string, options?: CompileOptions): CompiledScrip
       stateSiteCount: analysis.stateSiteCount,
       varSlotCount: analysis.varSlotCount,
       inputs: analysis.inputs,
+      securityDependencies: analysis.securityDependencies,
     },
     diagnostics,
   };
@@ -148,7 +164,10 @@ export interface CompileAsyncOptions extends CompileOptions {
  * library sources first (via {@link resolveLibraryClosure}) and then calls `compile()`. With
  * no `resolveLibrary`, it is exactly `compile(source, options)`.
  */
-export async function compileAsync(source: string, options: CompileAsyncOptions = {}): Promise<CompiledScript> {
+export async function compileAsync(
+  source: string,
+  options: CompileAsyncOptions = {},
+): Promise<CompiledScript> {
   const { resolveLibrary, ...rest } = options;
   if (!resolveLibrary) return compile(source, rest);
   const libraries = await resolveLibraryClosure(source, resolveLibrary, { seed: rest.libraries });
@@ -168,13 +187,28 @@ function throwIfErrors(diagnostics: Diagnostic[]): void {
   throw new CompileError(`Pine compile failed:\n${summary}`, diagnostics);
 }
 
-function extractMetadata(program: Program): Pick<ScriptMetadata, 'title' | 'overlay' | 'isStrategy' | 'strategy' | 'maxLinesCount' | 'maxLabelsCount' | 'maxBoxesCount' | 'maxPolylinesCount'> {
+function extractMetadata(
+  program: Program,
+): Pick<
+  ScriptMetadata,
+  | 'title'
+  | 'overlay'
+  | 'isStrategy'
+  | 'strategy'
+  | 'maxLinesCount'
+  | 'maxLabelsCount'
+  | 'maxBoxesCount'
+  | 'maxPolylinesCount'
+> {
   let title = '';
   let overlay = false;
   let isStrategy = false;
   let strategy: Partial<StrategySettings> | undefined;
   // Pine defaults for the drawing-object caps.
-  let maxLinesCount = 50, maxLabelsCount = 50, maxBoxesCount = 50, maxPolylinesCount = 100;
+  let maxLinesCount = 50,
+    maxLabelsCount = 50,
+    maxBoxesCount = 50,
+    maxPolylinesCount = 100;
   for (const s of program.body) {
     if (s.kind !== 'ExprStmt' || s.expr.kind !== 'Call') continue;
     const call = s.expr as Call;
@@ -197,7 +231,16 @@ function extractMetadata(program: Program): Pick<ScriptMetadata, 'title' | 'over
     if (isStrategy) strategy = extractStrategySettings(call);
     break;
   }
-  return { title, overlay, isStrategy, strategy, maxLinesCount, maxLabelsCount, maxBoxesCount, maxPolylinesCount };
+  return {
+    title,
+    overlay,
+    isStrategy,
+    strategy,
+    maxLinesCount,
+    maxLabelsCount,
+    maxBoxesCount,
+    maxPolylinesCount,
+  };
 }
 
 /** Parse the broker-relevant named args of a `strategy(...)` declaration. */
@@ -217,11 +260,16 @@ function extractStrategySettings(call: Call): Partial<StrategySettings> {
   const qtyValue = num('default_qty_value');
   if (qtyValue !== undefined) s.qtyValue = qtyValue;
   const qtyType = enumLeaf('default_qty_type');
-  if (qtyType === 'fixed' || qtyType === 'cash' || qtyType === 'percent_of_equity') s.qtyType = qtyType;
+  if (qtyType === 'fixed' || qtyType === 'cash' || qtyType === 'percent_of_equity')
+    s.qtyType = qtyType;
   const commissionValue = num('commission_value');
   if (commissionValue !== undefined) s.commissionValue = commissionValue;
   const commissionType = enumLeaf('commission_type');
-  if (commissionType === 'percent' || commissionType === 'cash_per_contract' || commissionType === 'cash_per_order') {
+  if (
+    commissionType === 'percent' ||
+    commissionType === 'cash_per_contract' ||
+    commissionType === 'cash_per_order'
+  ) {
     s.commissionType = commissionType;
   }
   const pyramiding = num('pyramiding');

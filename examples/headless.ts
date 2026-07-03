@@ -90,7 +90,9 @@ await engine.run({ symbol: 'BINANCE:BTCUSDT', timeframe: '1' });
 //    alerts:  { bar, message }[]
 // ─────────────────────────────────────────────────────────────────────────────
 const out = engine.outputs;
-console.log(`ran ${bars.length} bars → ${out.plots.size} plot series, ${out.markers.size} marker series, ${out.alerts.length} alerts\n`);
+console.log(
+  `ran ${bars.length} bars → ${out.plots.size} plot series, ${out.markers.size} marker series, ${out.alerts.length} alerts\n`,
+);
 
 for (const plot of out.plots.values()) {
   const last = plot.data[plot.data.length - 1];
@@ -100,7 +102,9 @@ for (const plot of out.plots.values()) {
 
 for (const marker of out.markers.values()) {
   const hits = marker.data.map((p, i) => (p ? i : -1)).filter((i) => i >= 0);
-  console.log(`marker "${marker.title}" (${marker.glyph}): fired on ${hits.length} bars → ${hits.slice(0, 8).join(', ')}${hits.length > 8 ? ' …' : ''}`);
+  console.log(
+    `marker "${marker.title}" (${marker.glyph}): fired on ${hits.length} bars → ${hits.slice(0, 8).join(', ')}${hits.length > 8 ? ' …' : ''}`,
+  );
 }
 
 console.log(`\nalerts (${out.alerts.length}):`);
@@ -117,4 +121,6 @@ engine.tick({ time: nextTime, open: 101, high: 101.5, low: 100.5, close: 101, vo
 engine.tick({ time: nextTime, open: 101, high: 103.0, low: 100.5, close: 102.8, volume: 90 }, true);
 const fast = out.plots.values().next().value!;
 const tail = fast.data[fast.data.length - 1];
-console.log(`\nafter 1 live bar: "${fast.title}" now has ${fast.data.length} points, last = ${tail.toFixed(2)}`);
+console.log(
+  `\nafter 1 live bar: "${fast.title}" now has ${fast.data.length} points, last = ${tail.toFixed(2)}`,
+);

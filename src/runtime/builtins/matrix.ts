@@ -23,8 +23,12 @@ export const MatrixNs = {
   set(m: Matrix, row: number, col: number, value: number): void {
     if (row >= 0 && row < m.rows && col >= 0 && col < m.columns) m.data[row][col] = value;
   },
-  rows(m: Matrix): number { return m.rows; },
-  columns(m: Matrix): number { return m.columns; },
+  rows(m: Matrix): number {
+    return m.rows;
+  },
+  columns(m: Matrix): number {
+    return m.columns;
+  },
   /** Insert a row at `rowIndex` (default = append) from `values` (default na-filled). */
   add_row(m: Matrix, rowIndex?: number, values?: number[]): void {
     const idx = rowIndex == null || Number.isNaN(rowIndex) ? m.rows : Math.trunc(rowIndex);
@@ -49,39 +53,55 @@ export const MatrixNs = {
   },
   transpose(m: Matrix): Matrix {
     const data: number[][] = [];
-    for (let c = 0; c < m.columns; c++) { data.push([]); for (let r = 0; r < m.rows; r++) data[c].push(m.data[r][c]); }
+    for (let c = 0; c < m.columns; c++) {
+      data.push([]);
+      for (let r = 0; r < m.rows; r++) data[c].push(m.data[r][c]);
+    }
     return { rows: m.columns, columns: m.rows, data };
   },
-  row(m: Matrix, i: number): number[] { return i >= 0 && i < m.rows ? m.data[i].slice() : []; },
-  col(m: Matrix, j: number): number[] { return j >= 0 && j < m.columns ? m.data.map((r) => r[j]) : []; },
+  row(m: Matrix, i: number): number[] {
+    return i >= 0 && i < m.rows ? m.data[i].slice() : [];
+  },
+  col(m: Matrix, j: number): number[] {
+    return j >= 0 && j < m.columns ? m.data.map((r) => r[j]) : [];
+  },
   /** Insert a column at `colIndex` (default = append) from `values` (default na-filled). */
   add_col(m: Matrix, colIndex?: number, values?: number[]): void {
     const idx = colIndex == null || Number.isNaN(colIndex) ? m.columns : Math.trunc(colIndex);
-    if (m.rows === 0 && values) { // empty matrix adopts the vector's shape (mirrors add_row)
+    if (m.rows === 0 && values) {
+      // empty matrix adopts the vector's shape (mirrors add_row)
       for (const v of values) m.data.push([v]);
       m.rows = values.length;
       m.columns = 1;
       return;
     }
-    for (let r = 0; r < m.rows; r++) m.data[r].splice(idx, 0, values ? values[r] ?? NaN : NaN);
+    for (let r = 0; r < m.rows; r++) m.data[r].splice(idx, 0, values ? (values[r] ?? NaN) : NaN);
     m.columns++;
   },
   /** Average of all non-na elements; na (NaN) when the matrix is empty. */
   avg(m: Matrix): number {
-    let s = 0, n = 0;
-    for (const row of m.data) for (const v of row) if (!Number.isNaN(v)) { s += v; n++; }
+    let s = 0,
+      n = 0;
+    for (const row of m.data)
+      for (const v of row)
+        if (!Number.isNaN(v)) {
+          s += v;
+          n++;
+        }
     return n ? s / n : NaN;
   },
   /** Largest non-na element; na when empty. */
   max(m: Matrix): number {
     let best = NaN;
-    for (const row of m.data) for (const v of row) if (!Number.isNaN(v) && (Number.isNaN(best) || v > best)) best = v;
+    for (const row of m.data)
+      for (const v of row) if (!Number.isNaN(v) && (Number.isNaN(best) || v > best)) best = v;
     return best;
   },
   /** Smallest non-na element; na when empty. */
   min(m: Matrix): number {
     let best = NaN;
-    for (const row of m.data) for (const v of row) if (!Number.isNaN(v) && (Number.isNaN(best) || v < best)) best = v;
+    for (const row of m.data)
+      for (const v of row) if (!Number.isNaN(v) && (Number.isNaN(best) || v < best)) best = v;
     return best;
   },
   /** Median of all non-na elements (mean of the two middle values for an even count). */
@@ -95,24 +115,41 @@ export const MatrixNs = {
   mode(m: Matrix): number {
     const counts = new Map<number, number>();
     for (const v of flatten(m)) counts.set(v, (counts.get(v) ?? 0) + 1);
-    let best = NaN, bestN = 0;
-    for (const [val, c] of counts) if (c > bestN || (c === bestN && val < best)) { bestN = c; best = val; }
+    let best = NaN,
+      bestN = 0;
+    for (const [val, c] of counts)
+      if (c > bestN || (c === bestN && val < best)) {
+        bestN = c;
+        best = val;
+      }
     return best;
   },
   /**
    * Fills the rectangular region [from_row, to_row) x [from_column, to_column)
    * with `value`. Omitted to_row/to_column default to the matrix dimensions.
    */
-  fill(m: Matrix, value: number, from_row = 0, to_row = m.rows, from_column = 0, to_column = m.columns): void {
-    const r0 = Math.max(0, from_row), r1 = Math.min(m.rows, to_row);
-    const c0 = Math.max(0, from_column), c1 = Math.min(m.columns, to_column);
+  fill(
+    m: Matrix,
+    value: number,
+    from_row = 0,
+    to_row = m.rows,
+    from_column = 0,
+    to_column = m.columns,
+  ): void {
+    const r0 = Math.max(0, from_row),
+      r1 = Math.min(m.rows, to_row);
+    const c0 = Math.max(0, from_column),
+      c1 = Math.min(m.columns, to_column);
     for (let r = r0; r < r1; r++) for (let c = c0; c < c1; c++) m.data[r][c] = value;
   },
   /** Appends the rows of m2 to m1 in place (both must have the same column count);
    *  returns m1. A column-count mismatch is a no-op (Pine errors; soft-fail). */
   concat(m1: Matrix, m2: Matrix): Matrix {
     if (m1.columns !== m2.columns) return m1;
-    for (const row of m2.data) { m1.data.push(row.slice()); m1.rows++; }
+    for (const row of m2.data) {
+      m1.data.push(row.slice());
+      m1.rows++;
+    }
     return m1;
   },
   /** Removes the row at `row` in place and returns its values as an array. */
@@ -177,8 +214,10 @@ export const MatrixNs = {
     from_column = 0,
     to_column = m.columns,
   ): Matrix {
-    const r0 = Math.max(0, from_row), r1 = Math.min(m.rows, to_row);
-    const c0 = Math.max(0, from_column), c1 = Math.min(m.columns, to_column);
+    const r0 = Math.max(0, from_row),
+      r1 = Math.min(m.rows, to_row);
+    const c0 = Math.max(0, from_column),
+      c1 = Math.min(m.columns, to_column);
     const data: number[][] = [];
     for (let r = r0; r < r1; r++) data.push(m.data[r].slice(c0, c1));
     return { rows: Math.max(0, r1 - r0), columns: Math.max(0, c1 - c0), data };
@@ -191,7 +230,11 @@ export const MatrixNs = {
    */
   mult(m1: Matrix, other: Matrix | number | number[]): Matrix | number[] | typeof NA {
     if (typeof other === 'number') {
-      return { rows: m1.rows, columns: m1.columns, data: m1.data.map((r) => r.map((v) => v * other)) };
+      return {
+        rows: m1.rows,
+        columns: m1.columns,
+        data: m1.data.map((r) => r.map((v) => v * other)),
+      };
     }
     const m2: Matrix = Array.isArray(other)
       ? { rows: other.length, columns: 1, data: other.map((v) => [v]) }
@@ -207,7 +250,9 @@ export const MatrixNs = {
       }
       data.push(row);
     }
-    return Array.isArray(other) ? data.map((r) => r[0]) : { rows: m1.rows, columns: m2.columns, data };
+    return Array.isArray(other)
+      ? data.map((r) => r[0])
+      : { rows: m1.rows, columns: m2.columns, data };
   },
   /** Determinant of a square matrix via Gaussian elimination with partial pivoting; na if not square. */
   det(m: Matrix): number {
@@ -230,12 +275,14 @@ export const MatrixNs = {
   /** Rank computed by Gaussian elimination with partial pivoting. */
   rank(m: Matrix): number {
     const a = m.data.map((r) => r.slice());
-    const rows = m.rows, cols = m.columns;
+    const rows = m.rows,
+      cols = m.columns;
     let rank = 0;
     const eps = 1e-12;
     for (let col = 0; col < cols && rank < rows; col++) {
       let pivot = rank;
-      for (let r = rank + 1; r < rows; r++) if (Math.abs(a[r][col]) > Math.abs(a[pivot][col])) pivot = r;
+      for (let r = rank + 1; r < rows; r++)
+        if (Math.abs(a[r][col]) > Math.abs(a[pivot][col])) pivot = r;
       if (Math.abs(a[pivot][col]) < eps) continue;
       [a[rank], a[pivot]] = [a[pivot], a[rank]];
       for (let r = 0; r < rows; r++) {
@@ -270,7 +317,8 @@ export const MatrixNs = {
   sort(m: Matrix, column = 0, order = 'ascending'): void {
     const sign = order === 'descending' ? -1 : 1;
     m.data.sort((a, b) => {
-      const x = a[column], y = b[column];
+      const x = a[column],
+        y = b[column];
       if (Number.isNaN(x)) return Number.isNaN(y) ? 0 : 1;
       if (Number.isNaN(y)) return -1;
       return (x - y) * sign;
@@ -320,7 +368,8 @@ export const MatrixNs = {
   pinv(m: Matrix): Matrix | typeof NA {
     if (m.rows === 0 || m.columns === 0) return NA;
     const A = m.data.map((r) => r.slice());
-    const rows = m.rows, cols = m.columns;
+    const rows = m.rows,
+      cols = m.columns;
     // Square: try the regular inverse first (matches the manual's stated behavior).
     if (rows === cols) {
       const inverse = invert(A.map((r) => r.slice()));
@@ -361,8 +410,9 @@ export const MatrixNs = {
     if (m.rows === 0 || m.rows !== m.columns) return false;
     for (let r = 0; r < m.rows; r++)
       for (let c = 0; c < m.columns; c++) {
-        if (r === c) { if (m.data[r][c] !== 1) return false; }
-        else if (m.data[r][c] !== 0) return false;
+        if (r === c) {
+          if (m.data[r][c] !== 1) return false;
+        } else if (m.data[r][c] !== 0) return false;
       }
     return true;
   },
@@ -370,8 +420,7 @@ export const MatrixNs = {
   is_diagonal(m: Matrix): boolean {
     if (m.rows === 0 || m.rows !== m.columns) return false;
     for (let r = 0; r < m.rows; r++)
-      for (let c = 0; c < m.columns; c++)
-        if (r !== c && m.data[r][c] !== 0) return false;
+      for (let c = 0; c < m.columns; c++) if (r !== c && m.data[r][c] !== 0) return false;
     return true;
   },
   /** True if the matrix is anti-diagonal (square, every element off the anti-diagonal r+c===n-1 is 0); false if not square/empty. */
@@ -379,24 +428,21 @@ export const MatrixNs = {
     if (m.rows === 0 || m.rows !== m.columns) return false;
     const last = m.rows - 1;
     for (let r = 0; r < m.rows; r++)
-      for (let c = 0; c < m.columns; c++)
-        if (r + c !== last && m.data[r][c] !== 0) return false;
+      for (let c = 0; c < m.columns; c++) if (r + c !== last && m.data[r][c] !== 0) return false;
     return true;
   },
   /** True if the matrix is symmetric (square and a[r][c] === a[c][r]); false if not square/empty. */
   is_symmetric(m: Matrix): boolean {
     if (m.rows === 0 || m.rows !== m.columns) return false;
     for (let r = 0; r < m.rows; r++)
-      for (let c = 0; c < r; c++)
-        if (m.data[r][c] !== m.data[c][r]) return false;
+      for (let c = 0; c < r; c++) if (m.data[r][c] !== m.data[c][r]) return false;
     return true;
   },
   /** True if the matrix is antisymmetric (square and aᵀ === -a, so a[c][r] === -a[r][c], diagonal 0); false if not square/empty. */
   is_antisymmetric(m: Matrix): boolean {
     if (m.rows === 0 || m.rows !== m.columns) return false;
     for (let r = 0; r < m.rows; r++)
-      for (let c = 0; c < m.columns; c++)
-        if (m.data[c][r] !== -m.data[r][c]) return false;
+      for (let c = 0; c < m.columns; c++) if (m.data[c][r] !== -m.data[r][c]) return false;
     return true;
   },
   /** True if every element is 0 or 1; false for an empty matrix. */
@@ -408,7 +454,8 @@ export const MatrixNs = {
   /** True if the matrix is triangular (square and zeros below OR above the main diagonal); false if not square/empty. */
   is_triangular(m: Matrix): boolean {
     if (m.rows === 0 || m.rows !== m.columns) return false;
-    let lower = true, upper = true; // lower-triangular keeps zeros above; upper-triangular keeps zeros below.
+    let lower = true,
+      upper = true; // lower-triangular keeps zeros above; upper-triangular keeps zeros below.
     for (let r = 0; r < m.rows; r++)
       for (let c = 0; c < m.columns; c++) {
         if (r > c && m.data[r][c] !== 0) upper = false; // entry below the diagonal
@@ -425,14 +472,18 @@ export const MatrixNs = {
     if (m.rows === 0) return false;
     for (const row of m.data) {
       let s = 0;
-      for (const v of row) { if (v < 0) return false; s += v; }
+      for (const v of row) {
+        if (v < 0) return false;
+        s += v;
+      }
       if (Math.abs(s - 1) > 1e-10) return false;
     }
     return true;
   },
   /** Kronecker product of m1 and m2. */
   kron(m1: Matrix, m2: Matrix): Matrix {
-    const rows = m1.rows * m2.rows, columns = m1.columns * m2.columns;
+    const rows = m1.rows * m2.rows,
+      columns = m1.columns * m2.columns;
     const data: number[][] = [];
     for (let r = 0; r < rows; r++) data.push(new Array(columns).fill(NaN));
     for (let r1 = 0; r1 < m1.rows; r1++)
@@ -455,7 +506,11 @@ function flatten(m: Matrix): number[] {
 /** n x n identity matrix. */
 function identity(n: number): Matrix {
   const data: number[][] = [];
-  for (let r = 0; r < n; r++) { const row = new Array(n).fill(0); row[r] = 1; data.push(row); }
+  for (let r = 0; r < n; r++) {
+    const row = new Array(n).fill(0);
+    row[r] = 1;
+    data.push(row);
+  }
   return { rows: n, columns: n, data };
 }
 
@@ -468,7 +523,10 @@ function determinant(a: number[][]): number {
     let pivot = col;
     for (let r = col + 1; r < n; r++) if (Math.abs(a[r][col]) > Math.abs(a[pivot][col])) pivot = r;
     if (Math.abs(a[pivot][col]) < eps) return 0;
-    if (pivot !== col) { [a[col], a[pivot]] = [a[pivot], a[col]]; det = -det; }
+    if (pivot !== col) {
+      [a[col], a[pivot]] = [a[pivot], a[col]];
+      det = -det;
+    }
     det *= a[col][col];
     for (let r = col + 1; r < n; r++) {
       const f = a[r][col] / a[col][col];
@@ -480,19 +538,29 @@ function determinant(a: number[][]): number {
 
 /** Transpose of a raw 2D array. */
 function transposeData(a: number[][]): number[][] {
-  const rows = a.length, cols = rows ? a[0].length : 0;
+  const rows = a.length,
+    cols = rows ? a[0].length : 0;
   const out: number[][] = [];
-  for (let c = 0; c < cols; c++) { const row: number[] = []; for (let r = 0; r < rows; r++) row.push(a[r][c]); out.push(row); }
+  for (let c = 0; c < cols; c++) {
+    const row: number[] = [];
+    for (let r = 0; r < rows; r++) row.push(a[r][c]);
+    out.push(row);
+  }
   return out;
 }
 
 /** Matrix product of two raw 2D arrays (a: p×q, b: q×s → p×s). */
 function multData(a: number[][], b: number[][]): number[][] {
-  const p = a.length, q = a.length ? a[0].length : 0, s = b.length ? b[0].length : 0;
+  const p = a.length,
+    q = a.length ? a[0].length : 0,
+    s = b.length ? b[0].length : 0;
   const out: number[][] = [];
   for (let i = 0; i < p; i++) {
     const row = new Array(s).fill(0);
-    for (let k = 0; k < q; k++) { const aik = a[i][k]; if (aik !== 0) for (let j = 0; j < s; j++) row[j] += aik * b[k][j]; }
+    for (let k = 0; k < q; k++) {
+      const aik = a[i][k];
+      if (aik !== 0) for (let j = 0; j < s; j++) row[j] += aik * b[k][j];
+    }
     out.push(row);
   }
   return out;
@@ -517,12 +585,19 @@ function eigenRealValues(a: number[][]): number[] {
   let iter = 0;
   const maxIter = 1000 * n;
   while (hi >= 0) {
-    if (hi === 0) { out.push(a[0][0]); hi = -1; break; }
+    if (hi === 0) {
+      out.push(a[0][0]);
+      hi = -1;
+      break;
+    }
     // Find a small sub-diagonal element to deflate at.
     let lo = hi;
     while (lo > 0) {
       const s = Math.abs(a[lo - 1][lo - 1]) + Math.abs(a[lo][lo]);
-      if (Math.abs(a[lo][lo - 1]) <= eps * (s === 0 ? 1 : s)) { a[lo][lo - 1] = 0; break; }
+      if (Math.abs(a[lo][lo - 1]) <= eps * (s === 0 ? 1 : s)) {
+        a[lo][lo - 1] = 0;
+        break;
+      }
       lo--;
     }
     if (lo === hi) {
@@ -565,7 +640,10 @@ function eig2x2(a: number, b: number, c: number, d: number): number[] {
   const tr = a + d;
   const det = a * d - b * c;
   const disc = tr * tr - 4 * det;
-  if (disc < 0) { const re = tr / 2; return [re, re]; }
+  if (disc < 0) {
+    const re = tr / 2;
+    return [re, re];
+  }
   const s = Math.sqrt(disc);
   return [(tr + s) / 2, (tr - s) / 2];
 }
@@ -579,7 +657,10 @@ function hessenberg(a: number[][]): void {
     if (scale === 0) continue;
     let h = 0;
     const v = new Array(n).fill(0);
-    for (let i = k + 1; i < n; i++) { v[i] = a[i][k] / scale; h += v[i] * v[i]; }
+    for (let i = k + 1; i < n; i++) {
+      v[i] = a[i][k] / scale;
+      h += v[i] * v[i];
+    }
     let g = Math.sqrt(h);
     if (v[k + 1] > 0) g = -g;
     h -= v[k + 1] * g;
@@ -612,22 +693,27 @@ function qrStep(a: number[][], lo: number, hi: number, mu: number): void {
   const sn: number[] = [];
   // QR via Givens to annihilate sub-diagonal entries.
   for (let i = lo; i < hi; i++) {
-    const x = a[i][i], y = a[i + 1][i];
+    const x = a[i][i],
+      y = a[i + 1][i];
     const r = Math.hypot(x, y);
     const c = r === 0 ? 1 : x / r;
     const s = r === 0 ? 0 : y / r;
-    cs[i] = c; sn[i] = s;
+    cs[i] = c;
+    sn[i] = s;
     for (let j = i; j < n; j++) {
-      const t1 = a[i][j], t2 = a[i + 1][j];
+      const t1 = a[i][j],
+        t2 = a[i + 1][j];
       a[i][j] = c * t1 + s * t2;
       a[i + 1][j] = -s * t1 + c * t2;
     }
   }
   // Form RQ by applying the rotations from the right.
   for (let i = lo; i < hi; i++) {
-    const c = cs[i], s = sn[i];
+    const c = cs[i],
+      s = sn[i];
     for (let j = 0; j <= Math.min(i + 2, hi); j++) {
-      const t1 = a[j][i], t2 = a[j][i + 1];
+      const t1 = a[j][i],
+        t2 = a[j][i + 1];
       a[j][i] = c * t1 + s * t2;
       a[j][i + 1] = -s * t1 + c * t2;
     }
@@ -654,12 +740,17 @@ function eigenvectorFor(a: number[][], lambda: number): number[] {
     v = new Array(n).fill(0).map((_, i) => 1 + i * 0.0001);
     for (let it = 0; it < 50; it++) {
       const w = new Array(n).fill(0);
-      for (let i = 0; i < n; i++) { let s = 0; for (let j = 0; j < n; j++) s += inv[i][j] * v[j]; w[i] = s; }
+      for (let i = 0; i < n; i++) {
+        let s = 0;
+        for (let j = 0; j < n; j++) s += inv[i][j] * v[j];
+        w[i] = s;
+      }
       const nrm = Math.hypot(...w);
       if (nrm === 0) break;
       for (let i = 0; i < n; i++) w[i] /= nrm;
       // Converged when direction stabilizes.
-      let dot = 0; for (let i = 0; i < n; i++) dot += w[i] * v[i];
+      let dot = 0;
+      for (let i = 0; i < n; i++) dot += w[i] * v[i];
       v = w;
       if (Math.abs(Math.abs(dot) - 1) < 1e-14) break;
     }
@@ -670,7 +761,10 @@ function eigenvectorFor(a: number[][], lambda: number): number[] {
   for (let i = 0; i < n; i++) v[i] /= nrm;
   // Fix sign: first component with |x|>tol positive.
   for (let i = 0; i < n; i++) {
-    if (Math.abs(v[i]) > 1e-9) { if (v[i] < 0) for (let k = 0; k < n; k++) v[k] = -v[k]; break; }
+    if (Math.abs(v[i]) > 1e-9) {
+      if (v[i] < 0) for (let k = 0; k < n; k++) v[k] = -v[k];
+      break;
+    }
   }
   return v;
 }
@@ -708,9 +802,16 @@ function nullSpaceVector(m: number[][]): number[] {
   }
   // Pick a free column for the null vector.
   let free = -1;
-  for (let col = 0; col < n; col++) if (where[col] === -1) { free = col; break; }
+  for (let col = 0; col < n; col++)
+    if (where[col] === -1) {
+      free = col;
+      break;
+    }
   const v = new Array(n).fill(0);
-  if (free === -1) { v[n - 1] = 1; return v; }
+  if (free === -1) {
+    v[n - 1] = 1;
+    return v;
+  }
   v[free] = 1;
   for (let col = 0; col < n; col++) {
     const r = where[col];
@@ -725,35 +826,61 @@ function nullSpaceVector(m: number[][]): number[] {
  * are obtained directly), then forms A⁺ = V Σ⁺ Uᵀ. Returns a cols×rows raw array.
  */
 function svdPseudoInverse(A: number[][]): number[][] {
-  const m = A.length, n = A[0].length;
+  const m = A.length,
+    n = A[0].length;
   // Work on whichever orientation keeps the Jacobi matrix small (n columns).
   // One-sided Jacobi: orthogonalize columns of U = A; accumulate V.
   const U = A.map((r) => r.slice()); // m×n
   const V: number[][] = [];
-  for (let i = 0; i < n; i++) { const row = new Array(n).fill(0); row[i] = 1; V.push(row); }
+  for (let i = 0; i < n; i++) {
+    const row = new Array(n).fill(0);
+    row[i] = 1;
+    V.push(row);
+  }
   const eps = 1e-15;
   for (let sweep = 0; sweep < 60; sweep++) {
     let off = 0;
     for (let p = 0; p < n - 1; p++) {
       for (let q = p + 1; q < n; q++) {
-        let alpha = 0, beta = 0, gamma = 0;
-        for (let i = 0; i < m; i++) { alpha += U[i][p] * U[i][p]; beta += U[i][q] * U[i][q]; gamma += U[i][p] * U[i][q]; }
+        let alpha = 0,
+          beta = 0,
+          gamma = 0;
+        for (let i = 0; i < m; i++) {
+          alpha += U[i][p] * U[i][p];
+          beta += U[i][q] * U[i][q];
+          gamma += U[i][p] * U[i][q];
+        }
         off += gamma * gamma;
         if (Math.abs(gamma) < eps) continue;
         const zeta = (beta - alpha) / (2 * gamma);
         const t = Math.sign(zeta || 1) / (Math.abs(zeta) + Math.sqrt(1 + zeta * zeta));
         const c = 1 / Math.sqrt(1 + t * t);
         const s = c * t;
-        for (let i = 0; i < m; i++) { const up = U[i][p], uq = U[i][q]; U[i][p] = c * up - s * uq; U[i][q] = s * up + c * uq; }
-        for (let i = 0; i < n; i++) { const vp = V[i][p], vq = V[i][q]; V[i][p] = c * vp - s * vq; V[i][q] = s * vp + c * vq; }
+        for (let i = 0; i < m; i++) {
+          const up = U[i][p],
+            uq = U[i][q];
+          U[i][p] = c * up - s * uq;
+          U[i][q] = s * up + c * uq;
+        }
+        for (let i = 0; i < n; i++) {
+          const vp = V[i][p],
+            vq = V[i][q];
+          V[i][p] = c * vp - s * vq;
+          V[i][q] = s * vp + c * vq;
+        }
       }
     }
     if (off < 1e-30) break;
   }
   // Singular values = column norms of U; normalize columns to get left vectors.
   const sigma = new Array(n).fill(0);
-  for (let j = 0; j < n; j++) { let s = 0; for (let i = 0; i < m; i++) s += U[i][j] * U[i][j]; sigma[j] = Math.sqrt(s); }
-  let maxSig = 0; for (const s of sigma) maxSig = Math.max(maxSig, s);
+  for (let j = 0; j < n; j++) {
+    let s = 0;
+    for (let i = 0; i < m; i++) s += U[i][j] * U[i][j];
+    sigma[j] = Math.sqrt(s);
+  }
+  let maxSig = 0;
+  for (const s of sigma) maxSig = Math.max(maxSig, s);
   const tol = maxSig * Math.max(m, n) * 1e-15;
   // A⁺ = V Σ⁺ Uᵀ_normalized.  Uhat[:,j] = U[:,j]/sigma[j].
   const out: number[][] = [];
@@ -779,13 +906,22 @@ function invert(a: number[][]): number[][] | null {
     let pivot = col;
     for (let r = col + 1; r < n; r++) if (Math.abs(a[r][col]) > Math.abs(a[pivot][col])) pivot = r;
     if (Math.abs(a[pivot][col]) < eps) return null;
-    if (pivot !== col) { [a[col], a[pivot]] = [a[pivot], a[col]]; [inv[col], inv[pivot]] = [inv[pivot], inv[col]]; }
+    if (pivot !== col) {
+      [a[col], a[pivot]] = [a[pivot], a[col]];
+      [inv[col], inv[pivot]] = [inv[pivot], inv[col]];
+    }
     const d = a[col][col];
-    for (let c = 0; c < n; c++) { a[col][c] /= d; inv[col][c] /= d; }
+    for (let c = 0; c < n; c++) {
+      a[col][c] /= d;
+      inv[col][c] /= d;
+    }
     for (let r = 0; r < n; r++) {
       if (r === col) continue;
       const f = a[r][col];
-      for (let c = 0; c < n; c++) { a[r][c] -= f * a[col][c]; inv[r][c] -= f * inv[col][c]; }
+      for (let c = 0; c < n; c++) {
+        a[r][c] -= f * a[col][c];
+        inv[r][c] -= f * inv[col][c];
+      }
     }
   }
   return inv;

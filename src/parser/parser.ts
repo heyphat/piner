@@ -10,9 +10,27 @@ import { Qualifier, type PineType } from '../sema/types.js';
 // Type-only (erased at runtime) — no runtime import cycle with library.ts.
 import type { LibraryIdentity } from '../sema/library.js';
 import type {
-  Program, Stmt, Expr, VarDecl, TupleDecl, ExprStmt, FuncDef, TypeDef,
-  ImportStmt, IfNode, SwitchNode, ForNode, ForInNode, WhileNode, Param, TypeField,
-  Arg, VarMode, AssignOp, BinaryOp, Loc,
+  Program,
+  Stmt,
+  Expr,
+  VarDecl,
+  TupleDecl,
+  ExprStmt,
+  FuncDef,
+  TypeDef,
+  ImportStmt,
+  IfNode,
+  SwitchNode,
+  ForNode,
+  ForInNode,
+  WhileNode,
+  Param,
+  TypeField,
+  Arg,
+  VarMode,
+  AssignOp,
+  BinaryOp,
+  Loc,
 } from './ast.js';
 
 export class ParseError extends Error {
@@ -36,24 +54,46 @@ export class ParseError extends Error {
 }
 
 const FUND_TYPES: Record<string, PineType> = {
-  int: { kind: 'int' }, float: { kind: 'float' }, bool: { kind: 'bool' },
-  color: { kind: 'color' }, string: { kind: 'string' },
+  int: { kind: 'int' },
+  float: { kind: 'float' },
+  bool: { kind: 'bool' },
+  color: { kind: 'color' },
+  string: { kind: 'string' },
 };
 const SPECIAL_TYPE_NAMES = new Set(['line', 'label', 'box', 'table', 'polyline', 'linefill']);
 const QUALIFIERS: Record<string, Qualifier> = {
-  const: Qualifier.Const, simple: Qualifier.Simple, series: Qualifier.Series,
+  const: Qualifier.Const,
+  simple: Qualifier.Simple,
+  series: Qualifier.Series,
 };
 // Structural keywords that Pine also accepts as plain identifiers in NAME positions —
 // parameter names, named-argument names, fields. Most common: `type` (v3/v4 `input(..., type=…)`
 // and params named `type`). Control-flow keywords (if/for/while/…) are intentionally excluded.
-const CONTEXTUAL_NAME_KW = new Set(['type', 'method', 'enum', 'import', 'export', 'series', 'simple', 'const']);
+const CONTEXTUAL_NAME_KW = new Set([
+  'type',
+  'method',
+  'enum',
+  'import',
+  'export',
+  'series',
+  'simple',
+  'const',
+]);
 // binary operator precedence (higher binds tighter); see §3.1
 const BIN_PREC: Record<string, number> = {
-  'or': 1, 'and': 2,
-  '==': 3, '!=': 3,
-  '<': 4, '<=': 4, '>': 4, '>=': 4,
-  '+': 5, '-': 5,
-  '*': 6, '/': 6, '%': 6,
+  or: 1,
+  and: 2,
+  '==': 3,
+  '!=': 3,
+  '<': 4,
+  '<=': 4,
+  '>': 4,
+  '>=': 4,
+  '+': 5,
+  '-': 5,
+  '*': 6,
+  '/': 6,
+  '%': 6,
 };
 
 export function parse(lex: LexResult): Program {
@@ -62,28 +102,48 @@ export function parse(lex: LexResult): Program {
 
 class Parser {
   private pos = 0;
-  constructor(private toks: Token[], private version: number) {}
+  constructor(
+    private toks: Token[],
+    private version: number,
+  ) {}
 
   // ── cursor helpers ────────────────────────────────────────
-  private peek(o = 0): Token { return this.toks[Math.min(this.pos + o, this.toks.length - 1)]; }
+  private peek(o = 0): Token {
+    return this.toks[Math.min(this.pos + o, this.toks.length - 1)];
+  }
   private at(kind: TokenKind, value?: string): boolean {
     const t = this.peek();
     return t.kind === kind && (value === undefined || t.value === value);
   }
-  private atKw(value: string): boolean { return this.at(TokenKind.Keyword, value); }
-  private next(): Token { return this.toks[this.pos++]; }
-  private loc(): Loc { const t = this.peek(); return { line: t.line, col: t.col }; }
-  private err(msg: string): never { const t = this.peek(); throw new ParseError(`${msg} (got ${t.kind} ${JSON.stringify(t.value)})`, t.line, t.col); }
+  private atKw(value: string): boolean {
+    return this.at(TokenKind.Keyword, value);
+  }
+  private next(): Token {
+    return this.toks[this.pos++];
+  }
+  private loc(): Loc {
+    const t = this.peek();
+    return { line: t.line, col: t.col };
+  }
+  private err(msg: string): never {
+    const t = this.peek();
+    throw new ParseError(`${msg} (got ${t.kind} ${JSON.stringify(t.value)})`, t.line, t.col);
+  }
 
   private expect(kind: TokenKind, value?: string): Token {
     if (!this.at(kind, value)) this.err(`expected ${value ?? kind}`);
     return this.next();
   }
   private eat(kind: TokenKind, value?: string): boolean {
-    if (this.at(kind, value)) { this.next(); return true; }
+    if (this.at(kind, value)) {
+      this.next();
+      return true;
+    }
     return false;
   }
-  private skipNewlines(): void { while (this.at(TokenKind.Newline)) this.next(); }
+  private skipNewlines(): void {
+    while (this.at(TokenKind.Newline)) this.next();
+  }
 
   // ── program ───────────────────────────────────────────────
   parseProgram(): Program {
@@ -133,23 +193,53 @@ class Parser {
     if (this.at(TokenKind.Keyword)) {
       const kw = this.peek().value;
       switch (kw) {
-        case 'import': return this.parseImport();
+        case 'import':
+          return this.parseImport();
         // `type Foo` / `enum Bar` / `method m(…)` introduce definitions (a NAME
         // follows); the same words used as a value (`type == "x"`, `method := …`)
         // lead an expression statement — fall through to the expression-led path.
-        case 'type': if (this.isNameToken(1)) return this.parseTypeDef(false); break;
-        case 'enum': if (this.isNameToken(1)) return this.parseEnumDef(false); break;
-        case 'method': if (this.isNameToken(1)) { this.next(); const fd = this.parseFuncDef(false); fd.isMethod = true; return fd; } break;
-        case 'export': return this.parseExport();
-        case 'if': return this.parseIf();
-        case 'for': return this.parseFor();
-        case 'while': return this.parseWhile();
-        case 'switch': return this.parseSwitch();
-        case 'break': this.next(); return { kind: 'Break', loc };
-        case 'continue': this.next(); return { kind: 'Continue', loc };
-        case 'var': case 'varip': return this.parseVarDecl();
-        case 'const': case 'simple': case 'series': return this.parseVarDecl();
-        case 'int': case 'float': case 'bool': case 'color': case 'string': {
+        case 'type':
+          if (this.isNameToken(1)) return this.parseTypeDef(false);
+          break;
+        case 'enum':
+          if (this.isNameToken(1)) return this.parseEnumDef(false);
+          break;
+        case 'method':
+          if (this.isNameToken(1)) {
+            this.next();
+            const fd = this.parseFuncDef(false);
+            fd.isMethod = true;
+            return fd;
+          }
+          break;
+        case 'export':
+          return this.parseExport();
+        case 'if':
+          return this.parseIf();
+        case 'for':
+          return this.parseFor();
+        case 'while':
+          return this.parseWhile();
+        case 'switch':
+          return this.parseSwitch();
+        case 'break':
+          this.next();
+          return { kind: 'Break', loc };
+        case 'continue':
+          this.next();
+          return { kind: 'Continue', loc };
+        case 'var':
+        case 'varip':
+          return this.parseVarDecl();
+        case 'const':
+        case 'simple':
+        case 'series':
+          return this.parseVarDecl();
+        case 'int':
+        case 'float':
+        case 'bool':
+        case 'color':
+        case 'string': {
           // A fundamental-type keyword leads a typed decl (`color c = …`) UNLESS it's used as
           // an expression — a member access (`color.new(…)`) or a cast call (`int(x)`) — or as a
           // plain variable NAME being declared/reassigned (`color = …`, `color := …`, which Pine
@@ -157,17 +247,25 @@ class Parser {
           // a var-decl. A `[` still means a typed decl (legacy array `float[] x`), not history.
           const n = this.peek(1);
           const exprUse = n.kind === TokenKind.Punct && (n.value === '.' || n.value === '(');
-          const nameUse = n.kind === TokenKind.Op
-            && (n.value === '=' || n.value === ':=' || n.value === '+=' || n.value === '-='
-              || n.value === '*=' || n.value === '/=' || n.value === '%=');
+          const nameUse =
+            n.kind === TokenKind.Op &&
+            (n.value === '=' ||
+              n.value === ':=' ||
+              n.value === '+=' ||
+              n.value === '-=' ||
+              n.value === '*=' ||
+              n.value === '/=' ||
+              n.value === '%=');
           if (!exprUse && !nameUse) return this.parseVarDecl();
           break;
         }
         // `not` is a unary operator that can lead an expression statement
         // (e.g. a switch branch `not na(x) or not na(y)`); fall through to the
         // expression-led path. Other unhandled keywords are invalid here.
-        case 'not': break;
-        default: this.err(`unexpected keyword '${kw}'`);
+        case 'not':
+          break;
+        default:
+          this.err(`unexpected keyword '${kw}'`);
       }
     }
     // `[a, b] = expr` is a destructuring decl; a bare `[a, b, c]` (e.g. a function's
@@ -205,14 +303,19 @@ class Parser {
   /** A token usable as a name (identifier or a fundamental-type keyword). */
   private isNameToken(offset = 0): boolean {
     const t = this.peek(offset);
-    return t.kind === TokenKind.Ident || (t.kind === TokenKind.Keyword && FUND_TYPES[t.value] !== undefined);
+    return (
+      t.kind === TokenKind.Ident ||
+      (t.kind === TokenKind.Keyword && FUND_TYPES[t.value] !== undefined)
+    );
   }
 
   /** A token usable as a DECLARED name — `isNameToken` plus contextual keywords (`type`, …)
    *  that Pine permits as parameter/field/variable names. */
   private isDeclName(offset = 0): boolean {
     const t = this.peek(offset);
-    return this.isNameToken(offset) || (t.kind === TokenKind.Keyword && CONTEXTUAL_NAME_KW.has(t.value));
+    return (
+      this.isNameToken(offset) || (t.kind === TokenKind.Keyword && CONTEXTUAL_NAME_KW.has(t.value))
+    );
   }
 
   /** Consume a declared name: an identifier or a fundamental-type keyword
@@ -234,7 +337,12 @@ class Parser {
     this.next(); // 'export'
     if (this.atKw('type')) return this.parseTypeDef(true);
     if (this.atKw('enum')) return this.parseEnumDef(true);
-    if (this.atKw('method')) { this.next(); const fd = this.parseFuncDef(true); fd.isMethod = true; return fd; }
+    if (this.atKw('method')) {
+      this.next();
+      const fd = this.parseFuncDef(true);
+      fd.isMethod = true;
+      return fd;
+    }
     if (this.at(TokenKind.Ident) && this.isFuncDefAhead()) return this.parseFuncDef(true);
     return this.parseVarDecl(true);
   }
@@ -264,8 +372,13 @@ class Parser {
     const n1 = this.peek(1);
     if (n1.kind === TokenKind.Ident) return true; // `Foo bar` (UDT-typed decl)
     // `Foo[] bar` — legacy array-typed decl (`[` immediately followed by `]`).
-    if (n1.kind === TokenKind.Punct && n1.value === '[' &&
-        this.peek(2).kind === TokenKind.Punct && this.peek(2).value === ']') return true;
+    if (
+      n1.kind === TokenKind.Punct &&
+      n1.value === '[' &&
+      this.peek(2).kind === TokenKind.Punct &&
+      this.peek(2).value === ']'
+    )
+      return true;
     // `array<int> x` — only collection templates precede `<`; otherwise `<` is
     // the comparison operator (e.g. `a < b` is an expression statement).
     if (n1.kind === TokenKind.Op && n1.value === '<') {
@@ -277,9 +390,19 @@ class Parser {
     // misread as declarations. Mirrors the qualified-name branch of isTypeStart().
     if (n1.kind === TokenKind.Punct && n1.value === '.') {
       let i = 1;
-      while (this.peek(i).kind === TokenKind.Punct && this.peek(i).value === '.' && this.isNameToken(i + 1)) i += 2;
-      if (this.peek(i).kind === TokenKind.Punct && this.peek(i).value === '[' &&
-          this.peek(i + 1).kind === TokenKind.Punct && this.peek(i + 1).value === ']') i += 2;
+      while (
+        this.peek(i).kind === TokenKind.Punct &&
+        this.peek(i).value === '.' &&
+        this.isNameToken(i + 1)
+      )
+        i += 2;
+      if (
+        this.peek(i).kind === TokenKind.Punct &&
+        this.peek(i).value === '[' &&
+        this.peek(i + 1).kind === TokenKind.Punct &&
+        this.peek(i + 1).value === ']'
+      )
+        i += 2;
       if (this.peek(i).kind === TokenKind.Ident) return true;
     }
     return false;
@@ -288,8 +411,13 @@ class Parser {
   private parseVarDecl(isExport = false): VarDecl {
     const loc = this.loc();
     let mode: VarMode = 'none';
-    if (this.atKw('var')) { this.next(); mode = 'var'; }
-    else if (this.atKw('varip')) { this.next(); mode = 'varip'; }
+    if (this.atKw('var')) {
+      this.next();
+      mode = 'var';
+    } else if (this.atKw('varip')) {
+      this.next();
+      mode = 'varip';
+    }
 
     let declQual: Qualifier | undefined;
     if (this.at(TokenKind.Keyword) && QUALIFIERS[this.peek().value] !== undefined) {
@@ -325,7 +453,9 @@ class Parser {
     const loc = this.loc();
     this.expect(TokenKind.Punct, '[');
     const names: string[] = [];
-    do { names.push(this.expect(TokenKind.Ident).value); } while (this.eat(TokenKind.Punct, ','));
+    do {
+      names.push(this.expect(TokenKind.Ident).value);
+    } while (this.eat(TokenKind.Punct, ','));
     this.expect(TokenKind.Punct, ']');
     this.expect(TokenKind.Op, '=');
     const init = this.parseExpr();
@@ -348,11 +478,13 @@ class Parser {
         // `drawPitchforkLine(chart.point start, …, color, width, style, extend)`).
         if (this.at(TokenKind.Keyword)) {
           const n1 = this.peek(1);
-          const asName = (n1.kind === TokenKind.Punct && (n1.value === ',' || n1.value === ')'))
-            || (n1.kind === TokenKind.Op && n1.value === '=');
+          const asName =
+            (n1.kind === TokenKind.Punct && (n1.value === ',' || n1.value === ')')) ||
+            (n1.kind === TokenKind.Op && n1.value === '=');
           if (asName) pname = this.next().value;
           // `const`/`simple`/`series` introducing a qualified param (`series int x`).
-          else if (QUALIFIERS[this.peek().value] !== undefined) declQual = QUALIFIERS[this.next().value];
+          else if (QUALIFIERS[this.peek().value] !== undefined)
+            declQual = QUALIFIERS[this.next().value];
         }
         let declType: PineType | undefined;
         // a typed param: fundamental/UDT/collection type followed by the name
@@ -370,9 +502,10 @@ class Parser {
     }
     this.expect(TokenKind.Punct, ')');
     this.expect(TokenKind.Op, '=>');
-    const body = this.at(TokenKind.Newline) || this.at(TokenKind.Indent)
-      ? (this.skipNewlines(), this.parseBlock())
-      : this.parseStatements();
+    const body =
+      this.at(TokenKind.Newline) || this.at(TokenKind.Indent)
+        ? (this.skipNewlines(), this.parseBlock())
+        : this.parseStatements();
     return { kind: 'FuncDef', export: isExport, name, params, body, loc };
   }
 
@@ -392,10 +525,12 @@ class Parser {
       // `.` (qualified built-in type — `chart.point p` / `chart.point[] ps`; for the
       // dotted case isTypeStart() already verified the chain ends in a declared name).
       const n1 = this.peek(1);
-      if (this.isTypeStart() &&
-          (this.isNameToken(1) ||
-           (n1.kind === TokenKind.Op && n1.value === '<') ||
-           (n1.kind === TokenKind.Punct && (n1.value === '[' || n1.value === '.')))) {
+      if (
+        this.isTypeStart() &&
+        (this.isNameToken(1) ||
+          (n1.kind === TokenKind.Op && n1.value === '<') ||
+          (n1.kind === TokenKind.Punct && (n1.value === '[' || n1.value === '.')))
+      ) {
         declType = this.parseType();
       }
       const fname = this.expectNameToken();
@@ -516,7 +651,7 @@ class Parser {
     this.skipNewlines();
     while (!this.at(TokenKind.Dedent) && !this.at(TokenKind.Eof)) {
       let test: Expr | undefined;
-      if (!(this.at(TokenKind.Op, '=>'))) test = this.parseExpr();
+      if (!this.at(TokenKind.Op, '=>')) test = this.parseExpr();
       this.expect(TokenKind.Op, '=>');
       let body: Stmt[];
       if (this.at(TokenKind.Newline) || this.at(TokenKind.Indent)) {
@@ -535,7 +670,9 @@ class Parser {
   }
 
   // ── expressions (Pratt) ───────────────────────────────────
-  private parseExpr(): Expr { return this.parseTernary(); }
+  private parseExpr(): Expr {
+    return this.parseTernary();
+  }
 
   private parseTernary(): Expr {
     const cond = this.parseBinary(0);
@@ -554,7 +691,12 @@ class Parser {
     let left = this.parseUnary();
     for (;;) {
       const t = this.peek();
-      const op = t.kind === TokenKind.Op ? t.value : t.kind === TokenKind.Keyword && (t.value === 'and' || t.value === 'or') ? t.value : null;
+      const op =
+        t.kind === TokenKind.Op
+          ? t.value
+          : t.kind === TokenKind.Keyword && (t.value === 'and' || t.value === 'or')
+            ? t.value
+            : null;
       if (op === null) break;
       const prec = BIN_PREC[op];
       if (prec === undefined || prec < minPrec) break;
@@ -568,7 +710,10 @@ class Parser {
 
   private parseUnary(): Expr {
     const t = this.peek();
-    if ((t.kind === TokenKind.Op && (t.value === '-' || t.value === '+')) || (t.kind === TokenKind.Keyword && t.value === 'not')) {
+    if (
+      (t.kind === TokenKind.Op && (t.value === '-' || t.value === '+')) ||
+      (t.kind === TokenKind.Keyword && t.value === 'not')
+    ) {
       const loc = this.loc();
       this.next();
       const operand = this.parseUnary();
@@ -595,7 +740,10 @@ class Parser {
       } else if (this.at(TokenKind.Op, '<') && e.kind === 'Member') {
         // possible generic type args `array.new<float>(...)`; otherwise `<` is comparison
         const ta = this.tryTypeArgs();
-        if (ta) { typeArgs = ta; continue; }
+        if (ta) {
+          typeArgs = ta;
+          continue;
+        }
         break;
       } else if (this.at(TokenKind.Punct, '(')) {
         e = this.parseCall(e, typeArgs);
@@ -619,7 +767,10 @@ class Parser {
       const types = [this.parseType()];
       while (this.eat(TokenKind.Punct, ',')) types.push(this.parseType());
       this.expect(TokenKind.Op, '>');
-      if (!this.at(TokenKind.Punct, '(')) { this.pos = save; return null; }
+      if (!this.at(TokenKind.Punct, '(')) {
+        this.pos = save;
+        return null;
+      }
       return types;
     } catch {
       this.pos = save;
@@ -653,17 +804,29 @@ class Parser {
     const t = this.peek();
     const loc: Loc = { line: t.line, col: t.col };
     switch (t.kind) {
-      case TokenKind.Int: this.next(); return { kind: 'Number', value: t.literal as number, isInt: true, loc };
-      case TokenKind.Float: this.next(); return { kind: 'Number', value: t.literal as number, isInt: false, loc };
-      case TokenKind.String: this.next(); return { kind: 'String', value: t.literal as string, loc };
-      case TokenKind.Bool: this.next(); return { kind: 'Bool', value: t.literal as boolean, loc };
-      case TokenKind.Color: this.next(); return { kind: 'Color', value: t.literal as string, loc };
+      case TokenKind.Int:
+        this.next();
+        return { kind: 'Number', value: t.literal as number, isInt: true, loc };
+      case TokenKind.Float:
+        this.next();
+        return { kind: 'Number', value: t.literal as number, isInt: false, loc };
+      case TokenKind.String:
+        this.next();
+        return { kind: 'String', value: t.literal as string, loc };
+      case TokenKind.Bool:
+        this.next();
+        return { kind: 'Bool', value: t.literal as boolean, loc };
+      case TokenKind.Color:
+        this.next();
+        return { kind: 'Color', value: t.literal as string, loc };
       case TokenKind.Na:
         this.next();
         // `na(x)` is the is-na() test function; a bare `na` is the na literal.
         if (this.at(TokenKind.Punct, '(')) return { kind: 'Ident', name: 'na', loc };
         return { kind: 'Na', loc };
-      case TokenKind.Ident: this.next(); return { kind: 'Ident', name: t.value, loc };
+      case TokenKind.Ident:
+        this.next();
+        return { kind: 'Ident', name: t.value, loc };
       case TokenKind.Keyword:
         if (t.value === 'if') return this.parseIf();
         if (t.value === 'switch') return this.parseSwitch();
@@ -672,13 +835,23 @@ class Parser {
         // (type/method/enum/import/export) used as a plain identifier name. The
         // statement-level forms (`type Foo`, `import …`) are dispatched before we
         // ever reach expression parsing, so here they can only be identifier refs.
-        if (FUND_TYPES[t.value] || QUALIFIERS[t.value] !== undefined || CONTEXTUAL_NAME_KW.has(t.value)) {
-          this.next(); return { kind: 'Ident', name: t.value, loc };
+        if (
+          FUND_TYPES[t.value] ||
+          QUALIFIERS[t.value] !== undefined ||
+          CONTEXTUAL_NAME_KW.has(t.value)
+        ) {
+          this.next();
+          return { kind: 'Ident', name: t.value, loc };
         }
         this.err(`unexpected keyword in expression '${t.value}'`);
         break;
       case TokenKind.Punct:
-        if (t.value === '(') { this.next(); const e = this.parseExpr(); this.expect(TokenKind.Punct, ')'); return e; }
+        if (t.value === '(') {
+          this.next();
+          const e = this.parseExpr();
+          this.expect(TokenKind.Punct, ')');
+          return e;
+        }
         if (t.value === '[') return this.parseTupleLiteral();
         break;
     }
@@ -690,7 +863,9 @@ class Parser {
     this.expect(TokenKind.Punct, '[');
     const items: Expr[] = [];
     if (!this.at(TokenKind.Punct, ']')) {
-      do { items.push(this.parseExpr()); } while (this.eat(TokenKind.Punct, ','));
+      do {
+        items.push(this.parseExpr());
+      } while (this.eat(TokenKind.Punct, ','));
     }
     this.expect(TokenKind.Punct, ']');
     return { kind: 'Tuple', items, loc };
@@ -701,21 +876,37 @@ class Parser {
     const t = this.peek();
     if (t.kind === TokenKind.Keyword && FUND_TYPES[t.value]) return true;
     if (t.kind === TokenKind.Ident) {
-      if (SPECIAL_TYPE_NAMES.has(t.value) || ['array', 'matrix', 'map'].includes(t.value)) return true;
+      if (SPECIAL_TYPE_NAMES.has(t.value) || ['array', 'matrix', 'map'].includes(t.value))
+        return true;
       // UDT type position: `Ident Ident` (e.g. `MyType m`).
       if (this.peek(1).kind === TokenKind.Ident) return true;
       // legacy UDT-array position: `MyType[] m`.
-      if (this.peek(1).kind === TokenKind.Punct && this.peek(1).value === '[' &&
-          this.peek(2).kind === TokenKind.Punct && this.peek(2).value === ']') return true;
+      if (
+        this.peek(1).kind === TokenKind.Punct &&
+        this.peek(1).value === '[' &&
+        this.peek(2).kind === TokenKind.Punct &&
+        this.peek(2).value === ']'
+      )
+        return true;
       // qualified type name: `chart.point lastP` — an `Ident('.'Ident)+` chain followed by
       // a name (with an optional legacy `[]` suffix). parseBaseType() consumes the dotted
       // name; here we only confirm it's a TYPE position (chain then a declared name), not a
       // bare member expression. Safe: isTypeStart is consulted only in decl/param/field slots.
       if (this.peek(1).kind === TokenKind.Punct && this.peek(1).value === '.') {
         let i = 1;
-        while (this.peek(i).kind === TokenKind.Punct && this.peek(i).value === '.' && this.isNameToken(i + 1)) i += 2;
-        if (this.peek(i).kind === TokenKind.Punct && this.peek(i).value === '[' &&
-            this.peek(i + 1).kind === TokenKind.Punct && this.peek(i + 1).value === ']') i += 2;
+        while (
+          this.peek(i).kind === TokenKind.Punct &&
+          this.peek(i).value === '.' &&
+          this.isNameToken(i + 1)
+        )
+          i += 2;
+        if (
+          this.peek(i).kind === TokenKind.Punct &&
+          this.peek(i).value === '[' &&
+          this.peek(i + 1).kind === TokenKind.Punct &&
+          this.peek(i + 1).value === ']'
+        )
+          i += 2;
         if (this.peek(i).kind === TokenKind.Ident) return true;
       }
     }
@@ -725,8 +916,13 @@ class Parser {
   private parseType(): PineType {
     const base = this.parseBaseType();
     // legacy collection syntax: `T[]` ≡ `array<T>` (e.g. `box[]`, `float[]`).
-    if (this.at(TokenKind.Punct, '[') && this.peek(1).kind === TokenKind.Punct && this.peek(1).value === ']') {
-      this.next(); this.next();
+    if (
+      this.at(TokenKind.Punct, '[') &&
+      this.peek(1).kind === TokenKind.Punct &&
+      this.peek(1).value === ']'
+    ) {
+      this.next();
+      this.next();
       return { kind: 'array', of: base };
     }
     return base;
@@ -737,14 +933,21 @@ class Parser {
     if (t.kind === TokenKind.Keyword && FUND_TYPES[t.value]) return FUND_TYPES[t.value];
     let name = t.value;
     if (name === 'array' && this.eat(TokenKind.Op, '<')) {
-      const of = this.parseType(); this.expect(TokenKind.Op, '>'); return { kind: 'array', of };
+      const of = this.parseType();
+      this.expect(TokenKind.Op, '>');
+      return { kind: 'array', of };
     }
     if (name === 'matrix' && this.eat(TokenKind.Op, '<')) {
-      const of = this.parseType(); this.expect(TokenKind.Op, '>'); return { kind: 'matrix', of };
+      const of = this.parseType();
+      this.expect(TokenKind.Op, '>');
+      return { kind: 'matrix', of };
     }
     if (name === 'map' && this.eat(TokenKind.Op, '<')) {
-      const key = this.parseType(); this.expect(TokenKind.Punct, ','); const value = this.parseType();
-      this.expect(TokenKind.Op, '>'); return { kind: 'map', key, value };
+      const key = this.parseType();
+      this.expect(TokenKind.Punct, ',');
+      const value = this.parseType();
+      this.expect(TokenKind.Op, '>');
+      return { kind: 'map', key, value };
     }
     // qualified built-in type name, e.g. `chart.point` (used as `array.new<chart.point>()`).
     // The element type is opaque to the runtime, so a dotted name is kept as an udt name.

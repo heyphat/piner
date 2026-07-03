@@ -4,12 +4,34 @@
  * produce identical per-bar output. The interpreter is the auditable oracle.
  */
 import type {
-  Program, Stmt, Expr, IfNode, SwitchNode, ForNode, ForInNode, WhileNode, Call,
-  Member, Ident, Reassign,
+  Program,
+  Stmt,
+  Expr,
+  IfNode,
+  SwitchNode,
+  ForNode,
+  ForInNode,
+  WhileNode,
+  Call,
+  Member,
+  Ident,
+  Reassign,
 } from '../parser/ast.js';
 import type { AnalyzeResult } from '../sema/analyze.js';
 import type { ExecutionContext } from '../runtime/context.js';
-import { nsRuntime, normalizeTaArgs, OUTPUT_FNS, NOOP_FNS, CAST_FNS, MARKER_KIND, DATE_FNS, TA_VARS, DRAWING_CASTS, NS_CALL_PARAMS, NS_OPTS_POSITIONAL } from '../codegen/intrinsics.js';
+import {
+  nsRuntime,
+  normalizeTaArgs,
+  OUTPUT_FNS,
+  NOOP_FNS,
+  CAST_FNS,
+  MARKER_KIND,
+  DATE_FNS,
+  TA_VARS,
+  DRAWING_CASTS,
+  NS_CALL_PARAMS,
+  NS_OPTS_POSITIONAL,
+} from '../codegen/intrinsics.js';
 
 /** Compile the annotated program into a per-bar ScriptFn driven by the interpreter. */
 export function makeInterpreted(result: AnalyzeResult): ($: ExecutionContext) => void {
@@ -47,7 +69,10 @@ class Interp {
           if (sym.kind === 'var') this.$.initVar(id, () => this.expr(s.init));
           else this.$.initVarip(id, () => this.expr(s.init));
           if (sym.historySlot != null) {
-            this.$.set(sym.historySlot, (sym.kind === 'var' ? this.$.readVar(id) : this.$.readVarip(id)) as number);
+            this.$.set(
+              sym.historySlot,
+              (sym.kind === 'var' ? this.$.readVar(id) : this.$.readVarip(id)) as number,
+            );
           }
         } else {
           const v = this.expr(s.init);
@@ -65,15 +90,28 @@ class Interp {
         });
         return;
       }
-      case 'Reassign': return void this.reassign(s);
-      case 'ExprStmt': { this.expr(s.expr); return; }
-      case 'If': return this.ifStmt(s);
-      case 'For': return this.forStmt(s);
-      case 'ForIn': return this.forInStmt(s);
-      case 'While': return this.whileStmt(s);
-      case 'Switch': { const r = this.switchValue(s); return r === BREAK || r === CONTINUE ? r : undefined; }
-      case 'Break': return BREAK;
-      case 'Continue': return CONTINUE;
+      case 'Reassign':
+        return void this.reassign(s);
+      case 'ExprStmt': {
+        this.expr(s.expr);
+        return;
+      }
+      case 'If':
+        return this.ifStmt(s);
+      case 'For':
+        return this.forStmt(s);
+      case 'ForIn':
+        return this.forInStmt(s);
+      case 'While':
+        return this.whileStmt(s);
+      case 'Switch': {
+        const r = this.switchValue(s);
+        return r === BREAK || r === CONTINUE ? r : undefined;
+      }
+      case 'Break':
+        return BREAK;
+      case 'Continue':
+        return CONTINUE;
       case 'FuncDef':
       case 'TypeDef':
       case 'Import':
@@ -94,7 +132,10 @@ class Interp {
       if (sym.kind === 'var') this.$.setVar(id, value);
       else this.$.setVarip(id, value);
       if (sym.historySlot != null) {
-        this.$.set(sym.historySlot, (sym.kind === 'var' ? this.$.readVar(id) : this.$.readVarip(id)) as number);
+        this.$.set(
+          sym.historySlot,
+          (sym.kind === 'var' ? this.$.readVar(id) : this.$.readVarip(id)) as number,
+        );
       }
       return;
     }
@@ -110,12 +151,18 @@ class Interp {
     const cur = this.expr(target) as number;
     const v = this.expr(value);
     switch (op) {
-      case '+=': return this.$.add(cur, v as number);
-      case '-=': return this.$.sub(cur, v as number);
-      case '*=': return this.$.mul(cur, v as number);
-      case '/=': return this.$.div(cur, v as number);
-      case '%=': return this.$.mod(cur, v as number);
-      default: return v;
+      case '+=':
+        return this.$.add(cur, v as number);
+      case '-=':
+        return this.$.sub(cur, v as number);
+      case '*=':
+        return this.$.mul(cur, v as number);
+      case '/=':
+        return this.$.div(cur, v as number);
+      case '%=':
+        return this.$.mod(cur, v as number);
+      default:
+        return v;
     }
   }
 
@@ -169,7 +216,11 @@ class Interp {
     }
   }
 
-  private readSymVal(sym: { kind: string; varSlot?: { id: number } | null; jsName?: string }): unknown {
+  private readSymVal(sym: {
+    kind: string;
+    varSlot?: { id: number } | null;
+    jsName?: string;
+  }): unknown {
     if (sym.kind === 'var') return this.$.readVar(sym.varSlot!.id);
     if (sym.kind === 'varip') return this.$.readVarip(sym.varSlot!.id);
     return this.env.get(sym.jsName!);
@@ -184,8 +235,14 @@ class Interp {
     const last = body[body.length - 1];
     if (last) {
       if (last.kind === 'ExprStmt') return this.expr(last.expr);
-      if (last.kind === 'VarDecl' && last.sym) { this.stmt(last); return this.readSymVal(last.sym); }
-      if (last.kind === 'Reassign' && last.target.kind === 'Ident' && last.sym) { this.stmt(last); return this.readSymVal(last.sym); }
+      if (last.kind === 'VarDecl' && last.sym) {
+        this.stmt(last);
+        return this.readSymVal(last.sym);
+      }
+      if (last.kind === 'Reassign' && last.target.kind === 'Ident' && last.sym) {
+        this.stmt(last);
+        return this.readSymVal(last.sym);
+      }
       // `if`/`switch` are expressions in Pine — a trailing one is the block's value. Evaluate it.
       if (last.kind === 'If' || last.kind === 'Switch') return this.expr(last);
       const r = this.stmt(last);
@@ -198,8 +255,13 @@ class Interp {
     const subj = s.subject ? this.expr(s.subject) : undefined;
     let defaultBody: Stmt[] | null = null;
     for (const c of s.cases) {
-      if (!c.test) { defaultBody = c.body; continue; }
-      const match = s.subject ? this.$.eq(subj, this.expr(c.test)) : this.$.toBool(this.expr(c.test));
+      if (!c.test) {
+        defaultBody = c.body;
+        continue;
+      }
+      const match = s.subject
+        ? this.$.eq(subj, this.expr(c.test))
+        : this.$.toBool(this.expr(c.test));
       if (match) return this.blockValue(c.body);
     }
     return defaultBody ? this.blockValue(defaultBody) : this.$.NA;
@@ -208,60 +270,89 @@ class Interp {
   // ── expressions ───────────────────────────────────────────
   private expr(e: Expr): unknown {
     switch (e.kind) {
-      case 'Number': return e.value;
-      case 'String': return e.value;
-      case 'Bool': return e.value;
-      case 'Color': return this.$.colorLit(e.value);
-      case 'Na': return this.$.NA;
-      case 'Ident': return this.ident(e);
-      case 'Member': return this.member(e);
+      case 'Number':
+        return e.value;
+      case 'String':
+        return e.value;
+      case 'Bool':
+        return e.value;
+      case 'Color':
+        return this.$.colorLit(e.value);
+      case 'Na':
+        return this.$.NA;
+      case 'Ident':
+        return this.ident(e);
+      case 'Member':
+        return this.member(e);
       case 'History': {
         if (e.historySlot == null) return this.$.NA;
         if (e.historyExpr) this.$.set(e.historySlot, this.expr(e.base)); // materialize this bar's value
         return this.$.get(e.historySlot, this.expr(e.offset) as number);
       }
       case 'Unary':
-        return e.op === 'not' ? this.$.not(this.expr(e.operand) as boolean)
-          : e.op === '-' ? this.$.neg(this.expr(e.operand) as number)
-          : this.expr(e.operand);
-      case 'Binary': return this.binary(e);
-      case 'Ternary': return this.$.toBool(this.expr(e.cond)) ? this.expr(e.then) : this.expr(e.else);
-      case 'Call': return this.call(e);
-      case 'Tuple': return e.items.map((it) => this.expr(it));
+        return e.op === 'not'
+          ? this.$.not(this.expr(e.operand) as boolean)
+          : e.op === '-'
+            ? this.$.neg(this.expr(e.operand) as number)
+            : this.expr(e.operand);
+      case 'Binary':
+        return this.binary(e);
+      case 'Ternary':
+        return this.$.toBool(this.expr(e.cond)) ? this.expr(e.then) : this.expr(e.else);
+      case 'Call':
+        return this.call(e);
+      case 'Tuple':
+        return e.items.map((it) => this.expr(it));
       case 'If': {
         if (this.$.toBool(this.expr(e.cond))) return this.blockValue(e.then);
-        for (const el of e.elifs) if (this.$.toBool(this.expr(el.cond))) return this.blockValue(el.body);
+        for (const el of e.elifs)
+          if (this.$.toBool(this.expr(el.cond))) return this.blockValue(el.body);
         return e.else ? this.blockValue(e.else) : this.$.NA;
       }
-      case 'Switch': return this.switchValue(e);
-      case 'For': case 'ForIn': case 'While': return this.$.NA;
+      case 'Switch':
+        return this.switchValue(e);
+      case 'For':
+      case 'ForIn':
+      case 'While':
+        return this.$.NA;
     }
   }
 
   private ident(e: Ident): unknown {
     const sym = e.sym!;
     switch (sym.kind) {
-      case 'builtin-series': return this.ctx[sym.name];
-      case 'var': return this.$.readVar(sym.varSlot!.id);
-      case 'varip': return this.$.readVarip(sym.varSlot!.id);
+      case 'builtin-series':
+        return this.ctx[sym.name];
+      case 'var':
+        return this.$.readVar(sym.varSlot!.id);
+      case 'varip':
+        return this.$.readVarip(sym.varSlot!.id);
       case 'plain':
-      case 'param': return this.env.get(sym.jsName!);
-      case 'builtin-ns': return this.ctx[nsRuntime(sym.name) ?? sym.name];
-      default: return this.$.NA;
+      case 'param':
+        return this.env.get(sym.jsName!);
+      case 'builtin-ns':
+        return this.ctx[nsRuntime(sym.name) ?? sym.name];
+      default:
+        return this.$.NA;
     }
   }
 
   private member(e: Member): unknown {
     if (e.constExpr) return this.expr(e.constExpr); // resolved enum member
     // strategy.closedtrades.first_index / strategy.opentrades.capital_held — bare scalar stats.
-    if (e.object.kind === 'Member' && e.object.object.kind === 'Ident'
-      && e.object.object.sym?.kind === 'builtin-ns' && e.object.object.name === 'strategy'
-      && (e.object.property === 'closedtrades' || e.object.property === 'opentrades')) {
+    if (
+      e.object.kind === 'Member' &&
+      e.object.object.kind === 'Ident' &&
+      e.object.object.sym?.kind === 'builtin-ns' &&
+      e.object.object.name === 'strategy' &&
+      (e.object.property === 'closedtrades' || e.object.property === 'opentrades')
+    ) {
       return (this.ctx.strategy as any).tradeStat(e.object.property, e.property);
     }
     if (e.object.kind === 'Ident' && e.object.sym?.kind === 'builtin-ns') {
       // no-paren stateful ta variable (`ta.tr`) → a site-keyed call.
-      if (e.object.name === 'ta' && TA_VARS.has(e.property)) return (this.ctx.ta as any)[e.property](e.stateSite ?? 0);
+      if (e.object.name === 'ta' && TA_VARS.has(e.property))
+        return (this.ctx.ta as any)[e.property](e.stateSite ?? 0);
       const rt = nsRuntime(e.object.name) ?? e.object.name;
       return this.ctx[rt][e.property];
     }
@@ -271,22 +362,36 @@ class Interp {
 
   private binary(e: Extract<Expr, { kind: 'Binary' }>): unknown {
     // v6: bools cannot hold na — na coerces to false. Lazy RHS preserved by &&/||.
-    if (e.op === 'and') return this.$.toBool(this.expr(e.left)) && this.$.toBool(this.expr(e.right));
+    if (e.op === 'and')
+      return this.$.toBool(this.expr(e.left)) && this.$.toBool(this.expr(e.right));
     if (e.op === 'or') return this.$.toBool(this.expr(e.left)) || this.$.toBool(this.expr(e.right));
     const l = this.expr(e.left);
     const r = this.expr(e.right);
     switch (e.op) {
-      case '==': return this.$.eq(l, r);
-      case '!=': return this.$.ne(l, r);
-      case '<': return this.$.lt(l, r);
-      case '<=': return this.$.le(l, r);
-      case '>': return this.$.gt(l, r);
-      case '>=': return this.$.ge(l, r);
-      case '+': return e.type?.kind === 'string' ? this.$.concat(l, r) : this.$.add(l as number, r as number);
-      case '-': return this.$.sub(l as number, r as number);
-      case '*': return this.$.mul(l as number, r as number);
-      case '/': return this.$.div(l as number, r as number);
-      case '%': return this.$.mod(l as number, r as number);
+      case '==':
+        return this.$.eq(l, r);
+      case '!=':
+        return this.$.ne(l, r);
+      case '<':
+        return this.$.lt(l, r);
+      case '<=':
+        return this.$.le(l, r);
+      case '>':
+        return this.$.gt(l, r);
+      case '>=':
+        return this.$.ge(l, r);
+      case '+':
+        return e.type?.kind === 'string'
+          ? this.$.concat(l, r)
+          : this.$.add(l as number, r as number);
+      case '-':
+        return this.$.sub(l as number, r as number);
+      case '*':
+        return this.$.mul(l as number, r as number);
+      case '/':
+        return this.$.div(l as number, r as number);
+      case '%':
+        return this.$.mod(l as number, r as number);
     }
   }
 
@@ -303,7 +408,11 @@ class Interp {
       });
       return obj;
     }
-    if (callee.kind === 'Member' && callee.object.kind === 'Ident' && callee.object.sym?.kind === 'builtin-ns') {
+    if (
+      callee.kind === 'Member' &&
+      callee.object.kind === 'Ident' &&
+      callee.object.sym?.kind === 'builtin-ns'
+    ) {
       const ns = callee.object.name;
       const fn = callee.property;
       const rt = nsRuntime(ns) ?? ns;
@@ -312,18 +421,28 @@ class Interp {
         // (e.g. valuewhen's occurrence) are not executed, matching codegen.
         const oneExpr = { kind: 'Number', value: 1, isInt: true } as Expr;
         const zeroExpr = { kind: 'Number', value: 0, isInt: true } as Expr;
-        const argExprs = normalizeTaArgs(fn, e.args.map((a) => a.value), oneExpr, zeroExpr);
+        const argExprs = normalizeTaArgs(
+          fn,
+          e.args.map((a) => a.value),
+          oneExpr,
+          zeroExpr,
+        );
         const values = argExprs.map((x) => this.expr(x));
         if ((fn === 'pivothigh' || fn === 'pivotlow') && values.length === 2) {
           values.unshift(fn === 'pivothigh' ? this.ctx.high : this.ctx.low);
         }
-        if ((fn === 'highest' || fn === 'highestbars') && values.length === 1) values.unshift(this.ctx.high);
-        if ((fn === 'lowest' || fn === 'lowestbars') && values.length === 1) values.unshift(this.ctx.low);
+        if ((fn === 'highest' || fn === 'highestbars') && values.length === 1)
+          values.unshift(this.ctx.high);
+        if ((fn === 'lowest' || fn === 'lowestbars') && values.length === 1)
+          values.unshift(this.ctx.low);
         return (this.ctx.ta as any)[fn](...values, e.stateSite ?? 0);
       }
       if (ns === 'input') {
         const defval = this.named(e, 'defval') ?? e.args.filter((a) => !a.name)[0]?.value;
-        return (this.ctx.input as any)[fn](e.inputKey ?? '', defval ? this.expr(defval) : undefined);
+        return (this.ctx.input as any)[fn](
+          e.inputKey ?? '',
+          defval ? this.expr(defval) : undefined,
+        );
       }
       if (ns === 'request' && fn === 'security') {
         const pos = e.args.filter((a) => !a.name).map((a) => a.value);
@@ -333,9 +452,16 @@ class Interp {
         const laArg = this.named(e, 'lookahead') ?? pos[4];
         const la = laArg ? this.expr(laArg) : false;
         return this.$.security(e.securitySite ?? 0, sym, tf, la, (sub) => {
-          const s$ = this.$, sctx = this.ctx;
-          this.$ = sub; this.ctx = sub; // rebind to HTF context; env (plain locals) is shared
-          try { return this.expr(exprNode); } finally { this.$ = s$; this.ctx = sctx; }
+          const s$ = this.$,
+            sctx = this.ctx;
+          this.$ = sub;
+          this.ctx = sub; // rebind to HTF context; env (plain locals) is shared
+          try {
+            return this.expr(exprNode);
+          } finally {
+            this.$ = s$;
+            this.ctx = sctx;
+          }
         });
       }
       if (ns === 'request' && fn === 'security_lower_tf') {
@@ -344,9 +470,16 @@ class Interp {
         const tf = this.expr(this.named(e, 'timeframe') ?? pos[1]);
         const exprNode = (this.named(e, 'expression') ?? pos[2])!;
         return this.$.securityLowerTf(e.securitySite ?? 0, sym, tf, (sub) => {
-          const s$ = this.$, sctx = this.ctx;
-          this.$ = sub; this.ctx = sub;
-          try { return this.expr(exprNode); } finally { this.$ = s$; this.ctx = sctx; }
+          const s$ = this.$,
+            sctx = this.ctx;
+          this.$ = sub;
+          this.ctx = sub;
+          try {
+            return this.expr(exprNode);
+          } finally {
+            this.$ = s$;
+            this.ctx = sctx;
+          }
         });
       }
       if (ns === 'strategy') return this.strategyCall(fn, e);
@@ -354,17 +487,27 @@ class Interp {
         const arg = e.args.filter((a) => !a.name)[0]?.value;
         return this.$.syminfoParse(fn, arg ? this.expr(arg) : undefined);
       }
-      return (this.ctx[rt] as any)[fn](...this.nsArgValues(e, NS_CALL_PARAMS[`${ns}.${fn}`], NS_OPTS_POSITIONAL[`${ns}.${fn}`]));
+      return (this.ctx[rt] as any)[fn](
+        ...this.nsArgValues(e, NS_CALL_PARAMS[`${ns}.${fn}`], NS_OPTS_POSITIONAL[`${ns}.${fn}`]),
+      );
     }
     // two-level namespace: chart.point.new(...)
-    if (callee.kind === 'Member' && callee.object.kind === 'Member'
-      && callee.object.object.kind === 'Ident' && callee.object.object.sym?.kind === 'builtin-ns') {
+    if (
+      callee.kind === 'Member' &&
+      callee.object.kind === 'Member' &&
+      callee.object.object.kind === 'Ident' &&
+      callee.object.object.sym?.kind === 'builtin-ns'
+    ) {
       // strategy.closedtrades.X(i) / strategy.opentrades.X(i) → per-trade introspection.
       if (callee.object.object.name === 'strategy') {
         const scope = callee.object.property;
         if (scope === 'closedtrades' || scope === 'opentrades') {
           const i = e.args.filter((a) => !a.name)[0]?.value;
-          return (this.ctx.strategy as any).tradeField(scope, callee.property, i ? this.expr(i) : 0);
+          return (this.ctx.strategy as any).tradeField(
+            scope,
+            callee.property,
+            i ? this.expr(i) : 0,
+          );
         }
         return this.$.NA;
       }
@@ -388,9 +531,12 @@ class Interp {
     if (coords) {
       const named = new Map(e.args.filter((a) => a.name).map((a) => [a.name!, a.value] as const));
       const positionalArgs = e.args.filter((a) => !a.name);
-      const slots: (typeof e.args[number]['value'] | undefined)[] = [];
+      const slots: ((typeof e.args)[number]['value'] | undefined)[] = [];
       for (let i = 0; i < coords.length; i++) slots[i] = positionalArgs[i]?.value; // coord slots
-      coords.forEach((pname, i) => { const v = named.get(pname); if (v !== undefined) slots[i] = v; }); // a coord passed by name
+      coords.forEach((pname, i) => {
+        const v = named.get(pname);
+        if (v !== undefined) slots[i] = v;
+      }); // a coord passed by name
       // Everything else → the trailing opts bag: extra POSITIONAL args keyed by their Pine
       // param name (optsPos), then NAMED args that aren't coords. Decide membership
       // syntactically first — coord slots must EVALUATE before opts values to match the
@@ -406,7 +552,8 @@ class Interp {
       // runtime's trailing `opts` parameter, not a skipped middle positional.
       const span = hasOpts ? Math.max(slots.length, coords.length) : slots.length;
       const out: unknown[] = [];
-      for (let i = 0; i < span; i++) out.push(slots[i] !== undefined ? this.expr(slots[i]!) : undefined);
+      for (let i = 0; i < span; i++)
+        out.push(slots[i] !== undefined ? this.expr(slots[i]!) : undefined);
       if (hasOpts) {
         const opts: Record<string, unknown> = {};
         for (const [pname, v] of extraPos) opts[pname] = this.expr(v);
@@ -445,8 +592,10 @@ class Interp {
     }
     if (name === 'timestamp') return this.$.timestamp(...e.args.map((a) => this.expr(a.value)));
     if (name === 'time') return (this.$ as any).timeFn(...e.args.map((a) => this.expr(a.value)));
-    if (name === 'time_close') return (this.$ as any).timeCloseFn(...e.args.map((a) => this.expr(a.value)));
-    if (name === 'nz') return e.args[1] !== undefined ? this.$.nz(a(0), a(1) as number) : this.$.nz(a(0));
+    if (name === 'time_close')
+      return (this.$ as any).timeCloseFn(...e.args.map((a) => this.expr(a.value)));
+    if (name === 'nz')
+      return e.args[1] !== undefined ? this.$.nz(a(0), a(1) as number) : this.$.nz(a(0));
     if (name === 'na') return this.$.na(a(0));
     if (name === 'alert') return this.$.alert((a(0) as string) ?? '');
     if (name === 'alertcondition') {
@@ -454,7 +603,11 @@ class Interp {
       const title = this.arg(e, 1, 'title');
       const msg = this.arg(e, 2, 'message');
       // `undefined` (not '') for an absent title/message so `message ?? title ?? 'alert'` works.
-      return this.$.alertcondition(cond, title ? (this.expr(title) as string) : undefined, msg ? (this.expr(msg) as string) : undefined);
+      return this.$.alertcondition(
+        cond,
+        title ? (this.expr(title) as string) : undefined,
+        msg ? (this.expr(msg) as string) : undefined,
+      );
     }
     if (CAST_FNS[name]) return (this.$ as any)[CAST_FNS[name]](a(0));
     if (DATE_FNS.has(name)) return this.$.dateAt(name, a(0) as number);
@@ -474,7 +627,10 @@ class Interp {
     const id = e.outputId ?? 0;
     const pos = e.args.filter((a) => !a.name).map((a) => a.value);
     const ev = (x?: Expr) => (x ? this.expr(x) : undefined);
-    const title = () => { const t = this.named(e, 'title'); return t ? (this.expr(t) as string) : `${name} ${id}`; };
+    const title = () => {
+      const t = this.named(e, 'title');
+      return t ? (this.expr(t) as string) : `${name} ${id}`;
+    };
     const color = () => ev(this.named(e, 'color'));
 
     switch (name) {
@@ -482,9 +638,17 @@ class Interp {
         // Pine: plot(series, title, color, …) — title is pos[1], color is pos[2].
         const titleExpr = this.named(e, 'title') ?? pos[1];
         const titleVal = titleExpr ? (this.expr(titleExpr) as string) : `plot ${id}`;
-        return this.$.plot(id, ev(this.named(e, 'series') ?? pos[0]) as number, ev(this.named(e, 'color') ?? pos[2]), titleVal, this.optsObj(e, ['series', 'title', 'color']));
+        return this.$.plot(
+          id,
+          ev(this.named(e, 'series') ?? pos[0]) as number,
+          ev(this.named(e, 'color') ?? pos[2]),
+          titleVal,
+          this.optsObj(e, ['series', 'title', 'color']),
+        );
       }
-      case 'plotshape': case 'plotchar': case 'plotarrow': {
+      case 'plotshape':
+      case 'plotchar':
+      case 'plotarrow': {
         // Bind by name with Pine's documented POSITIONAL fallback (most scripts call these
         // positionally) — otherwise title/style/location/color/text silently default and the
         // marker renders unstyled at the wrong side. Signatures differ per function:
@@ -495,18 +659,49 @@ class Interp {
         const titleExpr = this.named(e, 'title') ?? pos[1];
         const titleVal = titleExpr ? (this.expr(titleExpr) as string) : `${name} ${id}`;
         if (name === 'plotarrow') {
-          return this.$.marker(id, series, ev(this.named(e, 'colorup') ?? pos[2]), undefined, titleVal, 'abovebar', '', MARKER_KIND[name]);
+          return this.$.marker(
+            id,
+            series,
+            ev(this.named(e, 'colorup') ?? pos[2]),
+            undefined,
+            titleVal,
+            'abovebar',
+            '',
+            MARKER_KIND[name],
+          );
         }
-        const glyph = ev(name === 'plotchar' ? (this.named(e, 'char') ?? pos[2]) : (this.named(e, 'style') ?? pos[2])) as string;
+        const glyph = ev(
+          name === 'plotchar'
+            ? (this.named(e, 'char') ?? pos[2])
+            : (this.named(e, 'style') ?? pos[2]),
+        ) as string;
         const loc = ev(this.named(e, 'location') ?? pos[3]) as string;
         const markerColor = ev(this.named(e, 'color') ?? pos[4]);
         const text = ev(this.named(e, 'text') ?? pos[6]);
-        return this.$.marker(id, series, markerColor, text, titleVal, loc ?? 'abovebar', glyph ?? '', MARKER_KIND[name]);
+        return this.$.marker(
+          id,
+          series,
+          markerColor,
+          text,
+          titleVal,
+          loc ?? 'abovebar',
+          glyph ?? '',
+          MARKER_KIND[name],
+        );
       }
-      case 'plotcandle': case 'plotbar':
-        return this.$.plotcandle(id, ev(this.named(e, 'open') ?? pos[0]) as number, ev(this.named(e, 'high') ?? pos[1]) as number,
-          ev(this.named(e, 'low') ?? pos[2]) as number, ev(this.named(e, 'close') ?? pos[3]) as number,
-          color(), ev(this.named(e, 'wickcolor')), ev(this.named(e, 'bordercolor')), title());
+      case 'plotcandle':
+      case 'plotbar':
+        return this.$.plotcandle(
+          id,
+          ev(this.named(e, 'open') ?? pos[0]) as number,
+          ev(this.named(e, 'high') ?? pos[1]) as number,
+          ev(this.named(e, 'low') ?? pos[2]) as number,
+          ev(this.named(e, 'close') ?? pos[3]) as number,
+          color(),
+          ev(this.named(e, 'wickcolor')),
+          ev(this.named(e, 'bordercolor')),
+          title(),
+        );
       case 'hline':
         return this.$.hline(id, ev(this.named(e, 'price') ?? pos[0]) as number, title());
       case 'fill': {
@@ -517,12 +712,24 @@ class Interp {
         // args are commonly positional, named keys alone can't tell them apart — disambiguate
         // by shape: a numeric 3rd arg (the color form's 3rd arg is always a color) or a
         // present 5th+6th positional arg marks the gradient overload.
-        const tv = this.named(e, 'top_value'), bv = this.named(e, 'bottom_value');
-        const tc = this.named(e, 'top_color'), bc = this.named(e, 'bottom_color');
+        const tv = this.named(e, 'top_value'),
+          bv = this.named(e, 'bottom_value');
+        const tc = this.named(e, 'top_color'),
+          bc = this.named(e, 'bottom_color');
         const top = pos[2]?.type?.kind;
-        const isGradient = !!(tv || bv || tc || bc) || top === 'int' || top === 'float' || !!(pos[4] && pos[5]);
+        const isGradient =
+          !!(tv || bv || tc || bc) || top === 'int' || top === 'float' || !!(pos[4] && pos[5]);
         if (isGradient) {
-          return this.$.fillGradient(id, p1, p2, ev(tv ?? pos[2]) as number, ev(bv ?? pos[3]) as number, ev(tc ?? pos[4]), ev(bc ?? pos[5]), title());
+          return this.$.fillGradient(
+            id,
+            p1,
+            p2,
+            ev(tv ?? pos[2]) as number,
+            ev(bv ?? pos[3]) as number,
+            ev(tc ?? pos[4]),
+            ev(bc ?? pos[5]),
+            title(),
+          );
         }
         return this.$.fill(id, p1, p2, ev(this.named(e, 'color') ?? pos[2]), title());
       }
@@ -536,23 +743,38 @@ class Interp {
 
   /** Mirror of codegen's strategyCall: name-or-positional arg binding + `when` gate. */
   private strategyCall(fn: string, e: Call): unknown {
-    const st = (this.ctx.strategy as any);
+    const st = this.ctx.strategy as any;
     const ev = (x?: Expr) => (x ? this.expr(x) : undefined);
     const when = () => ev(this.named(e, 'when'));
     switch (fn) {
       case 'entry':
       case 'order':
-        return st[fn](ev(this.arg(e, 0, 'id')), ev(this.arg(e, 1, 'direction')),
-          ev(this.arg(e, 2, 'qty')), ev(this.arg(e, 3, 'limit')), ev(this.arg(e, 4, 'stop')), when());
+        return st[fn](
+          ev(this.arg(e, 0, 'id')),
+          ev(this.arg(e, 1, 'direction')),
+          ev(this.arg(e, 2, 'qty')),
+          ev(this.arg(e, 3, 'limit')),
+          ev(this.arg(e, 4, 'stop')),
+          when(),
+        );
       case 'close':
         return st.close(ev(this.arg(e, 0, 'id')), ev(this.named(e, 'qty')), when());
       case 'close_all':
         return st.close_all(when());
       case 'exit':
-        return st.exit(ev(this.arg(e, 0, 'id')), ev(this.arg(e, 1, 'from_entry')),
-          ev(this.arg(e, 2, 'qty')), ev(this.arg(e, 4, 'profit')), ev(this.arg(e, 6, 'loss')),
-          ev(this.arg(e, 7, 'stop')), ev(this.arg(e, 5, 'limit')),
-          ev(this.arg(e, 8, 'trail_price')), ev(this.arg(e, 9, 'trail_points')), ev(this.arg(e, 10, 'trail_offset')), when());
+        return st.exit(
+          ev(this.arg(e, 0, 'id')),
+          ev(this.arg(e, 1, 'from_entry')),
+          ev(this.arg(e, 2, 'qty')),
+          ev(this.arg(e, 4, 'profit')),
+          ev(this.arg(e, 6, 'loss')),
+          ev(this.arg(e, 7, 'stop')),
+          ev(this.arg(e, 5, 'limit')),
+          ev(this.arg(e, 8, 'trail_price')),
+          ev(this.arg(e, 9, 'trail_points')),
+          ev(this.arg(e, 10, 'trail_offset')),
+          when(),
+        );
       case 'cancel':
         return st.cancel(ev(this.arg(e, 0, 'id')), when());
       case 'cancel_all':

@@ -4,14 +4,20 @@
  */
 import { describe, it, expect } from 'bun:test';
 import {
-  compile, Engine, ArrayFeed, type Bar, type CompiledScript, type LibraryRegistry,
+  compile,
+  Engine,
+  ArrayFeed,
+  type Bar,
+  type CompiledScript,
+  type LibraryRegistry,
 } from '../src/index.js';
 
 // ── deterministic bar series ────────────────────────────────
 function mulberry32(seed: number) {
   let a = seed >>> 0;
   return () => {
-    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
@@ -41,7 +47,10 @@ async function crossCheck(c: CompiledScript, bars: Bar[], ticks: [Bar, boolean][
   const ip = new Engine(c, new ArrayFeed(bars), { backend: 'interp' });
   await js.run({ symbol: 'T', timeframe: '1' });
   await ip.run({ symbol: 'T', timeframe: '1' });
-  for (const [bar, close] of ticks) { js.tick(bar, close); ip.tick(bar, close); }
+  for (const [bar, close] of ticks) {
+    js.tick(bar, close);
+    ip.tick(bar, close);
+  }
 
   expect([...ip.outputs.plots.keys()].sort()).toEqual([...js.outputs.plots.keys()].sort());
   for (const [id, jp] of js.outputs.plots) {
@@ -49,7 +58,9 @@ async function crossCheck(c: CompiledScript, bars: Bar[], ticks: [Bar, boolean][
     expect(jp.data.length).toBe(ipp.data.length);
     for (let i = 0; i < jp.data.length; i++) {
       if (!eqNaN(jp.data[i], ipp.data[i])) {
-        throw new Error(`plot ${id} '${jp.title}' diverged at bar ${i}: js=${jp.data[i]} interp=${ipp.data[i]}`);
+        throw new Error(
+          `plot ${id} '${jp.title}' diverged at bar ${i}: js=${jp.data[i]} interp=${ipp.data[i]}`,
+        );
       }
     }
   }
@@ -70,12 +81,15 @@ export addn(float x, float n) => x + n
 `,
       },
     ];
-    const c = compile(`//@version=6
+    const c = compile(
+      `//@version=6
 indicator("consumer")
 import alice/mathlib/1 as ml
 plot(ml.dbl(close), title="d")
 plot(ml.addn(close, 5.0), title="a")
-`, { libraries: registry });
+`,
+      { libraries: registry },
+    );
     const js = await crossCheck(c, bars);
     // dbl(close) == close*2 on the last bar
     const last = bars.length - 1;
@@ -85,16 +99,22 @@ plot(ml.addn(close, 5.0), title="a")
 
   it('imported function is byte-for-byte identical to the same function declared locally', async () => {
     const registry: LibraryRegistry = [
-      { key: 'u/ind/1', source: `//@version=6
+      {
+        key: 'u/ind/1',
+        source: `//@version=6
 library("Ind")
 export smadiff(float src, int len) => ta.sma(src, len) - ta.ema(src, len)
-` },
+`,
+      },
     ];
-    const imported = compile(`//@version=6
+    const imported = compile(
+      `//@version=6
 indicator("imp")
 import u/ind/1 as lib
 plot(lib.smadiff(close, 10), title="v")
-`, { libraries: registry });
+`,
+      { libraries: registry },
+    );
     const local = compile(`//@version=6
 indicator("loc")
 smadiff(float src, int len) => ta.sma(src, len) - ta.ema(src, len)
@@ -114,16 +134,22 @@ plot(smadiff(close, 10), title="v")
 
   it('omitted alias defaults to the lib component', async () => {
     const registry: LibraryRegistry = [
-      { key: 'u/helper/1', source: `//@version=6
+      {
+        key: 'u/helper/1',
+        source: `//@version=6
 library("Helper")
 export triple(float x) => x * 3.0
-` },
+`,
+      },
     ];
-    const c = compile(`//@version=6
+    const c = compile(
+      `//@version=6
 indicator("c")
 import u/helper/1
 plot(helper.triple(close))
-`, { libraries: registry });
+`,
+      { libraries: registry },
+    );
     const js = await crossCheck(c, bars);
     const last = bars.length - 1;
     expect(js.outputs.plots.get(0)!.data[last]).toBeCloseTo(bars[last].close * 3, 9);

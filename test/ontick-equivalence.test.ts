@@ -67,7 +67,10 @@ describe('onTick equivalence — pure ta/price scripts (safe to incrementalize)'
 
 describe('onTick divergence — repaint-aware scripts (why onTick is NOT transparent)', () => {
   it('barstate.islast diverges at the prior bar (it was "last" when it committed)', async () => {
-    const { full, incr } = await fullVsIncremental('//@version=6\nindicator("x")\nplot(barstate.islast ? 1 : 0)', 6);
+    const { full, incr } = await fullVsIncremental(
+      '//@version=6\nindicator("x")\nplot(barstate.islast ? 1 : 0)',
+      6,
+    );
     // FULL: only the true rightmost bar is last.
     expect(full.outputs.plots.get(0)!.data).toEqual([0, 0, 0, 0, 0, 1]);
     // INCREMENTAL: bar 4 was the last of the N-1 batch when it committed, and stays committed.
@@ -76,7 +79,10 @@ describe('onTick divergence — repaint-aware scripts (why onTick is NOT transpa
   });
 
   it('barstate.isrealtime diverges on the stepped bar even when it closes', async () => {
-    const { full, incr } = await fullVsIncremental('//@version=6\nindicator("x")\nplot(barstate.isrealtime ? 1 : 0)', 6);
+    const { full, incr } = await fullVsIncremental(
+      '//@version=6\nindicator("x")\nplot(barstate.isrealtime ? 1 : 0)',
+      6,
+    );
     // FULL treats every bar as history → never realtime.
     expect(full.outputs.plots.get(0)!.data).toEqual([0, 0, 0, 0, 0, 0]);
     // INCREMENTAL: the stepped bar ran under realtimeBarState → realtime on the last bar.
@@ -86,7 +92,10 @@ describe('onTick divergence — repaint-aware scripts (why onTick is NOT transpa
   it('barstate.isconfirmed agrees here (closing tick confirms, matching full historical)', async () => {
     // Documents the one repaint flag that does NOT diverge when the tick closes the bar:
     // both paths treat every committed bar as confirmed. (It WOULD diverge on a non-closing tick.)
-    const { full, incr } = await fullVsIncremental('//@version=6\nindicator("x")\nplot(barstate.isconfirmed ? 1 : 0)', 6);
+    const { full, incr } = await fullVsIncremental(
+      '//@version=6\nindicator("x")\nplot(barstate.isconfirmed ? 1 : 0)',
+      6,
+    );
     expect(incr.outputs.plots.get(0)!.data).toEqual(full.outputs.plots.get(0)!.data);
     expect(full.outputs.plots.get(0)!.data).toEqual([1, 1, 1, 1, 1, 1]);
   });

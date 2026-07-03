@@ -7,7 +7,12 @@ import { parse } from '../src/parser/parser.js';
 import { Qualifier, joinQualifier, qtype } from '../src/sema/types.js';
 
 const bars: Bar[] = Array.from({ length: 15 }, (_, i) => ({
-  time: i * 60000, open: 100 + i, high: 105 + i, low: 95 + i, close: 100 + (i % 4), volume: 1000 + i * 10,
+  time: i * 60000,
+  open: 100 + i,
+  high: 105 + i,
+  low: 95 + i,
+  close: 100 + (i % 4),
+  volume: 1000 + i * 10,
 }));
 
 describe('ta.dev (mean absolute deviation)', () => {
@@ -16,7 +21,8 @@ describe('ta.dev (mean absolute deviation)', () => {
     [5, 5, 5].forEach((v) => ta.dev(v, 3, 0));
     expect(ta.dev(5, 3, 0)).toBeCloseTo(0, 12);
     const ta2 = new Ta();
-    ta2.dev(0, 3, 0); ta2.dev(3, 3, 0);
+    ta2.dev(0, 3, 0);
+    ta2.dev(3, 3, 0);
     expect(ta2.dev(6, 3, 0)).toBeCloseTo((3 + 0 + 3) / 3, 9); // mean 3, |0-3|+|3-3|+|6-3| = 6 → /3 = 2
   });
 });
@@ -70,7 +76,8 @@ plot(bar_index, title="bi")
 
 describe('parse-only constructs do not crash the parser', () => {
   it('parses type definitions, enums, and imports', () => {
-    const p = parse(tokenize(`//@version=6
+    const p = parse(
+      tokenize(`//@version=6
 indicator("p")
 type Point
     float x = 0.0
@@ -80,7 +87,8 @@ enum Side
     short
 import user/lib/1 as helper
 plot(close)
-`));
+`),
+    );
     expect(p.body.find((s) => s.kind === 'TypeDef')).toBeDefined();
     expect(p.body.find((s) => s.kind === 'Import')).toBeDefined();
   });
@@ -96,11 +104,13 @@ plot(close)
   });
 
   it('parses collection type templates', () => {
-    const p = parse(tokenize(`//@version=6
+    const p = parse(
+      tokenize(`//@version=6
 indicator("c")
 array<float> xs = na
 plot(close)
-`));
+`),
+    );
     expect(p.body[1].kind).toBe('VarDecl');
   });
 });
@@ -117,7 +127,10 @@ plot(time_close, title="tc")
     await eng.run({ symbol: 'T', timeframe: '1' });
     expect(eng.outputs.alerts.length).toBe(bars.length); // fired each bar
     const b = bars[6];
-    expect(eng.outputs.plots.get(0)!.data[6]).toBeCloseTo((b.high + b.low + b.close + b.close) / 4, 9);
+    expect(eng.outputs.plots.get(0)!.data[6]).toBeCloseTo(
+      (b.high + b.low + b.close + b.close) / 4,
+      9,
+    );
     expect(eng.outputs.plots.get(1)!.data[6]).toBe(b.time + 60_000); // close time = open + one tf ("1" = 1min)
   });
 });

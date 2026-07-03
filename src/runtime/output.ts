@@ -34,7 +34,12 @@ export interface MarkerSeries {
   data: (MarkerPoint | null)[];
 }
 
-export interface OHLC { open: number; high: number; low: number; close: number; }
+export interface OHLC {
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
 export interface CandleSeries {
   id: number;
   title: string;
@@ -94,7 +99,11 @@ export class OutputCollector {
   /** request.security[_lower_tf] data dependencies (deduped), for host-side fetch + inject. */
   readonly securityRequests: SecurityRequest[] = [];
   recordSecurityRequest(symbol: string, timeframe: string, lowerTf: boolean): void {
-    if (this.securityRequests.some((r) => r.symbol === symbol && r.timeframe === timeframe && r.lowerTf === lowerTf)) {
+    if (
+      this.securityRequests.some(
+        (r) => r.symbol === symbol && r.timeframe === timeframe && r.lowerTf === lowerTf,
+      )
+    ) {
       return;
     }
     this.securityRequests.push({ symbol, timeframe, lowerTf });
@@ -116,7 +125,13 @@ export class OutputCollector {
   }
 
   // ── markers (plotshape / plotchar / plotarrow) ────────────
-  declareMarker(id: number, title: string, kind: MarkerSeries['kind'], location: string, glyph: string): void {
+  declareMarker(
+    id: number,
+    title: string,
+    kind: MarkerSeries['kind'],
+    location: string,
+    glyph: string,
+  ): void {
     if (!this.markers.has(id)) this.markers.set(id, { id, title, kind, location, glyph, data: [] });
   }
   marker(id: number, bar: number, on: boolean, point: MarkerPoint): void {
@@ -126,9 +141,17 @@ export class OutputCollector {
 
   // ── candle overlays (plotcandle / plotbar) ────────────────
   declareCandle(id: number, title: string): void {
-    if (!this.candles.has(id)) this.candles.set(id, { id, title, data: [], colors: [], wickColors: [], borderColors: [] });
+    if (!this.candles.has(id))
+      this.candles.set(id, { id, title, data: [], colors: [], wickColors: [], borderColors: [] });
   }
-  candle(id: number, bar: number, ohlc: OHLC | null, color?: string | null, wick?: string | null, border?: string | null): void {
+  candle(
+    id: number,
+    bar: number,
+    ohlc: OHLC | null,
+    color?: string | null,
+    wick?: string | null,
+    border?: string | null,
+  ): void {
     const s = this.candles.get(id);
     if (!s) return;
     s.data[bar] = ohlc;
@@ -148,7 +171,14 @@ export class OutputCollector {
     const s = this.fills.get(id);
     if (s) s.colors[bar] = color; // null (na) stored too — a realtime tick may clear a fill set by an earlier tick
   }
-  fillGradientPoint(id: number, bar: number, topValue: number, bottomValue: number, topColor: string | null, bottomColor: string | null): void {
+  fillGradientPoint(
+    id: number,
+    bar: number,
+    topValue: number,
+    bottomValue: number,
+    topColor: string | null,
+    bottomColor: string | null,
+  ): void {
     const s = this.fills.get(id);
     if (!s) return;
     if (!s.gradient) s.gradient = { topValue: [], bottomValue: [], topColor: [], bottomColor: [] };

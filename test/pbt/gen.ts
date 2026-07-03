@@ -10,7 +10,12 @@ const LOWER = 'abcdefghijklmnopqrstuvwxyz'.split('');
 // (`PineCoders/AllTimeHighLow/1`, `rayolf/rc_highest_lowest/1`). Exercise all of them,
 // but keep a fixed leading letter so a segment is never a keyword and never starts with
 // a digit (both would be invalid where a segment is parsed as an identifier).
-const IDENT_CHARS = [...LOWER, ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''), ...'0123456789'.split(''), '_'];
+const IDENT_CHARS = [
+  ...LOWER,
+  ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''),
+  ...'0123456789'.split(''),
+  '_',
+];
 
 /** A safe Pine identifier segment: starts with a fixed letter, never a keyword, no `/`. */
 export const seg: fc.Arbitrary<string> = fc
@@ -24,7 +29,8 @@ export const versionInt: fc.Arbitrary<number> = fc.integer({ min: 1, max: 9999 }
 function mulberry32(seed: number) {
   let a = seed >>> 0;
   return () => {
-    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
@@ -59,7 +65,12 @@ export function exprArb(leaves: string[], depth = 3): fc.Arbitrary<string> {
   const sub = () => exprArb(leaves, depth - 1);
   return fc.oneof(
     { weight: 2, arbitrary: leaf },
-    { weight: 3, arbitrary: fc.tuple(sub(), sub(), fc.constantFrom('+', '-', '*')).map(([a, b, op]) => `(${a} ${op} ${b})`) },
+    {
+      weight: 3,
+      arbitrary: fc
+        .tuple(sub(), sub(), fc.constantFrom('+', '-', '*'))
+        .map(([a, b, op]) => `(${a} ${op} ${b})`),
+    },
     { weight: 1, arbitrary: sub().map((e) => `ta.sma(${e}, 5)`) },
     { weight: 1, arbitrary: sub().map((e) => `ta.ema(${e}, 4)`) },
     { weight: 1, arbitrary: sub().map((e) => `math.abs(${e})`) },

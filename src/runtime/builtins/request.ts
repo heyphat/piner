@@ -23,7 +23,12 @@ export interface HtfBar {
   volume: number;
 }
 export interface BaseBar {
-  time: number; open: number; high: number; low: number; close: number; volume: number;
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
 }
 
 const DAY = 86400000;
@@ -35,14 +40,19 @@ export function bucketKey(time: number, tf: string): number {
   const unit = (m[2] || '').toUpperCase(); // '' ⇒ minutes
   const d = new Date(time);
   switch (unit) {
-    case 'S': return Math.floor(time / (mult * 1000));
-    case 'D': return Math.floor(time / (mult * DAY));
+    case 'S':
+      return Math.floor(time / (mult * 1000));
+    case 'D':
+      return Math.floor(time / (mult * DAY));
     // Weeks start MONDAY (ISO 8601 / TradingView crypto-forex). Epoch day 0 = Thu; a Monday is
     // epoch day ≡ 4 (mod 7), so the +3 offset makes floor((day+3)/7) increment on Mondays. (+4
     // would increment on Sundays, splitting Sun off into a new week — wrong vs TradingView.)
-    case 'W': return Math.floor((Math.floor(time / DAY) + 3) / (7 * mult));
-    case 'M': return d.getUTCFullYear() * 12 + Math.floor(d.getUTCMonth() / mult);
-    default: return Math.floor(time / (mult * 60000)); // minutes
+    case 'W':
+      return Math.floor((Math.floor(time / DAY) + 3) / (7 * mult));
+    case 'M':
+      return d.getUTCFullYear() * 12 + Math.floor(d.getUTCMonth() / mult);
+    default:
+      return Math.floor(time / (mult * 60000)); // minutes
   }
 }
 
@@ -50,7 +60,10 @@ export function bucketKey(time: number, tf: string): number {
  * Resample base bars into HTF bars. Returns the HTF OHLCV bars (ascending) and,
  * per base-bar index, the index of the HTF bucket it belongs to.
  */
-export function resampleToTimeframe(bars: BaseBar[], tf: string): { htf: HtfBar[]; bucketOf: number[] } {
+export function resampleToTimeframe(
+  bars: BaseBar[],
+  tf: string,
+): { htf: HtfBar[]; bucketOf: number[] } {
   const htf: HtfBar[] = [];
   const bucketOf: number[] = new Array(bars.length);
   let curKey: number | null = null;
@@ -58,7 +71,14 @@ export function resampleToTimeframe(bars: BaseBar[], tf: string): { htf: HtfBar[
     const b = bars[i];
     const k = bucketKey(b.time, tf);
     if (k !== curKey) {
-      htf.push({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? 0 });
+      htf.push({
+        time: b.time,
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        volume: b.volume ?? 0,
+      });
       curKey = k;
     } else {
       const h = htf[htf.length - 1];

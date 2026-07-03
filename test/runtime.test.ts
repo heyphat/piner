@@ -92,8 +92,10 @@ describe('SeriesStore', () => {
   it('reverse-indexes (0=current) and returns NaN out of range', () => {
     const s = new SeriesStore();
     const slot = s.declareNumericSlot();
-    s.set(slot, 10); s.commitBar();
-    s.set(slot, 20); s.commitBar();
+    s.set(slot, 10);
+    s.commitBar();
+    s.set(slot, 20);
+    s.commitBar();
     s.set(slot, 30); // current (uncommitted)
     expect(s.get(slot, 0)).toBe(30);
     expect(s.get(slot, 1)).toBe(20);
@@ -104,7 +106,11 @@ describe('SeriesStore', () => {
   it('grows capacity beyond the initial 1024 bars', () => {
     const s = new SeriesStore();
     const slot = s.declareNumericSlot();
-    for (let i = 0; i < 3000; i++) { s.beginBar(); s.set(slot, i); s.commitBar(); }
+    for (let i = 0; i < 3000; i++) {
+      s.beginBar();
+      s.set(slot, i);
+      s.commitBar();
+    }
     // after committing 3000 bars, the last written value is at offset 1
     // (offset 0 is the next, not-yet-written bar).
     expect(s.get(slot, 1)).toBe(2999);
@@ -114,8 +120,10 @@ describe('SeriesStore', () => {
   it('truncateTo rolls back the bar counter', () => {
     const s = new SeriesStore();
     const slot = s.declareNumericSlot();
-    s.set(slot, 1); s.commitBar();
-    s.set(slot, 2); s.commitBar();
+    s.set(slot, 1);
+    s.commitBar();
+    s.set(slot, 2);
+    s.commitBar();
     expect(s.committedBars).toBe(2);
     s.truncateTo(1);
     expect(s.committedBars).toBe(1);
@@ -126,12 +134,14 @@ describe('SeriesStore', () => {
   it('history slots are polymorphic: non-numeric values read back via getHist', () => {
     const s = new SeriesStore();
     const slot = s.declareNumericSlot();
-    s.set(slot, { a: 1 }); s.commitBar(); // bar 0: an object
-    s.set(slot, 42); s.commitBar();        // bar 1: a number (clears the overlay at this bar)
-    s.set(slot, "txt");                    // bar 2 (in progress): a string
-    expect(s.getHist(slot, 0)).toBe("txt");        // current bar → string
-    expect(s.getHist(slot, 1)).toBe(42);           // 1 back → number (not the stale object)
-    expect(s.getHist(slot, 2)).toEqual({ a: 1 });  // 2 back → object
+    s.set(slot, { a: 1 });
+    s.commitBar(); // bar 0: an object
+    s.set(slot, 42);
+    s.commitBar(); // bar 1: a number (clears the overlay at this bar)
+    s.set(slot, 'txt'); // bar 2 (in progress): a string
+    expect(s.getHist(slot, 0)).toBe('txt'); // current bar → string
+    expect(s.getHist(slot, 1)).toBe(42); // 1 back → number (not the stale object)
+    expect(s.getHist(slot, 2)).toEqual({ a: 1 }); // 2 back → object
     expect(Number.isNaN(s.getHist(slot, 9) as number)).toBe(true); // out of range → NaN
     // the numeric fast-path read (get) still returns NaN where an object lives
     expect(s.get(slot, 2)).toBeNaN();

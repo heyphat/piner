@@ -31,19 +31,43 @@ export interface Token {
 }
 
 export const KEYWORDS = new Set([
-  'if', 'else', 'switch', 'for', 'to', 'by', 'in', 'while', 'break', 'continue',
-  'var', 'varip', 'and', 'or', 'not', 'true', 'false', 'na', 'import', 'as',
-  'export', 'method', 'type', 'enum', 'int', 'float', 'bool', 'color', 'string',
-  'const', 'simple', 'series',
+  'if',
+  'else',
+  'switch',
+  'for',
+  'to',
+  'by',
+  'in',
+  'while',
+  'break',
+  'continue',
+  'var',
+  'varip',
+  'and',
+  'or',
+  'not',
+  'true',
+  'false',
+  'na',
+  'import',
+  'as',
+  'export',
+  'method',
+  'type',
+  'enum',
+  'int',
+  'float',
+  'bool',
+  'color',
+  'string',
+  'const',
+  'simple',
+  'series',
 ]);
 
 /** Multi-character operators, longest first (maximal munch). */
-export const MULTI_OPS = [
-  ':=', '==', '!=', '<=', '>=', '=>', '+=', '-=', '*=', '/=', '%=',
-];
+export const MULTI_OPS = [':=', '==', '!=', '<=', '>=', '=>', '+=', '-=', '*=', '/=', '%='];
 
-export const SINGLE_OPS = new Set([
-  '+', '-', '*', '/', '%', '<', '>', '=', '?', ':',
-]);
+export const SINGLE_OPS = new Set(['+', '-', '*', '/', '%', '<', '>', '=', '?', ':']);
 
 export const PUNCT = new Set(['(', ')', '[', ']', ',', '.']);

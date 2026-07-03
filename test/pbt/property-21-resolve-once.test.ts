@@ -16,9 +16,18 @@ describe('Property 21 — shared libraries are resolved exactly once', () => {
         // Ensure the four lib names are distinct to avoid accidental identity clashes.
         fc.pre(new Set([baseN, leftN, rightN]).size === 3);
         const reg = indexRegistry([
-          { key: `${u}/${baseN}/1`, source: `//@version=6\nlibrary("B")\nexport inc(float x) => x + 1.0\n` },
-          { key: `${u}/${leftN}/1`, source: `//@version=6\nlibrary("L")\nimport ${u}/${baseN}/1 as b\nexport l(float x) => b.inc(x)\n` },
-          { key: `${u}/${rightN}/1`, source: `//@version=6\nlibrary("R")\nimport ${u}/${baseN}/1 as b\nexport r(float x) => b.inc(x)\n` },
+          {
+            key: `${u}/${baseN}/1`,
+            source: `//@version=6\nlibrary("B")\nexport inc(float x) => x + 1.0\n`,
+          },
+          {
+            key: `${u}/${leftN}/1`,
+            source: `//@version=6\nlibrary("L")\nimport ${u}/${baseN}/1 as b\nexport l(float x) => b.inc(x)\n`,
+          },
+          {
+            key: `${u}/${rightN}/1`,
+            source: `//@version=6\nlibrary("R")\nimport ${u}/${baseN}/1 as b\nexport r(float x) => b.inc(x)\n`,
+          },
         ]);
         const graph = new LibraryResolver(reg).resolve([
           { kind: 'Import', user: u, lib: leftN, version: '1' },

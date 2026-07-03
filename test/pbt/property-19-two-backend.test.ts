@@ -21,8 +21,14 @@ describe('Property 19 — two-backend byte-for-byte output holds with imports', 
         async (e1, e2, bars) => {
           // base exports g; mid imports base and exports f (transitive); consumer imports mid + base.
           const registry = [
-            { key: 'u/base/1', source: `//@version=6\nlibrary("Base")\nexport g(float src) => ${e2}\n` },
-            { key: 'u/mid/1', source: `//@version=6\nlibrary("Mid")\nimport u/base/1 as b\nexport f(float src) => ${e1} + b.g(src)\n` },
+            {
+              key: 'u/base/1',
+              source: `//@version=6\nlibrary("Base")\nexport g(float src) => ${e2}\n`,
+            },
+            {
+              key: 'u/mid/1',
+              source: `//@version=6\nlibrary("Mid")\nimport u/base/1 as b\nexport f(float src) => ${e1} + b.g(src)\n`,
+            },
           ];
           const c = compile(
             `//@version=6\nindicator("t")\nimport u/mid/1 as m\nimport u/base/1 as b\nplot(m.f(close), title="p1")\nplot(b.g(high), title="p2")\n`,
@@ -37,8 +43,10 @@ describe('Property 19 — two-backend byte-for-byte output holds with imports', 
           // Realtime replay: re-run the open bar (repaint) then confirm.
           const nb = bars[bars.length - 1];
           const live = { ...nb, time: nb.time + 60000, close: nb.close + 1 };
-          js.tick(live, false); ip.tick(live, false);
-          js.tick(live, true); ip.tick(live, true);
+          js.tick(live, false);
+          ip.tick(live, false);
+          js.tick(live, true);
+          ip.tick(live, true);
           comparePlots(js.outputs.plots, ip.outputs.plots, 'realtime');
           // sanity: the eqNaN helper is symmetric for the extreme values used here.
           void eqNaN;

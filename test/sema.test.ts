@@ -8,7 +8,12 @@ import type { VarDecl, Binary } from '../src/parser/ast.js';
 const an = (src: string) => analyze(parse(tokenize(src)));
 const HEAD = '//@version=6\nindicator("x")\n';
 const bars: Bar[] = Array.from({ length: 12 }, (_, i) => ({
-  time: i * 60000, open: 100 + i, high: 102 + i, low: 99 + i, close: 100 + i, volume: 1,
+  time: i * 60000,
+  open: 100 + i,
+  high: 102 + i,
+  low: 99 + i,
+  close: 100 + i,
+  volume: 1,
 }));
 
 describe('type inference (drives + vs concat)', () => {
@@ -43,18 +48,26 @@ describe('type inference (drives + vs concat)', () => {
 
 describe('diagnostics', () => {
   it('warns on == na and != na', () => {
-    const w = an(HEAD + 'b = close == na\nc = close != na\n').diagnostics.filter((d) => d.severity === 'warning');
+    const w = an(HEAD + 'b = close == na\nc = close != na\n').diagnostics.filter(
+      (d) => d.severity === 'warning',
+    );
     expect(w.length).toBeGreaterThanOrEqual(2);
   });
   it('errors on undefined variables', () => {
-    expect(an(HEAD + 'y = nope + 1\n').diagnostics.some((d) => d.severity === 'error' && /undefined/.test(d.message))).toBe(true);
+    expect(
+      an(HEAD + 'y = nope + 1\n').diagnostics.some(
+        (d) => d.severity === 'error' && /undefined/.test(d.message),
+      ),
+    ).toBe(true);
   });
   it('warns on a stateful call inside a conditional branch', () => {
     const w = an(HEAD + 'v = close > open ? ta.sma(close, 5) : 0.0\n').diagnostics;
     expect(w.some((d) => d.severity === 'warning' && /stateful/.test(d.message))).toBe(true);
   });
   it('rejects deferred features with a clear error', () => {
-    expect(() => compile(HEAD + 'import user/lib/1 as lib\nplot(lib.f(close))\n')).toThrow(CompileError); // library import/export still deferred
+    expect(() => compile(HEAD + 'import user/lib/1 as lib\nplot(lib.f(close))\n')).toThrow(
+      CompileError,
+    ); // library import/export still deferred
   });
 
   it('chained / inline-expression history compiles (materialized into an auto-history slot)', () => {
@@ -86,7 +99,10 @@ describe('slot allocation', () => {
   });
 
   it('UDT constructor args are analyzed exactly once (no duplicate inputs / state slots)', () => {
-    const r = an(HEAD + 'type P\n    float v\n    float w\np = P.new(input.float(1.0, "Length"), ta.sma(close, 5))\n');
+    const r = an(
+      HEAD +
+        'type P\n    float v\n    float w\np = P.new(input.float(1.0, "Length"), ta.sma(close, 5))\n',
+    );
     expect(r.inputs.length).toBe(1);
     expect(r.inputs[0].key).toBe('Length'); // no phantom "Length (2)" key
     expect(r.stateSiteCount).toBe(1); // the ta.sma arg got ONE site, not two
@@ -95,7 +111,10 @@ describe('slot allocation', () => {
 
 describe('history back-patch and var+history run correctly', () => {
   it('prev = run[1] yields the previous bar value of a var', async () => {
-    const c = compile(HEAD + 'var float run = 0.0\nrun := run + close\nprev = run[1]\nplot(run, title="run")\nplot(prev, title="prev")\n');
+    const c = compile(
+      HEAD +
+        'var float run = 0.0\nrun := run + close\nprev = run[1]\nplot(run, title="run")\nplot(prev, title="prev")\n',
+    );
     const eng = new Engine(c, new ArrayFeed(bars));
     await eng.run({ symbol: 'T', timeframe: '1' });
     const run = eng.outputs.plots.get(0)!.data;
