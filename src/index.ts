@@ -17,7 +17,7 @@ export type {
 export { tokenize, LexError } from './lexer/lexer.js';
 export { parse, ParseError } from './parser/parser.js';
 export { analyze } from './sema/analyze.js';
-export type { Diagnostic, AnalyzeResult, InputDecl } from './sema/analyze.js';
+export type { Diagnostic, AnalyzeResult, InputDecl, SecurityDependency } from './sema/analyze.js';
 export { emit } from './codegen/emit.js';
 export { makeInterpreted } from './interp/interpreter.js';
 export type * as ast from './parser/ast.js';

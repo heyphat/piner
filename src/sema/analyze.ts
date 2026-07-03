@@ -78,6 +78,20 @@ export interface InputDecl {
   tooltip?: string;
 }
 
+export interface SecurityDependency {
+  /** true for request.security_lower_tf, false for request.security. */
+  lowerTf: boolean;
+  /** true when the symbol is a self-reference (`syminfo.tickerid`/`syminfo.ticker`/empty). */
+  self: boolean;
+  /** Statically-resolved literal symbol (null when self or dynamic). */
+  symbol: string | null;
+  /** Statically-resolved literal timeframe string (null when dynamic). */
+  timeframe: string | null;
+  /** true when the symbol or timeframe could not be resolved statically (a run is
+   *  needed to know the concrete dependency). */
+  dynamic: boolean;
+}
+
 export interface AnalyzeResult {
   program: Program;
   diagnostics: Diagnostic[];
@@ -89,6 +103,8 @@ export interface AnalyzeResult {
   autoHistory: { slot: number; leaf: string }[];
   /** The script's `input.*` declarations, in source order (settings schema). */
   inputs: InputDecl[];
+  /** Best-effort static request.security[_lower_tf] dependencies (one per call site). */
+  securityDependencies: SecurityDependency[];
 }
 
 // Builtin OHLCV+time leaves backed by a fixed series slot.
@@ -262,6 +278,7 @@ class Analyzer {
    *  (e.g. `input.string(HISTORICAL, options = [HISTORICAL, PRESENT])`). */
   private constEnv = new Map<string, Expr>();
   private securityCounter = 0;
+  private securityDeps: SecurityDependency[] = [];
 
   constructor(private program: Program) {}
 
@@ -283,6 +300,7 @@ class Analyzer {
       varSlotCount: c.varSlotCount,
       autoHistory: this.autoHistory,
       inputs: this.inputs,
+      securityDependencies: this.securityDeps,
     };
   }
 
@@ -634,6 +652,7 @@ class Analyzer {
     // dependency recording); other request.* are deferred.
     if (nsName === 'request' && (fnName === 'security' || fnName === 'security_lower_tf')) {
       e.securitySite = this.securityCounter++;
+      this.securityDeps.push(this.extractSecurityDep(e, fnName === 'security_lower_tf'));
     } else if (nsName && DEFERRED_NAMESPACES.has(nsName)) {
       this.error(e, `'${nsName}.${fnName}' is not yet supported`);
     }
@@ -658,6 +677,47 @@ class Analyzer {
     }
 
     return (e.type = this.callReturnType(nsName, fnName));
+  }
+
+  /** Best-effort static extraction of a request.security[_lower_tf] dependency. */
+  private extractSecurityDep(e: Extract<Expr, { kind: 'Call' }>, lowerTf: boolean): SecurityDependency {
+    const positional = e.args.filter((a) => !a.name).map((a) => a.value);
+    const symArg = (e.args.find((a) => a.name === 'symbol')?.value) ?? positional[0];
+    const tfArg = (e.args.find((a) => a.name === 'timeframe')?.value) ?? positional[1];
+
+    const symNode = this.deref(symArg);
+    let self = false;
+    let symbol: string | null = null;
+    let symDynamic = true;
+    if (symNode) {
+      if (symNode.kind === 'String') {
+        if (symNode.value === '') self = true;
+        else symbol = symNode.value;
+        symDynamic = false;
+      } else if (
+        symNode.kind === 'Member' && symNode.object.kind === 'Ident'
+        && symNode.object.name === 'syminfo' && (symNode.property === 'tickerid' || symNode.property === 'ticker')
+      ) {
+        self = true;
+        symDynamic = false;
+      }
+    }
+
+    const tfNode = this.deref(tfArg);
+    const timeframe = tfNode && tfNode.kind === 'String' ? tfNode.value : null;
+    const tfDynamic = timeframe === null;
+
+    return { lowerTf, self, symbol, timeframe, dynamic: symDynamic || tfDynamic };
+  }
+
+  /** Follow const-bound identifiers to their defining expression (bounded), for static folding. */
+  private deref(node: Expr | undefined): Expr | undefined {
+    let n = node;
+    let guard = 0;
+    while (n && n.kind === 'Ident' && this.constEnv.has(n.name) && guard++ < 8) {
+      n = this.constEnv.get(n.name);
+    }
+    return n;
   }
 
   private callReturnType(ns: string | undefined, fn: string | undefined): PineType {

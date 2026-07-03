@@ -5,7 +5,7 @@
 import { tokenize } from '../lexer/lexer.js';
 import { parse } from '../parser/parser.js';
 import { inlineUserFunctions } from '../sema/inline.js';
-import { analyze, CompileError, type Diagnostic, type InputDecl } from '../sema/analyze.js';
+import { analyze, CompileError, type Diagnostic, type InputDecl, type SecurityDependency } from '../sema/analyze.js';
 import {
   indexRegistry, LibraryResolver, mergeLibraries, checkExportConstraints,
   classifyDeclaration, type CompileOptions,
@@ -30,6 +30,10 @@ export interface ScriptMetadata {
   varSlotCount: number;
   /** `input.*` settings schema (title/type/default/min/max/options), in order. */
   inputs: InputDecl[];
+  /** Best-effort static request.security[_lower_tf] dependencies (one per call site).
+   *  A host can read these after `compile()` (no run needed) to plan cross-symbol /
+   *  lower-TF data fetches; entries with `dynamic: true` need a run to resolve. */
+  securityDependencies: SecurityDependency[];
   /** Drawing-object caps from indicator()/strategy() (Pine defaults: lines/labels/boxes = 50,
    *  polylines = 100). Consumers FIFO-trim each drawing type to these limits. */
   maxLinesCount: number;
@@ -125,6 +129,7 @@ export function compile(source: string, options?: CompileOptions): CompiledScrip
       stateSiteCount: analysis.stateSiteCount,
       varSlotCount: analysis.varSlotCount,
       inputs: analysis.inputs,
+      securityDependencies: analysis.securityDependencies,
     },
     diagnostics,
   };

@@ -192,6 +192,19 @@ export class StrategyBroker {
   get equity(): number { return this.settings.initialCapital + this.realized + this.openProfit; }
   get openProfit(): number { return this.size === 0 ? 0 : this.size * (this.host.close - this.avgPrice); }
   get netProfit(): number { return this.realized; }
+  /** Profit factor: gross profit / |gross loss| (Infinity when there are no losing
+   *  trades, 0 when flat). Not a Pine `strategy.*` builtin — a convenience metric
+   *  computed here so consumers don't recompute it inconsistently. */
+  get profitFactor(): number {
+    const gl = Math.abs(this.grossLoss);
+    return gl > 0 ? this.grossProfit / gl : this.grossProfit > 0 ? Infinity : 0;
+  }
+  /** Win rate: winning / decided (win+loss) closed trades, 0..1. Convenience metric
+   *  (not a Pine builtin), computed here for a single source of truth. */
+  get winRate(): number {
+    const decided = this.wins + this.losses;
+    return decided > 0 ? this.wins / decided : 0;
+  }
   /** Weighted average fill price of the OPEN lots (NaN while flat). Derived from the
    *  lots so a partial FIFO close re-prices the remainder, as TradingView does. */
   get avgPrice(): number {
