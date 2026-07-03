@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0]
+
+### Added
+
+- `ScriptMetadata.securityDependencies` and the exported `SecurityDependency` type:
+  best-effort **static** extraction of each `request.security` / `request.security_lower_tf`
+  call site's symbol and timeframe, so a host can plan cross-symbol and lower-timeframe data
+  fetches from `compile()` alone (no run). `syminfo.tickerid`/`syminfo.ticker`/`""` resolve as
+  symbol self-references (`self`), and `timeframe.period`/`""` as chart-timeframe self-references
+  (`tfSelf`); a symbol or timeframe that cannot be resolved statically — including any variable
+  reassigned via `:=` (a loop body included) or an identifier shadowed by a local or
+  inlined-function parameter — is conservatively flagged `dynamic: true`.
+- `strategy` broker convenience metrics `profitFactor` (gross profit ÷ |gross loss|) and
+  `winRate` (winning ÷ decided trades), computed at the broker for a single source of truth.
+
 ## [0.3.0]
 
 ### Added
@@ -245,6 +260,7 @@ Initial release: clean-room Pine Script v6 engine. `compile(src)` lexes → pars
 → analyzes → emits JS and an interpreter oracle, cross-checked for identical
 output. Real indicators (SMA/EMA cross, RSI, Bollinger, ATR, …) run end-to-end.
 
+[0.4.0]: https://github.com/heyphat/piner/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/heyphat/piner/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/heyphat/piner/compare/v0.1.8...v0.2.1
 [0.1.8]: https://github.com/heyphat/piner/compare/v0.1.7...v0.1.8
