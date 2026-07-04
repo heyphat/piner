@@ -12,6 +12,7 @@ public TradingView v6 docs only.
 | [pine-semantics.md](./pine-semantics.md)                         | The **specification** the engine implements: verified Pine v6 execution semantics (bar-by-bar, series `[]`, `na`, `var`/`varip`, rollback, repaint, `request.security()`), with source citations.                                                                   |
 | [coverage-and-compatibility.md](./coverage-and-compatibility.md) | **What's supported** of Pine v6 (measured against the official reference-manual corpus) and **how piner maps onto fractal-chart** — the integration seam, compatibility scorecard, and adapter surface.                                                             |
 | [pine-v6-feature-support.md](./pine-v6-feature-support.md)       | The **feature→location map**: every language feature and builtin namespace with its `src/` implementation site and support status (✅ / ⚠️ / ❌).                                                                                                                   |
+| [strategy-broker.md](./strategy-broker.md)                       | **The `strategy.*` broker simulator**: execution/fill model, order & lot data model, exit brackets + trailing stops, position accounting, equity/statistics + derived risk metrics (Sharpe/Sortino/CAGR/…), the `strategy.risk.*` rules, realtime rollback, the facade, and known deviations. |
 | [parity-matrix.md](./parity-matrix.md)                           | **Numeric parity vs an independent reference runtime / the v6 manual**, namespace by namespace — how the math is verified.                                                                                                                                          |
 | [v6-coverage-gap.md](./v6-coverage-gap.md)                       | **Auto-generated** name-by-name diff of piner's surface against every `##` entry in the bundled v6 reference manual (`bun scripts/v6-coverage-audit.ts`).                                                                                                           |
 | [audit-2026-07.md](./audit/2026-07.md)                           | **Correctness audit & fix log** (July 2026): every verified logic bug found in the initial release — na-truthiness, realtime rollback, inliner capture, broker fills, numeric formulas — what was fixed, what was deliberately left, and the test-coverage lessons. |
@@ -30,12 +31,13 @@ drawing objects), **inputs** (schema + override-by-title), broad
 
 - **Two backends, byte-for-byte identical.** `compile(src)` emits both a JS closure
   (`codegen/emit.ts`) and an AST interpreter (`interp/interpreter.ts`) against the
-  same runtime `$`; the whole test suite asserts they agree. **530 tests** (1 skipped
+  same runtime `$`; the whole test suite asserts they agree. **669 tests** (1 skipped
   — the optional reference-manual corpus), 0 failing.
 - **Coverage.** ~96% of the official v6 reference-manual single-script examples
   compile _and run_ end-to-end with **0 backend divergences**; the auto-generated
-  gap report covers **846/884 manual entries (95.7%)** with every _fillable_ gap
-  closed. See [coverage-and-compatibility.md](./coverage-and-compatibility.md).
+  gap report covers **852/884 manual entries (96.4%)** — every _fillable_ gap
+  closed and **Functions at 100%** (457/457, incl. `strategy.risk.*`). See
+  [coverage-and-compatibility.md](./coverage-and-compatibility.md).
 - **Now supported:** library `import`/`export` via an in-memory source registry
   (`compile(src, { libraries })`; no network/FS, both backends byte-identical).
 - **Still deferred:** fundamental/alternative `request.*` data feeds, a live

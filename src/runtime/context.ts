@@ -60,7 +60,7 @@ import type { BarState } from './barstate.js';
  *  Memoized: `time_close`/`timenow` read it every bar, but a context's timeframe is fixed
  *  (and only a handful of distinct strings ever appear), so parse each string once. */
 const TF_SECONDS_CACHE = new Map<string, number>();
-function tfSeconds(tf: string): number {
+export function tfSeconds(tf: string): number {
   const cached = TF_SECONDS_CACHE.get(tf);
   if (cached !== undefined) return cached;
   const m = /^(\d*)([a-zA-Z]?)$/.exec(tf) ?? [];
@@ -449,6 +449,14 @@ export class ExecutionContext {
   /** start instant (UTC midnight) of the trading day the current bar belongs to. */
   get time_tradingday() {
     return this.tradingDayMs(this.time);
+  }
+  /** Trading-day bucket for the strategy.risk intraday rules: the calendar trading
+   *  day on daily-or-faster timeframes, one bucket per bar above daily (the v6
+   *  reference: “per 1 bar, if chart resolution is higher than 1 day”). */
+  get tradingDayKey(): number {
+    if (tfSeconds(this.tfStr) > 86400) return this.idx;
+    const d = this.tradingDayMs(this.time);
+    return Number.isFinite(d) ? d : this.idx;
   }
 
   /** chart.* — two-level namespace (`chart.point.*` builds point records) plus the

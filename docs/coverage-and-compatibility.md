@@ -161,7 +161,7 @@ function/type/enum/constant name, or a method with an identical receiver type _a
 | **`request.security()`**     | ✅ v1         | same-symbol HTF resampling + sub-evaluation; `lookahead_off`/`on`; tuples; **same-TF is identity (no lag)**; cross-symbol degrades to na                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | realtime re-request                                                                                                                   |
 | `request.*` (fundamentals)   | ⚠️ na-stub    | dividends/earnings/splits/financial/economic/quandl/currency_rate/seed/footprint/security_lower_tf return na (no external feed)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | real data feeds                                                                                                                       |
 | `TradingView/ta` library fns | ⚠️ partial    | `ta.requestUpAndDownVolume(ltf)` provided as a builtin — callable directly as `ta.requestUpAndDownVolume(...)` **without** any `import` (drop the `import TradingView/ta/12` line: its default alias `ta` shadows the builtin namespace and is a CompileError); single-bar volume split by candle direction since there's no intrabar feed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | true lower-TF split needs intrabar data                                                                                               |
-| **`strategy.*`**             | ✅ v1         | broker sim: entry/order/close/close_all/exit/cancel (market/limit/stop + **trailing** stops), next-bar-open fills, reverse + pyramiding, sizing/commission/slippage, PnL + trade list + equity curve + max drawdown/run-up, live read-backs, `when`-gating, **per-trade introspection** (`closedtrades`/`opentrades` `.profit`/`.entry_price`/…), **performance stats** (`netprofit_percent`/`openprofit_percent`/`grossprofit_percent`/`grossloss_percent`, `max_drawdown_percent`, `max_runup(_percent)`, `avg_trade(_percent)`, `avg_winning_trade(_percent)`, `avg_losing_trade(_percent)`, `max_contracts_held_all/long/short`, `position_entry_name`), **bare collection stats** (`closedtrades.first_index`, `opentrades.capital_held`), `default_entry_qty`, `convert_to_account`/`symbol` (single-currency identity) | OCA groups, `calc_on_every_tick`, `strategy.risk.*`, `margin_liquidation_price` (na — margin not modeled)                             |
+| **`strategy.*`**             | ✅ v1         | broker sim: entry/order/close/close_all/exit/cancel (market/limit/stop + **trailing** stops), next-bar-open fills, reverse + pyramiding, sizing/commission/slippage, PnL + trade list + equity curve + max drawdown/run-up, live read-backs, `when`-gating, **per-trade introspection** (`closedtrades`/`opentrades` `.profit(_percent)`/`.entry_price`/`.commission`/`.entry_time`/`.exit_time`/`.max_runup`/`.max_drawdown`/… — only `*_comment`/`exit_id` stay na), **performance stats** (`netprofit_percent`/`openprofit_percent`/`grossprofit_percent`/`grossloss_percent`, `max_drawdown_percent`, `max_runup(_percent)`, `avg_trade(_percent)`, `avg_winning_trade(_percent)`, `avg_losing_trade(_percent)`, `max_contracts_held_all/long/short`, `position_entry_name`), **bare collection stats** (`closedtrades.first_index`, `opentrades.capital_held`), `default_entry_qty`, `convert_to_account`/`symbol` (single-currency identity), **`strategy.risk.*`** (all 6 rules: `allow_entry_in`, `max_position_size`, `max_drawdown`, `max_intraday_loss`, `max_intraday_filled_orders`, `max_cons_loss_days` — cancel/close/halt semantics, per-trading-day buckets) | OCA groups, `calc_on_every_tick`, `margin_liquidation_price` (na — margin not modeled)                             |
 
 ### 3.1 Coverage audit (all 7 manual sections)
 
@@ -170,14 +170,14 @@ function/type/enum/constant name, or a method with an identical receiver type _a
 **every documented `##` entry** (884) across the manual's 7 sections — Types,
 Variables, Constants, Functions, Keywords, Operators, Annotations — classifying each
 gap as _fillable now_ vs _deferred_ (needs a data feed/larger subsystem). Current
-total: **846/884 = 95.7%**, and **every fillable gap is now closed** (0 fillable
-remaining). Keywords/Types/Operators/Annotations are 100%; **Constants is now 100%**
+total: **852/884 = 96.4%**, and **every fillable gap is now closed** (0 fillable
+remaining). Keywords/Types/Operators/Annotations are 100%; **Constants is 100%**
 (204/204 — `dayofweek.*` day constants, `alert.freq_*`, `backadjustment.*`,
 `settlement_as_close.*`, the `plot`/`text`/`label`/`line` style tags, and the FX
-currency codes all wired). The remaining 38 gaps are exclusively _deferred_: Variables
-needing a live data feed (`bid`/`ask`, fundamentals, analyst recommendations, target
-prices, intraday session state) and the 6 `strategy.risk.*` risk-limit controls
-(need broker halt logic).
+currency codes all wired); **Functions is now 100%** (457/457 — the last 6, the
+`strategy.risk.*` risk-limit rules, are implemented in the broker). The remaining
+32 gaps are exclusively _deferred_ Variables needing a live data feed (`bid`/`ask`,
+fundamentals, analyst recommendations, target prices, intraday session state).
 
 A name-by-name diff of piner's implemented surface against **every documented
 function header** in the bundled reference manual (884 `##` entries) found the only
@@ -185,8 +185,8 @@ real _function_ gaps were small mechanical ones — now closed: `ta.max`/`ta.min
 `array.new_linefill`, the `matrix.is_*` predicate family + `elements_count`,
 `runtime.error`, `max_bars_back` (noop), the `line()/box()/…` type casts,
 `strategy.default_entry_qty`, and the drawing chart-point/formatting setters. The
-**only namespaced functions still deferred are `strategy.risk.*`** (5 risk-limit
-controls needing broker halt logic).
+last holdouts — the 6 `strategy.risk.*` risk-limit rules — are now implemented as
+broker halt logic, so **every documented function is covered**.
 
 ⚠️ **Caveat — the bundled manual is an older v6 snapshot.** It has no
 `type_footprint`/`footprint` entry (footprint charts / `request.footprint`), so the
@@ -268,8 +268,8 @@ statistics (percent / averages / drawdown-run-up extremes / max-contracts-held /
 `position_entry_name` / `closedtrades.first_index` / `opentrades.capital_held`).
 Parity-exact vs PineTS where it has them (`ta.pvt` ~1e-11, `dayofweek.*`,
 `last_bar_time`, `time_tradingday`); both-backend cross-checked otherwise
-(`test/coverage-gaps.test.ts`). The 38 remaining gaps are all _deferred_ — they
-need a live data feed or the session/risk subsystems.
+(`test/coverage-gaps.test.ts`). The 32 remaining gaps are all _deferred_ — they
+need a live data feed or an intraday session model.
 
 See [`parity-matrix.md`](./parity-matrix.md) for the per-namespace coverage matrix and
 the full deferred list.

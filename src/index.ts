@@ -67,7 +67,9 @@ export type {
 } from './runtime/output.js';
 export type { BarState } from './runtime/barstate.js';
 export { StrategyBroker } from './runtime/builtins/strategy.js';
-export type { StrategySettings, ClosedTrade } from './runtime/builtins/strategy.js';
+export type { StrategySettings, ClosedTrade, StrategyReport } from './runtime/builtins/strategy.js';
+export { computeStrategyMetrics } from './engine/strategy-metrics.js';
+export type { StrategyMetrics, StrategyMetricsOptions } from './engine/strategy-metrics.js';
 
 // Semantics (types)
 export { Qualifier } from './sema/types.js';

@@ -113,6 +113,45 @@ describe('strategy — broker simulator', () => {
     expect(eng.strategy.closedTrades[0].qty).toBe(1);
   });
 
+  it('per-trade commission, fill times, percents, and excursions (documented fields, were NaN)', async () => {
+    // cash_per_order commission = 1: entry fills bar1 @101 (fee 1), close fills
+    // bar6 @106 (fee 1) → trade profit 5-1-1 = 3. While held (bars 1..5): best
+    // high 107 (bar5) → run-up 6; worst low 99 (bar1) → drawdown 2.
+    const eng = await bothBackends(
+      '//@version=6\nstrategy("s", commission_type = strategy.commission.cash_per_order, commission_value = 1)\n' +
+        'if bar_index == 0\n    strategy.entry("L", strategy.long)\n' +
+        'if bar_index == 5\n    strategy.close("L")\n' +
+        'plot(strategy.closedtrades.commission(0))\n' +
+        'plot(strategy.closedtrades.entry_time(0))\n' +
+        'plot(strategy.closedtrades.exit_time(0))\n' +
+        'plot(strategy.closedtrades.profit_percent(0))\n' +
+        'plot(strategy.closedtrades.max_runup(0))\n' +
+        'plot(strategy.closedtrades.max_drawdown(0))\n' +
+        'plot(strategy.opentrades.commission(0))\n' +
+        'plot(strategy.opentrades.entry_time(0))\n' +
+        'plot(strategy.opentrades.max_drawdown(0))\n',
+    );
+    const at9 = (p: number) => eng.outputs.plots.get(p)!.data[9];
+    expect(at9(0)).toBeCloseTo(2, 9); // both sides' commission on the row
+    expect(at9(1)).toBe(60000); // entry_time = bar1's time
+    expect(at9(2)).toBe(360000); // exit_time = bar6's time
+    expect(at9(3)).toBeCloseTo((3 / 101) * 100, 9); // profit_percent (net of fees)
+    expect(at9(4)).toBeCloseTo(6, 9); // max_runup
+    expect(at9(5)).toBeCloseTo(2, 9); // max_drawdown
+    // Open-trade view mid-position (bar 3): entry fee only, live extremes.
+    const at3 = (p: number) => eng.outputs.plots.get(p)!.data[3];
+    expect(at3(6)).toBeCloseTo(1, 9); // opentrades.commission = entry fee
+    expect(at3(7)).toBe(60000); // opentrades.entry_time
+    expect(at3(8)).toBeCloseTo(2, 9); // opentrades.max_drawdown so far
+    expect(at9(6)).toBeNaN(); // flat again → no open trade 0
+    // Broker report: total commission both sides; profit net of fees.
+    expect(eng.strategy.totalCommission).toBeCloseTo(2, 9);
+    expect(eng.strategy.netProfit).toBeCloseTo(3, 9);
+    expect(eng.strategy.closedTrades[0].commission).toBeCloseTo(2, 9);
+    expect(eng.strategy.closedTrades[0].maxRunup).toBeCloseTo(6, 9);
+    expect(eng.strategy.closedTrades[0].entryTime).toBe(60000);
+  });
+
   it('configurable mintick scales tick-denominated exits (was hard-coded 0.01)', async () => {
     // Long fills bar1 @101; lows are 98+i, so the lowest low from bar1 on is 99.
     // exit loss=50 ticks → stop = 101 - 50*mintick. mintick=0.01 → 100.5 (>= 99 → stopped

@@ -240,6 +240,7 @@ Constant namespaces (all `constants.ts`): `plot.style_*`@6 `shape.*`@20 `locatio
 | State `strategy.position_size/position_avg_price/equity/netprofit/opentrades/closedtrades/…` | ✅     | `strategy.ts` (broker getters/`tradeStat`@162)                          | report via `StrategyBroker`                                                                                                               |
 | Fill timing                                                                                  | ✅     | `strategy.ts`                                                           | next-bar-open (or same-bar-close with `process_orders_on_close`)                                                                          |
 | Per-trade introspection (`strategy.closedtrades.profit(i)` etc.) + performance stats         | ✅     | `strategy.ts:162` (`tradeStat`)                                         | `.profit/.entry_price/.exit_price/…` per trade; `*_percent`, averages, drawdown/run-up extremes, `position_entry_name`                    |
+| `strategy.risk.*` (all 6 rules)                                                              | ✅     | `strategy.ts` (`setRisk*`, `riskTrip`/`riskRollDay`/`riskCheckEquity`)  | `allow_entry_in`, `max_position_size`, `max_drawdown`, `max_intraday_loss`, `max_intraday_filled_orders`, `max_cons_loss_days` — cancel/close/halt, per-trading-day buckets; see pine-semantics.md §9.1 |
 
 ---
 

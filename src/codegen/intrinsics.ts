@@ -287,6 +287,18 @@ export const NS_CALL_PARAMS: Record<string, readonly string[]> = {
   'linefill.new': ['line1', 'line2', 'color'],
 };
 
+/** Ordered Pine parameters of the `strategy.risk.*` rules — both backends bind
+ *  named/positional args through this shared table (an unlisted risk fn is not
+ *  modeled and evaluates to na). */
+export const STRATEGY_RISK_PARAMS: Record<string, readonly string[]> = {
+  allow_entry_in: ['value'],
+  max_cons_loss_days: ['count', 'alert_message'],
+  max_drawdown: ['value', 'type', 'alert_message'],
+  max_intraday_filled_orders: ['count', 'alert_message'],
+  max_intraday_loss: ['value', 'type', 'alert_message'],
+  max_position_size: ['contracts'],
+};
+
 /**
  * Ordered Pine POSITIONAL parameters that follow the runtime coord params (NS_CALL_PARAMS)
  * and must fold into the trailing `opts` object BY POSITION. The runtime constructors take
