@@ -194,7 +194,8 @@ export function computeStrategyMetrics(
     volatilityPercent: std * annualize * 100,
     cagrPercent,
     calmar,
-    exposurePercent: report.barsProcessed > 0 ? (report.barsInMarket / report.barsProcessed) * 100 : 0,
+    exposurePercent:
+      report.barsProcessed > 0 ? (report.barsInMarket / report.barsProcessed) * 100 : 0,
     expectancy,
     maxConsecutiveWins,
     maxConsecutiveLosses,

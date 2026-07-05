@@ -4,6 +4,55 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0]
+
+### Added
+
+- **`strategy.risk.*` — all six documented risk-management rules** (the last Functions
+  gap in the v6 reference; Functions coverage is now 457/457):
+  - `allow_entry_in(value)` — entries only in the allowed direction; a disallowed-direction
+    `strategy.entry` closes an open opposite position (no reversal) and is a no-op while flat.
+  - `max_position_size(contracts)` — entry quantities are reduced so the resulting position
+    never exceeds the cap; an entry with no room left is not placed.
+  - `max_drawdown(value, type)` / `max_cons_loss_days(count)` — on breach, cancel all pending
+    orders and exit brackets, close the position with a market order, and halt trading
+    **permanently**.
+  - `max_intraday_loss(value, type)` / `max_intraday_filled_orders(count)` — same, but halted
+    **until the trading day ends** (UTC calendar day; one bucket per bar above the daily
+    timeframe, per the reference).
+  - Repeated calls to the same rule keep the most restrictive value; `alert_message` args are
+    accepted and ignored; risk state participates in realtime rollback (a halt tripped on a
+    speculative tick rolls back cleanly).
+- **Derived risk-adjusted metrics**: `computeStrategyMetrics(report, opts?)` (exported) and
+  `Engine.strategyMetrics(opts?)` — a pure reduction of the strategy report computing Sharpe,
+  Sortino, annualized volatility, CAGR, Calmar, exposure %, expectancy, max consecutive
+  wins/losses, largest win/loss, average bars per trade, and a buy-&-hold benchmark
+  (`buyHoldReturnPercent`, `outperformance`). Annualization resolves from a `periodsPerYear`
+  override (for host market-calendar conventions) → empirical bars-per-year from real bar
+  times → the timeframe as a 24/7 market; `riskFreeRate` (annual) is subtracted per period.
+  These are deliberately **not** Pine builtins — the `strategy.*` language surface is
+  unchanged, matching TradingView (which shows them in the Strategy Tester UI only).
+- **Per-trade fills detail** — documented `strategy.closedtrades.*`/`strategy.opentrades.*`
+  fields that previously returned `na` now return real values: `commission()` (both sides'
+  fees on the row; open trades report the carried entry fee), `entry_time()`/`exit_time()`
+  (fill-bar times), `profit_percent()`, and `max_runup()`/`max_drawdown()` (+`_percent`) —
+  per-trade favorable/adverse intrabar excursions tracked over each entry's life. Only
+  `entry_comment`/`exit_comment`/`exit_id` remain `na`.
+- Exported `StrategyReport` type; the report gains `evens`, `maxDrawdownPercent`,
+  `totalCommission` (TradingView's "Commission Paid"), and the exposure counters
+  `barsProcessed`/`barsInMarket`.
+- `docs/strategy-broker.md` — a full design doc for the broker (fill model, data model,
+  exits/trailing, accounting, risk rules, rollback, facade, deviations).
+
+### Changed
+
+- `strategy.risk.*` calls previously compiled as silent `na` no-ops; they now enforce their
+  rules, so strategies that call them can produce different (correct) backtest results.
+- `ClosedTrade` rows now carry `commission`, `entryTime`, `exitTime`, `maxRunup`, and
+  `maxDrawdown` as required fields — additive for consumers reading `report()` output
+  (everyone in practice); a type-level break only for code that constructs `ClosedTrade`
+  objects itself.
+
 ## [0.4.0]
 
 ### Added
@@ -260,6 +309,7 @@ Initial release: clean-room Pine Script v6 engine. `compile(src)` lexes → pars
 → analyzes → emits JS and an interpreter oracle, cross-checked for identical
 output. Real indicators (SMA/EMA cross, RSI, Bollinger, ATR, …) run end-to-end.
 
+[0.5.0]: https://github.com/heyphat/piner/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/heyphat/piner/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/heyphat/piner/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/heyphat/piner/compare/v0.1.8...v0.2.1

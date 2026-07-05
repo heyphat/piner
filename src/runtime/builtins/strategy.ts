@@ -508,8 +508,7 @@ export class StrategyBroker {
   private riskTrip(untilDayEnd: boolean): void {
     if (untilDayEnd) this.riskHaltedDay = this.riskDay;
     else this.riskHalted = true;
-    this.pending =
-      this.size !== 0 ? [{ id: '', dir: 0, kind: 'closeAll', otype: 'market' }] : [];
+    this.pending = this.size !== 0 ? [{ id: '', dir: 0, kind: 'closeAll', otype: 'market' }] : [];
     this.exits = [];
   }
 

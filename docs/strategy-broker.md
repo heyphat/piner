@@ -66,7 +66,7 @@ for each bar i:
 
 - **`onBar()` — the main fill pass.** Runs BEFORE the script body, against the
   new bar's full range, with market orders filling at the bar's **open**. An
-  order queued on bar *N* therefore fills at bar *N+1*'s open — TradingView's
+  order queued on bar _N_ therefore fills at bar _N+1_'s open — TradingView's
   "fills at next bar open" rule.
 - **`onBarClose()` — `process_orders_on_close`.** An extra fill pass AFTER the
   script body, treating the bar's close as a one-price tick (`o=h=l=c`). Market
@@ -87,15 +87,15 @@ Within one `processTick(o, h, l, marketPx)` pass, the steps are ordered:
 
 ## 3. Data model
 
-| Type | Role |
-| --- | --- |
-| `StrategySettings` | `strategy()` declaration args: `initialCapital`, sizing (`qtyType`: fixed / cash / percent_of_equity + `qtyValue`), commission (percent / cash_per_contract / cash_per_order), `pyramiding`, `slippage` (ticks), `processOrdersOnClose`. |
-| `Order` (private) | One queued order: `id`, `dir` (+1/−1), optional `qty`, `kind` (`entry` \| `order` \| `close` \| `closeAll`), `otype` (`market` \| `limit` \| `stop` \| `stoplimit`), trigger `price`, stop-limit's resting `limit`, and the stop-limit `triggered` latch. |
+| Type                    | Role                                                                                                                                                                                                                                                               |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `StrategySettings`      | `strategy()` declaration args: `initialCapital`, sizing (`qtyType`: fixed / cash / percent_of_equity + `qtyValue`), commission (percent / cash_per_contract / cash_per_order), `pyramiding`, `slippage` (ticks), `processOrdersOnClose`.                           |
+| `Order` (private)       | One queued order: `id`, `dir` (+1/−1), optional `qty`, `kind` (`entry` \| `order` \| `close` \| `closeAll`), `otype` (`market` \| `limit` \| `stop` \| `stoplimit`), trigger `price`, stop-limit's resting `limit`, and the stop-limit `triggered` latch.          |
 | `ExitBracket` (private) | One `strategy.exit()` call: `id`, `fromEntry` (`''` = every entry, current and future), qty cap, tick-denominated `profit`/`loss`, absolute `stop`/`limit`, trailing `trailPrice`/`trailPoints`/`trailOffset` + the ratcheting `trailStop`, and `filled` progress. |
-| `Lot` (private) | One open entry: `id`, remaining unsigned `qty`, its own fill `price`, fill `bar`, and the carried entry-side commission `fee`. **The position is the list of lots**; `size` is the signed aggregate. |
-| `ClosedTrade` | One ledger row per entry→exit pair: ids, direction, qty, both prices/bars, net `profit`, running `cumProfit`. |
+| `Lot` (private)         | One open entry: `id`, remaining unsigned `qty`, its own fill `price`, fill `bar`, and the carried entry-side commission `fee`. **The position is the list of lots**; `size` is the signed aggregate.                                                               |
+| `ClosedTrade`           | One ledger row per entry→exit pair: ids, direction, qty, both prices/bars, net `profit`, running `cumProfit`.                                                                                                                                                      |
 
-**Why lots?** TradingView books one trade row per *entry*, closes FIFO, and
+**Why lots?** TradingView books one trade row per _entry_, closes FIFO, and
 measures per-entry exit levels (`profit`/`loss` ticks) from each entry's own
 fill price. Keeping the position as per-entry lots makes `strategy.close(id)`,
 `strategy.exit(from_entry=…)`, partial closes, and per-trade introspection all
@@ -118,7 +118,7 @@ type: both → **stop-limit** (the stop arms a resting limit), stop only →
   append (market orders, can't be modified).
 - `exit` is keyed by id too — re-submitting updates the bracket in place while
   **preserving the trailing-stop ratchet** (`trailStop` carries over).
-- `cancel(id)` removes pending orders *and* brackets with that id — but never
+- `cancel(id)` removes pending orders _and_ brackets with that id — but never
   market orders (they execute on the next tick regardless, per Pine).
   `cancel_all()` likewise spares in-flight market orders.
 - Submissions are rejected while a **risk halt** is active (§8).
@@ -127,15 +127,15 @@ type: both → **stop-limit** (the stop arms a resting limit), stop only →
 
 For each pending order, against the tick's range `[l, h]` starting at `o`:
 
-| Type | Fill rule |
-| --- | --- |
-| market | Fills at `marketPx` (the pass's open) ± adverse slippage. |
-| limit (buy) | Gap through the price (`o <= p`) fills at the **better** open; else fills at `p` when `l <= p`. Sell mirrored. No slippage (limits fill at their price or better). |
-| stop (buy) | Gap through (`o >= p`) fills at the open **plus adverse slippage**; else at `p` + slippage when `h >= p`. Sell mirrored. |
-| stop-limit | The stop trigger arms a resting limit (`triggered = true`) — which may still fill on the SAME tick at the limit price. A limit resting since a *prior* tick also gets the open-gap improvement, like any limit order. |
+| Type        | Fill rule                                                                                                                                                                                                             |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| market      | Fills at `marketPx` (the pass's open) ± adverse slippage.                                                                                                                                                             |
+| limit (buy) | Gap through the price (`o <= p`) fills at the **better** open; else fills at `p` when `l <= p`. Sell mirrored. No slippage (limits fill at their price or better).                                                    |
+| stop (buy)  | Gap through (`o >= p`) fills at the open **plus adverse slippage**; else at `p` + slippage when `h >= p`. Sell mirrored.                                                                                              |
+| stop-limit  | The stop trigger arms a resting limit (`triggered = true`) — which may still fill on the SAME tick at the limit price. A limit resting since a _prior_ tick also gets the open-gap improvement, like any limit order. |
 
 Slippage is `settings.slippage × mintick`, always applied in the adverse
-direction of the *taker* (for a close, the direction that exits the position).
+direction of the _taker_ (for a close, the direction that exits the position).
 
 ### Execution semantics (`execute`, wrapped by `fill`)
 
@@ -147,7 +147,7 @@ Once an order fills at `price`:
   id isn't the first entry's.
 - **`entry`** —
   1. `strategy.risk.allow_entry_in` check: a disallowed-direction entry never
-     opens; against an open opposite position it *closes* it (no reversal),
+     opens; against an open opposite position it _closes_ it (no reversal),
      while flat it's a no-op (§8).
   2. Opposite direction → **reverse**: flatten first, then open the full
      quantity.
@@ -183,13 +183,13 @@ Checked each pass against the tick's range (`processExits`), only while a
 position is open.
 
 - **Per-lot exits.** Each eligible lot (`fromEntry` filter, `''` = all) gets its
-  own exit order: tick-denominated levels are measured from *that lot's* fill
+  own exit order: tick-denominated levels are measured from _that lot's_ fill
   price — `stop = lot.price − dir·loss·mintick`, `limit = lot.price +
-  dir·profit·mintick`. Absolute `stop`/`limit` prices are shared across lots.
+dir·profit·mintick`. Absolute `stop`/`limit` prices are shared across lots.
 - **Relative + absolute on the same side** (`loss`+`stop`, `profit`+`limit`):
   the level expected to trigger FIRST wins — the one nearer the market (long
   stop: the higher of the two; long limit: the lower). This is `firstOf`.
-- **Gap fills pre-empt the path.** If the tick *opens* through a level, the fill
+- **Gap fills pre-empt the path.** If the tick _opens_ through a level, the fill
   happens at the open (stop: worse, plus slippage; limit: better) before any
   intrabar logic.
 - **Intrabar ordering heuristic.** When both the stop and limit levels are
@@ -197,7 +197,7 @@ position is open.
   (`highFirst = h − o < o − l`): for a long, the stop lives on the low side, so
   the stop fires first exactly when the low is nearer the open.
 - **Quantity cap.** `qty` caps the bracket's total fills across lots
-  (`filled` accumulates). A bracket is *spent* once it has filled its cap or
+  (`filled` accumulates). A bracket is _spent_ once it has filled its cap or
   exhausted its eligible lots; one with no matching lots yet (its `from_entry`
   hasn't filled) stays armed and waits for the entry.
 
@@ -213,7 +213,7 @@ farther extreme → close** — with three interleaved steps at each path point:
 3. **Ratchet**: once armed, the stop trails `trail_offset` ticks behind each
    favorable price, monotonically.
 
-Because the walk is ordered, a low that occurs *before* arming can't trigger,
+Because the walk is ordered, a low that occurs _before_ arming can't trigger,
 and the ratchet can't use an extreme the path hasn't reached yet. The ratchet
 (`trailStop`) persists across bars and across `strategy.exit` re-submissions.
 
@@ -261,7 +261,7 @@ marks the open position against the current bar's close.
 - Live: `position_size`, `position_avg_price` (na while flat), `equity`,
   `openprofit`, `netprofit`, `grossprofit`/`grossloss`,
   `wintrades`/`losstrades`/`eventrades`, `opentrades` (one per lot),
-  `closedtrades`, `position_entry_name` (the entry that *initially* opened the
+  `closedtrades`, `position_entry_name` (the entry that _initially_ opened the
   position; survives partial closes).
 - Performance: the `*_percent` family (basis: initial capital),
   `max_drawdown(_percent)`, `max_runup(_percent)`, `avg_trade(_percent)`,
@@ -287,7 +287,7 @@ marks the open position against the current bar's close.
   drawdown (+%), `totalCommission` (both sides, TradingView's "Commission
   Paid"), the trade list (each row carries fill times, its commission, and its
   trade-life run-up/drawdown), the equity curve, and the exposure counters
-  (`barsProcessed` / `barsInMarket` — a bar is *in market* when a position is
+  (`barsProcessed` / `barsInMarket` — a bar is _in market_ when a position is
   open after its `onBar` fill pass).
 
 ### 7.1 Derived risk-adjusted metrics (`computeStrategyMetrics`)
@@ -305,7 +305,7 @@ Deliberate boundaries:
 
 - **Not Pine builtins.** TradingView shows these in the Strategy Tester UI, not
   in the Pine language — the `strategy.*` namespace stays TV-exact.
-- **Report analytics, not broker state.** Only the exposure *counters* live in
+- **Report analytics, not broker state.** Only the exposure _counters_ live in
   the broker (they need per-bar observation); everything else derives from the
   report at call time. `report()` stays broker-verbatim.
 - **No market-calendar policy.** Annualization resolves as: the host's
@@ -315,7 +315,7 @@ Deliberate boundaries:
   is subtracted per period.
 
 Method (kept compatible with fractal-chart's `stats.ts` given the same
-`periodsPerYear`): per-bar simple equity returns *including flat bars* (dropping
+`periodsPerYear`): per-bar simple equity returns _including flat bars_ (dropping
 idle bars inflates Sharpe); Sortino's downside deviation is the RMS of negative
 returns over the downside count, `Infinity` when there's no downside and the
 mean is positive; CAGR prefers the real bar-time span; Calmar = CAGR % / the
@@ -340,14 +340,14 @@ count) and scores the day that just closed for `max_cons_loss_days`.
 
 **Halts.** Two flavors, one gate (`riskHaltActive`):
 
-- *Permanent* (`riskHalted`) — `max_drawdown`, `max_cons_loss_days`.
-- *Until day end* (`riskHaltedDay` = the current day key; expires when the day
+- _Permanent_ (`riskHalted`) — `max_drawdown`, `max_cons_loss_days`.
+- _Until day end_ (`riskHaltedDay` = the current day key; expires when the day
   rolls) — `max_intraday_loss`, `max_intraday_filled_orders`.
 
 While a halt is active every submission (`entry`/`order`/`close`/`close_all`/
 `exit`) is rejected at the facade→broker boundary.
 
-**Tripping** (`riskTrip`): cancel *every* pending order and exit bracket, and —
+**Tripping** (`riskTrip`): cancel _every_ pending order and exit bracket, and —
 if a position is open — queue one emergency `closeAll` **market order**, which
 fills on the next tick pass like any market order (next bar's open, or the
 same-bar close pass under `process_orders_on_close`). The emergency close
@@ -355,14 +355,14 @@ itself bypasses the submission gate (it's created inside the broker).
 
 Per rule:
 
-| Rule | Trigger | Halt |
-| --- | --- | --- |
-| `allow_entry_in(value)` | Not a halt — an execution-time filter on `entry` fills: disallowed direction closes an open opposite position (market, **no reversal**) and is a no-op while flat. `strategy.order` is unaffected. | — |
-| `max_position_size(contracts)` | Not a halt — clamps each `entry` fill's qty to the remaining room (`cap − |size|`); no room → order dropped. Reversals flatten first, so the flip gets the full cap. | — |
-| `max_drawdown(value, type)` | `maxDrawdown ≥ value` (cash) or `maxDrawdownPercent ≥ value` (% of maximum equity) — checked after every mark-to-market, i.e. against the intrabar equity path. | permanent |
-| `max_intraday_loss(value, type)` | Loss measured from the **day's opening equity** along the intrabar path; the percent form's threshold is `value%` of the **day's maximum equity** (both per the v6 reference). | day |
-| `max_intraday_filled_orders(count)` | `riskDayFills ≥ count`, checked after each pass's fills. Fill counting: one per executed order (`fill` wraps `execute` and counts only when state actually changed — a blocked/no-op order is not a fill), plus one per exit-bracket lot close (each lot's exit is its own order). | day |
-| `max_cons_loss_days(count)` | At day rollover: a day whose closing equity (`riskBarCloseEquity`) finished below its opening equity extends the streak; otherwise the streak resets. Streak reaching `count` trips. | permanent |
+| Rule                                | Trigger                                                                                                                                                                                                                                                                            | Halt      |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `allow_entry_in(value)`             | Not a halt — an execution-time filter on `entry` fills: disallowed direction closes an open opposite position (market, **no reversal**) and is a no-op while flat. `strategy.order` is unaffected.                                                                                 | —         |
+| `max_position_size(contracts)`      | Not a halt — clamps each `entry` fill's qty to the remaining room (`cap −                                                                                                                                                                                                          | size      | `); no room → order dropped. Reversals flatten first, so the flip gets the full cap. | —   |
+| `max_drawdown(value, type)`         | `maxDrawdown ≥ value` (cash) or `maxDrawdownPercent ≥ value` (% of maximum equity) — checked after every mark-to-market, i.e. against the intrabar equity path.                                                                                                                    | permanent |
+| `max_intraday_loss(value, type)`    | Loss measured from the **day's opening equity** along the intrabar path; the percent form's threshold is `value%` of the **day's maximum equity** (both per the v6 reference).                                                                                                     | day       |
+| `max_intraday_filled_orders(count)` | `riskDayFills ≥ count`, checked after each pass's fills. Fill counting: one per executed order (`fill` wraps `execute` and counts only when state actually changed — a blocked/no-op order is not a fill), plus one per exit-bracket lot close (each lot's exit is its own order). | day       |
+| `max_cons_loss_days(count)`         | At day rollover: a day whose closing equity (`riskBarCloseEquity`) finished below its opening equity extends the streak; otherwise the streak resets. Streak reaching `count` trips.                                                                                               | permanent |
 
 **Check ordering inside a pass** (§2): fills happen first, then the
 filled-orders cap, then mark-to-market runs the equity rules while updating the
@@ -371,8 +371,8 @@ in the bar can't see a day-max the path hasn't reached yet).
 
 Known approximations (documented deviations from TradingView's tick engine):
 
-- Breaches detected at bar *N*'s mark-to-market close the position at bar
-  *N+1*'s open (piner's standing next-tick fill rule); TV's 4-tick OHLC walk can
+- Breaches detected at bar _N_'s mark-to-market close the position at bar
+  _N+1_'s open (piner's standing next-tick fill rule); TV's 4-tick OHLC walk can
   close at a later tick of the same bar.
 - Orders already in the same pass's queue can still fill after the
   filled-orders cap is crossed mid-pass (TV has the same property for same-tick
@@ -385,17 +385,17 @@ The driver snapshots all mutable engine state after each committed bar and
 **restores it before every realtime tick** (`Driver.onTick` → `rollback()`), so
 replaying/replacing the open bar's ticks can never double-fill or leak state.
 The broker participates via `snapshot()`/`restore()` with a three-way field
-taxonomy chosen so rollback stays correct *without* deep-cloning the
+taxonomy chosen so rollback stays correct _without_ deep-cloning the
 ever-growing history arrays on every tick:
 
-| Class | Fields | Copy strategy |
-| --- | --- | --- |
-| `SNAP_DEEP` | `pending`, `exits`, `entryLots` | `structuredClone` — element objects mutate in place (orders latch `triggered`, brackets ratchet `trailStop`/`filled`, lots shed `qty`/`fee`). |
-| `SNAP_APPEND` | `closedTrades`, `equityCurve` | shallow `slice` — append-only, rows never mutated after booking. |
-| `SNAP_SCALARS` | position/PnL/extremes scalars **and all `risk*` settings + runtime state** | direct assignment. |
+| Class          | Fields                                                                     | Copy strategy                                                                                                                                 |
+| -------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SNAP_DEEP`    | `pending`, `exits`, `entryLots`                                            | `structuredClone` — element objects mutate in place (orders latch `triggered`, brackets ratchet `trailStop`/`filled`, lots shed `qty`/`fee`). |
+| `SNAP_APPEND`  | `closedTrades`, `equityCurve`                                              | shallow `slice` — append-only, rows never mutated after booking.                                                                              |
+| `SNAP_SCALARS` | position/PnL/extremes scalars **and all `risk*` settings + runtime state** | direct assignment.                                                                                                                            |
 
 The risk state being in the snapshot is what makes a halt tripped on a
-*speculative* tick roll back cleanly when the real closing tick arrives
+_speculative_ tick roll back cleanly when the real closing tick arrives
 (covered by `test/strategy-risk.test.ts`).
 
 > Adding a mutable field to the broker? It MUST go into one of the three
@@ -428,26 +428,26 @@ Backend routing specifics (`emit.ts` / `interpreter.ts`, kept mirror-identical):
 
 ## 11. Known deviations & not-yet-modeled
 
-| Area | Status |
-| --- | --- |
-| OCA groups (`oca_name`/`oca_type`) | constants accepted, grouping not enforced |
-| `calc_on_every_tick` / `calc_on_order_fills` | driver runs the Pine default (bar close); realtime ticks do run fill passes |
-| Margin (`margin_long/short`, liquidation) | not modeled; `margin_liquidation_price` = na |
-| Currency conversion | single-currency identity; `account_currency` = `'USD'` |
-| `closedtrades.*` comments / `exit_id` | na (order comments not plumbed; commissions, times, and per-trade run-up/drawdown ARE tracked) |
-| Trailing stop | position-aggregate activation + group fill (TV: per entry) |
-| Risk emergency close | fills next tick pass (TV: next tick of its 4-tick bar walk) |
-| `alert_message` on risk rules & orders | accepted, ignored (no alert routing in the engine core) |
+| Area                                         | Status                                                                                         |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| OCA groups (`oca_name`/`oca_type`)           | constants accepted, grouping not enforced                                                      |
+| `calc_on_every_tick` / `calc_on_order_fills` | driver runs the Pine default (bar close); realtime ticks do run fill passes                    |
+| Margin (`margin_long/short`, liquidation)    | not modeled; `margin_liquidation_price` = na                                                   |
+| Currency conversion                          | single-currency identity; `account_currency` = `'USD'`                                         |
+| `closedtrades.*` comments / `exit_id`        | na (order comments not plumbed; commissions, times, and per-trade run-up/drawdown ARE tracked) |
+| Trailing stop                                | position-aggregate activation + group fill (TV: per entry)                                     |
+| Risk emergency close                         | fills next tick pass (TV: next tick of its 4-tick bar walk)                                    |
+| `alert_message` on risk rules & orders       | accepted, ignored (no alert routing in the engine core)                                        |
 
 ## 12. Where it's tested
 
-| File | Covers |
-| --- | --- |
-| `test/strategy.test.ts` | fills & timing, reverse/netting, pyramiding, close-by-id, exits (brackets, trailing, qty caps), sizing/commission/slippage, `process_orders_on_close`, stats, introspection |
-| `test/strategy-risk.test.ts` | all six risk rules (behavioral, multi-day feeds), most-restrictive merging, speculative-tick halt rollback, indicator inertness |
-| `test/strategy-metrics.test.ts` | derived metrics: hand-computed Sharpe/Sortino/volatility/CAGR/Calmar, annualization resolution, exposure counters, streaks, report backward-compat, two-backend metric equality |
-| `test/cross-check.test.ts` / `parity.test.ts` | two-backend identical outputs incl. strategy scripts |
-| `test/ontick-equivalence.test.ts` | incremental tick processing vs full recompute (broker rollback contract) |
+| File                                          | Covers                                                                                                                                                                          |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test/strategy.test.ts`                       | fills & timing, reverse/netting, pyramiding, close-by-id, exits (brackets, trailing, qty caps), sizing/commission/slippage, `process_orders_on_close`, stats, introspection     |
+| `test/strategy-risk.test.ts`                  | all six risk rules (behavioral, multi-day feeds), most-restrictive merging, speculative-tick halt rollback, indicator inertness                                                 |
+| `test/strategy-metrics.test.ts`               | derived metrics: hand-computed Sharpe/Sortino/volatility/CAGR/Calmar, annualization resolution, exposure counters, streaks, report backward-compat, two-backend metric equality |
+| `test/cross-check.test.ts` / `parity.test.ts` | two-backend identical outputs incl. strategy scripts                                                                                                                            |
+| `test/ontick-equivalence.test.ts`             | incremental tick processing vs full recompute (broker rollback contract)                                                                                                        |
 
 Every fill/PnL expectation in those tests is hand-computed from the rules in
 this document — if you change a rule here, a test should break.
