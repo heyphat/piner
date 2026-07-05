@@ -85,15 +85,95 @@ Within one `processTick(o, h, l, marketPx)` pass, the steps are ordered:
 4. **Mark-to-market** — equity curve + drawdown/run-up extremes along the
    intrabar path, then the equity-based risk rules (§7, §8).
 
+### The whole run in one picture
+
+Everything above and below this section, stitched together — the life of one
+bar (each later section details one box):
+
+```
+           Engine.run(opts)
+                │   feed.history() → bars;   configureStrategy(metadata.strategy)
+                ▼
+┌────────────── Driver loop — one iteration per bar (or per realtime tick) ──────────────┐
+│                                                                                        │
+│  beginBar(i)                                                                           │
+│      │                                                                                 │
+│      ▼                                                                                 │
+│  $.onStrategyBar() ─── THE FILL PASS (runs BEFORE the script body)              §2     │
+│      │                                                                                 │
+│      ├─ riskRollDay() ── new trading day? reset intraday counters/baselines;    §8     │
+│      │                   score the day that closed (max_cons_loss_days → trip)         │
+│      │                                                                                 │
+│      └─ processTick(open, high, low, marketPx = open)                                  │
+│           │                                                                            │
+│           │ 1. pending orders vs the bar range [low, high]                      §4     │
+│           │      market → fills at open ± slippage                                     │
+│           │      limit / stop / stop-limit → gap-through at open, else at level        │
+│           │      each fill → execute():                                                │
+│           │        entry → allow_entry_in filter → reverse if opposite →               │
+│           │                pyramiding cap → max_position_size clamp → openOrAdd(Lot)   │
+│           │        order → nets the position (a crossing remainder flips)              │
+│           │        close / closeAll → closePosition: FIFO lots → ClosedTrade rows §6   │
+│           │                                                                            │
+│           │ 2. exit brackets, per open lot: profit/loss ticks, stop/limit,      §5     │
+│           │      trailing ratchet → closeLot → ClosedTrade rows                        │
+│           │                                                                            │
+│           │ 3. risk gate: dayFills ≥ max_intraday_filled_orders → riskTrip      §8     │
+│           │                                                                            │
+│           │ 4. markToMarket: equityCurve[i]; intrabar equity path →             §7     │
+│           │      drawdown/run-up extremes, per-lot MFE/MAE                             │
+│           │      └─ riskCheckEquity: max_drawdown / max_intraday_loss breach →  §8     │
+│           │           riskTrip = cancel ALL orders + brackets, queue an emergency      │
+│           │           closeAll (fills NEXT pass), halt (for the day, or for good)      │
+│           │                                                                            │
+│           └─ exposure counters (barsProcessed / barsInMarket)                   §7     │
+│      │                                                                                 │
+│      ▼                                                                                 │
+│  main($) ─── SCRIPT BODY (both backends call the same facade)                   §10    │
+│      strategy.entry/order/close/close_all/exit/cancel → queue / re-key / cancel        │
+│        pending orders + brackets    (rejected while a risk halt is active)             │
+│      strategy.risk.* → idempotent rule setters (most restrictive value wins)    §8     │
+│      strategy.equity, strategy.closedtrades.*, … → live read-backs              §7     │
+│      │                                                                                 │
+│      ▼                                                                                 │
+│  $.onStrategyBarClose() ─── only with process_orders_on_close:                  §2     │
+│      processTick(close, close, close, close) — the same 4 steps on the close tick      │
+│      │                                                                                 │
+│      ▼                                                                                 │
+│  commitBar()                                                                           │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+       │                                            ▲
+       │ realtime tick arrives                      │  rollback(): truncate series to the
+       └────────────────────────────────────────────┘  committed length, restore the broker
+          (a closing tick commits + re-snapshots)      snapshot (§9), replay the open bar
+
+after (or during) the run:
+  Engine.strategy           →  broker.report()             StrategyReport (broker-verbatim)
+  Engine.strategyMetrics()  →  computeStrategyMetrics()    Sharpe/Sortino/CAGR/… (derived, §7.1)
+```
+
+The one timing rule this layout encodes — the fill pass runs **before** the
+script body, so an order queued on bar _N_ meets its first fill pass on bar
+_N+1_:
+
+```
+      bar N                                bar N+1
+      ────────────────────────────         ─────────────────────────────────
+      onStrategyBar: (nothing pending)     onStrategyBar: queued entry FILLS
+                                       ┌──▶  at bar N+1's open (± slippage)
+      main($): strategy.entry("L") ────┘
+                 = queued, not filled      main($): position_size reads 1
+```
+
 ## 3. Data model
 
-| Type                    | Role                                                                                                                                                                                                                                                               |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `StrategySettings`      | `strategy()` declaration args: `initialCapital`, sizing (`qtyType`: fixed / cash / percent_of_equity + `qtyValue`), commission (percent / cash_per_contract / cash_per_order), `pyramiding`, `slippage` (ticks), `processOrdersOnClose`.                           |
-| `Order` (private)       | One queued order: `id`, `dir` (+1/−1), optional `qty`, `kind` (`entry` \| `order` \| `close` \| `closeAll`), `otype` (`market` \| `limit` \| `stop` \| `stoplimit`), trigger `price`, stop-limit's resting `limit`, and the stop-limit `triggered` latch.          |
-| `ExitBracket` (private) | One `strategy.exit()` call: `id`, `fromEntry` (`''` = every entry, current and future), qty cap, tick-denominated `profit`/`loss`, absolute `stop`/`limit`, trailing `trailPrice`/`trailPoints`/`trailOffset` + the ratcheting `trailStop`, and `filled` progress. |
-| `Lot` (private)         | One open entry: `id`, remaining unsigned `qty`, its own fill `price`, fill `bar`, and the carried entry-side commission `fee`. **The position is the list of lots**; `size` is the signed aggregate.                                                               |
-| `ClosedTrade`           | One ledger row per entry→exit pair: ids, direction, qty, both prices/bars, net `profit`, running `cumProfit`.                                                                                                                                                      |
+| Type                    | Role                                                                                                                                                                                                                                                                                                                                |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `StrategySettings`      | `strategy()` declaration args: `initialCapital`, sizing (`qtyType`: fixed / cash / percent_of_equity + `qtyValue`), commission (percent / cash_per_contract / cash_per_order), `pyramiding`, `slippage` (ticks), `processOrdersOnClose`.                                                                                            |
+| `Order` (private)       | One queued order: `id`, `dir` (+1/−1), optional `qty`, `kind` (`entry` \| `order` \| `close` \| `closeAll`), `otype` (`market` \| `limit` \| `stop` \| `stoplimit`), trigger `price`, stop-limit's resting `limit`, and the stop-limit `triggered` latch.                                                                           |
+| `ExitBracket` (private) | One `strategy.exit()` call: `id`, `fromEntry` (`''` = any id), `maxSeq` (call-time scope — only lots from orders submitted before the call are covered), qty cap, tick-denominated `profit`/`loss`, absolute `stop`/`limit`, trailing `trailPrice`/`trailPoints`/`trailOffset` + the ratcheting `trailStop`, and `filled` progress. |
+| `Lot` (private)         | One open entry: `id`, remaining unsigned `qty`, its own fill `price`, fill `bar`, and the carried entry-side commission `fee`. **The position is the list of lots**; `size` is the signed aggregate.                                                                                                                                |
+| `ClosedTrade`           | One ledger row per entry→exit pair: ids, direction, qty, both prices/bars, net `profit`, running `cumProfit`.                                                                                                                                                                                                                       |
 
 **Why lots?** TradingView books one trade row per _entry_, closes FIFO, and
 measures per-entry exit levels (`profit`/`loss` ticks) from each entry's own
@@ -116,6 +196,12 @@ type: both → **stop-limit** (the stop arms a resting limit), stop only →
 - `entry`/`order` are **keyed by id**: re-submitting an id replaces the unfilled
   pending order in place (Pine's order-modify semantics). `close`/`close_all`
   append (market orders, can't be modified).
+- `close`/`close_all` are **gated at call time**: `close_all()` is a no-op while
+  flat, and `close(id)` is a no-op unless an entry with that id is currently
+  open — a same-bar queued entry does not count (per the TV docs' "Order
+  execution demo": _"if there is no open position, the function call has no
+  effect"_). Without the gate, `entry` + `close_all` on one flat bar would fill
+  back-to-back in the next bar's pass as an instant zero-profit round trip.
 - `exit` is keyed by id too — re-submitting updates the bracket in place while
   **preserving the trailing-stop ratchet** (`trailStop` carries over).
 - `cancel(id)` removes pending orders _and_ brackets with that id — but never
@@ -151,10 +237,11 @@ Once an order fills at `price`:
      while flat it's a no-op (§8).
   2. Opposite direction → **reverse**: flatten first, then open the full
      quantity.
-  3. Same direction → **pyramiding cap**: at most `settings.pyramiding`
-     same-side entry adds per position (`entryCount` is a real count, so
-     `pyramiding = N` admits exactly N adds). `strategy.order` is uncapped,
-     matching TradingView.
+  3. Same direction → **pyramiding cap**: at most `settings.pyramiding` OPEN
+     trades opened by `strategy.entry` (lots carry an `entryCmd` flag; closing a
+     trade FREES capacity — per TV, a blocked entry waits "until at least one of
+     the existing trades closes"). `strategy.order` is uncapped and its lots
+     don't count toward the cap, matching TradingView.
   4. `strategy.risk.max_position_size` clamps the quantity to the remaining
      room; no room → the order is dropped (§8).
 - **`order`** — **nets**: an opposite-direction fill reduces the position; a
@@ -186,6 +273,19 @@ position is open.
   own exit order: tick-denominated levels are measured from _that lot's_ fill
   price — `stop = lot.price − dir·loss·mintick`, `limit = lot.price +
 dir·profit·mintick`. Absolute `stop`/`limit` prices are shared across lots.
+- **Call-time scoping.** A bracket covers only lots whose originating order was
+  submitted at-or-before the `strategy.exit` call (orders carry a submission
+  `seq`; lots inherit it; the bracket records `maxSeq`). Per the TV docs'
+  exit-persist demo, one call covers "entries created before or on the bar where
+  the call occurs" and _"does not affect any subsequent entries"_ — later
+  same-id entries need their own exit call (re-calling the same exit id
+  re-scopes it).
+- **Quantity reservation.** Brackets reserve their `qty` from their eligible
+  lots in CALL order, recomputed each pass — a later bracket can fill only what
+  earlier brackets left unreserved, _even when it triggers first_ (TV's
+  reversed-exit demo: `exit(qty=19, limit)` then `exit(qty=20, stop)` on 20
+  shares → the stop covers exactly 1). A bracket without `qty` reserves
+  everything unreserved of its scope.
 - **Relative + absolute on the same side** (`loss`+`stop`, `profit`+`limit`):
   the level expected to trigger FIRST wins — the one nearer the market (long
   stop: the higher of the two; long limit: the lower). This is `firstOf`.

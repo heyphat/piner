@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1]
+
+### Fixed
+
+- `strategy.exit()` now scopes to entries that existed **when it was called** —
+  previously a bracket also matched later same-id entries submitted after the
+  `strategy.exit()` call, contradicting the reference's exit-persist rule ("does
+  not affect any subsequent entries").
+- `strategy.exit()` calls now **reserve quantity in call order** across brackets
+  on the same position, instead of each bracket independently claiming up to its
+  full `qty`. A bracket that triggers first can now close only what earlier
+  brackets left unreserved of its eligible lots, matching the reference's
+  reserved-exit behavior.
+- The `pyramiding` cap now counts **open** `strategy.entry` trades instead of
+  entries-since-flat: closing one open trade frees a pyramiding slot for a new
+  entry, per the reference ("cannot add to them... until at least one of the
+  existing trades closes"). Previously the cap never released once reached.
+
 ## [0.5.0]
 
 ### Added
@@ -309,6 +327,7 @@ Initial release: clean-room Pine Script v6 engine. `compile(src)` lexes → pars
 → analyzes → emits JS and an interpreter oracle, cross-checked for identical
 output. Real indicators (SMA/EMA cross, RSI, Bollinger, ATR, …) run end-to-end.
 
+[0.5.1]: https://github.com/heyphat/piner/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/heyphat/piner/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/heyphat/piner/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/heyphat/piner/compare/v0.2.1...v0.3.0
