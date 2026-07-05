@@ -31,6 +31,7 @@ import {
   DRAWING_CASTS,
   NS_CALL_PARAMS,
   NS_OPTS_POSITIONAL,
+  STRATEGY_RISK_PARAMS,
 } from '../codegen/intrinsics.js';
 
 /** Compile the annotated program into a per-bar ScriptFn driven by the interpreter. */
@@ -507,6 +508,12 @@ class Interp {
             scope,
             callee.property,
             i ? this.expr(i) : 0,
+          );
+        }
+        // strategy.risk.X(...) → the broker's risk-rule setters.
+        if (scope === 'risk' && STRATEGY_RISK_PARAMS[callee.property]) {
+          return (this.ctx.strategy.risk as any)[callee.property](
+            ...this.nsArgValues(e, STRATEGY_RISK_PARAMS[callee.property]),
           );
         }
         return this.$.NA;

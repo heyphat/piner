@@ -36,6 +36,7 @@ import {
   DRAWING_CASTS,
   NS_CALL_PARAMS,
   NS_OPTS_POSITIONAL,
+  STRATEGY_RISK_PARAMS,
 } from './intrinsics.js';
 
 export interface CodegenOutput {
@@ -518,7 +519,11 @@ class Emitter {
           const i = e.args.filter((a) => !a.name)[0]?.value;
           return `$.strategy.tradeField(${JSON.stringify(scope)}, ${JSON.stringify(callee.property)}, ${i ? `(${this.expr(i)})` : '0'})`;
         }
-        return '$.NA'; // other strategy.* sub-objects (risk.*, …) not modeled
+        // strategy.risk.X(...) → the broker's risk-rule setters.
+        if (scope === 'risk' && STRATEGY_RISK_PARAMS[callee.property]) {
+          return `$.strategy.risk.${callee.property}(${this.nsArgs(e, STRATEGY_RISK_PARAMS[callee.property])})`;
+        }
+        return '$.NA'; // other strategy.* sub-objects not modeled
       }
       const rt = nsRuntime(callee.object.object.name) ?? callee.object.object.name;
       return `$.${rt}.${callee.object.property}.${callee.property}(${this.nsArgs(e)})`;

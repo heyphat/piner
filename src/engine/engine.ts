@@ -6,10 +6,15 @@
  * declares the history columns the analyzer assigned and can run either backend.
  */
 
-import { ExecutionContext } from '../runtime/context.js';
+import { ExecutionContext, tfSeconds } from '../runtime/context.js';
 import { Driver, type ScriptFn } from './driver.js';
 import type { DataFeed, Bar } from './feed.js';
 import type { CompiledScript } from './compiler.js';
+import {
+  computeStrategyMetrics,
+  type StrategyMetrics,
+  type StrategyMetricsOptions,
+} from './strategy-metrics.js';
 
 export interface RunOptions {
   symbol: string;
@@ -86,5 +91,19 @@ export class Engine {
   /** Strategy backtest report (net/gross PnL, trade list, equity curve). */
   get strategy() {
     return this.ctx.strategyBroker.report();
+  }
+
+  /** Derived risk-adjusted metrics (Sharpe, Sortino, CAGR, Calmar, exposure, …) over
+   *  the strategy report, annualized from the run's bar times + timeframe. Pass
+   *  `periodsPerYear`/`riskFreeRate` to apply a host market-calendar convention. */
+  strategyMetrics(
+    opts: Omit<StrategyMetricsOptions, 'barTimes' | 'timeframeSeconds' | 'bars'> = {},
+  ): StrategyMetrics {
+    return computeStrategyMetrics(this.ctx.strategyBroker.report(), {
+      barTimes: this.ctx.allBars.map((b) => b.time),
+      bars: this.ctx.allBars,
+      timeframeSeconds: tfSeconds(this.ctx.tfStr),
+      ...opts,
+    });
   }
 }

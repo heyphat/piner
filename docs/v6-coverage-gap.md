@@ -7,7 +7,7 @@ sections (Types, Variables, Constants, Functions, Keywords, Operators, Annotatio
 > The bundled manual is an older v6 snapshot (no `type_footprint`); features TradingView added since
 > are not visible here. See coverage-and-compatibility.md §3.1.
 
-**846/884 documented entries covered (95.7%).**
+**852/884 documented entries covered (96.4%).**
 
 ## Variables — 128/160 covered · **0 fillable, 32 deferred**
 
@@ -21,9 +21,7 @@ sections (Types, Variables, Constants, Functions, Keywords, Operators, Annotatio
 
 ## Constants — 204/204 covered ✅
 
-## Functions — 451/457 covered · **0 fillable, 6 deferred**
-
-**Deferred** (risk-limit controls (need broker halt logic)): `strategy.risk.allow_entry_in`, `strategy.risk.max_cons_loss_days`, `strategy.risk.max_drawdown`, `strategy.risk.max_intraday_filled_orders`, `strategy.risk.max_intraday_loss`, `strategy.risk.max_position_size`
+## Functions — 457/457 covered ✅
 
 ## Keywords — 15/15 covered ✅
 

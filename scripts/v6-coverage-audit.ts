@@ -5,7 +5,12 @@ import { KEYWORDS, MULTI_OPS, SINGLE_OPS, PUNCT } from '../src/lexer/token.js';
 import { NS_RUNTIME } from '../src/codegen/intrinsics.js';
 import { historicalBarState } from '../src/runtime/barstate.js';
 
-const DOC = '/Users/phat/phat.vn/fractal-chart/pinescriptv6/pinescriptv6_complete_reference.md';
+// The bundled v6 manual snapshot (not vendored here — TradingView content). Point
+// PINE_REF_MD at a checkout of https://github.com/codenamedevan/pinescriptv6
+// (commit f256c0a) if the default path is absent.
+const DOC =
+  process.env.PINE_REF_MD ??
+  '/Users/phat/phat.vn/fractal-chart/pinescriptv6/pinescriptv6_complete_reference.md';
 const md = readFileSync(DOC, 'utf8').split('\n');
 
 // 1) split into sections by single-# headers; collect ## entries per section.
@@ -235,7 +240,6 @@ note.Annotations =
   'piner treats `//@…` as comments (ignored, no error); `//@version` is honored. Annotations carry no execution semantics, so this is functionally complete.';
 
 const DEFER: [RegExp, string][] = [
-  [/^strategy\.risk\./, 'risk-limit controls (need broker halt logic)'],
   [/^(ask|bid)$/, 'tick-level bid/ask (no L1 quote feed)'],
   [
     /^syminfo\.(industry|sector|recommendations|target_price|shares_outstanding|expiration_date|current_contract|main_tickerid)/,

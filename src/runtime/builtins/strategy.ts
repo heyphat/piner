@@ -42,6 +42,9 @@ export interface StrategyHost {
   time: number;
   idx: number;
   mintick: number;
+  /** Trading-day bucket for the strategy.risk intraday rules: the calendar trading
+   *  day on daily-or-faster timeframes, one bucket per bar above daily. */
+  tradingDayKey: number;
 }
 
 export interface StrategySettings {
@@ -90,7 +93,14 @@ interface Lot {
   qty: number; // unsigned contracts remaining
   price: number; // this entry's fill price
   bar: number; // bar index of the fill
+  time: number; // fill time (bar time, ms) — serves entry_time
   fee: number; // entry-side commission still carried (pro-rated out as the lot closes)
+  // Per-CONTRACT favorable/adverse price excursions over the lot's life (≥ 0,
+  // price units), updated each mark-to-market from the bar's high/low. Being
+  // per-contract they survive partial closes unscaled; a trade row multiplies by
+  // its own qty. Serve max_runup / max_drawdown (+_percent).
+  maxFavMove: number;
+  maxAdvMove: number;
 }
 
 export interface ClosedTrade {
@@ -101,8 +111,40 @@ export interface ClosedTrade {
   exitPrice: number;
   entryBar: number;
   exitBar: number;
+  /** Fill times (bar time, ms) of the entry/exit — serve entry_time/exit_time. */
+  entryTime: number;
+  exitTime: number;
   profit: number;
   cumProfit: number;
+  /** Both sides' commission booked on this row (entry share + exit share). */
+  commission: number;
+  /** Trade-life intrabar extremes for this row's quantity (money, ≥ 0). */
+  maxRunup: number;
+  maxDrawdown: number;
+}
+
+/** The broker-verbatim backtest report (`Engine.strategy` / `StrategyBroker.report()`).
+ *  Derived analytics (Sharpe, Sortino, CAGR, …) are NOT here — they live in
+ *  `computeStrategyMetrics` (engine/strategy-metrics.ts), which consumes this. */
+export interface StrategyReport {
+  initialCapital: number;
+  netProfit: number;
+  grossProfit: number;
+  grossLoss: number;
+  wins: number;
+  losses: number;
+  evens: number;
+  maxDrawdown: number;
+  maxDrawdownPercent: number;
+  /** All commission charged, both sides (TradingView's "Commission Paid"). */
+  totalCommission: number;
+  closedTrades: ClosedTrade[];
+  /** Per-bar equity, indexed by bar index (sparse before the strategy activated). */
+  equityCurve: number[];
+  /** Bars processed while the strategy was active (the exposure denominator). */
+  barsProcessed: number;
+  /** Bars on which a position was open after the bar's fill pass. */
+  barsInMarket: number;
 }
 
 export class StrategyBroker {
@@ -150,9 +192,36 @@ export class StrategyBroker {
   maxContractsAll = 0;
   maxContractsLong = 0;
   maxContractsShort = 0;
+  // Market-exposure counters (report-only; drive the exposure % metric). A bar is
+  // "in market" when a position is open after its onBar fill pass — a position
+  // opened by the process_orders_on_close pass counts from the NEXT bar.
+  private barsProcessed = 0;
+  private barsInMarket = 0;
+  /** All commission charged so far, both sides (TradingView's "Commission Paid"). */
+  totalCommission = 0;
 
   private pending: Order[] = [];
   private exits: ExitBracket[] = [];
+
+  // ── strategy.risk.* rule settings (declared with simple args, so the setters run
+  //    idempotently every bar; repeated calls keep the most restrictive value) ─
+  private riskDirection: 'all' | 'long' | 'short' = 'all';
+  private riskMaxPositionSize?: number;
+  private riskMaxConsLossDays?: number;
+  private riskMaxDrawdownCash?: number;
+  private riskMaxDrawdownPct?: number; // % of maximum equity
+  private riskMaxIntradayOrders?: number;
+  private riskMaxIntradayLossCash?: number;
+  private riskMaxIntradayLossPct?: number; // % of the day's maximum equity
+  // strategy.risk runtime state
+  private riskHalted = false; // permanent halt (max_drawdown / max_cons_loss_days)
+  private riskHaltedDay = NaN; // intraday halt: the trading-day key it applies to
+  private riskDay = NaN; // current trading-day key
+  private riskDayStartEquity = NaN; // equity when the trading day opened
+  private riskDayMaxEquity = NaN; // the day's maximum equity (intraday-loss % basis)
+  private riskDayFills = 0; // orders filled so far today
+  private riskConsLossDays = 0; // consecutive losing trading days so far
+  private riskBarCloseEquity = NaN; // equity at the last processed bar's close
 
   // ── realtime rollback (the driver snapshots before speculative intrabar ticks) ─
   // Fields captured/restored around every speculative tick, split by copy strategy so
@@ -185,6 +254,25 @@ export class StrategyBroker {
     'maxContractsAll',
     'maxContractsLong',
     'maxContractsShort',
+    'barsProcessed',
+    'barsInMarket',
+    'totalCommission',
+    'riskDirection',
+    'riskMaxPositionSize',
+    'riskMaxConsLossDays',
+    'riskMaxDrawdownCash',
+    'riskMaxDrawdownPct',
+    'riskMaxIntradayOrders',
+    'riskMaxIntradayLossCash',
+    'riskMaxIntradayLossPct',
+    'riskHalted',
+    'riskHaltedDay',
+    'riskDay',
+    'riskDayStartEquity',
+    'riskDayMaxEquity',
+    'riskDayFills',
+    'riskConsLossDays',
+    'riskBarCloseEquity',
   ] as const;
   snapshot(): unknown {
     const s: Record<string, unknown> = {};
@@ -321,19 +409,19 @@ export class StrategyBroker {
     else this.pending.push(o);
   }
   entry(id: string, dir: number, qty?: number, limit?: number, stop?: number): void {
-    if (!this.active) return;
+    if (!this.active || this.riskHaltActive) return;
     this.submit({ id, dir, qty, kind: 'entry', ...orderTrigger(limit, stop) });
   }
   order(id: string, dir: number, qty?: number, limit?: number, stop?: number): void {
-    if (!this.active) return;
+    if (!this.active || this.riskHaltActive) return;
     this.submit({ id, dir, qty, kind: 'order', ...orderTrigger(limit, stop) });
   }
   close(id: string, qty?: number): void {
-    if (!this.active) return;
+    if (!this.active || this.riskHaltActive) return;
     this.pending.push({ id, dir: 0, qty, kind: 'close', otype: 'market' });
   }
   close_all(): void {
-    if (!this.active) return;
+    if (!this.active || this.riskHaltActive) return;
     this.pending.push({ id: '', dir: 0, kind: 'closeAll', otype: 'market' });
   }
   exit(
@@ -348,7 +436,7 @@ export class StrategyBroker {
     trailPoints?: number,
     trailOffset?: number,
   ): void {
-    if (!this.active) return;
+    if (!this.active || this.riskHaltActive) return;
     // Pine keys exit brackets by id — re-submitting the same id updates in place
     // rather than stacking duplicates while the position is held open.
     const bracket: ExitBracket = {
@@ -371,6 +459,115 @@ export class StrategyBroker {
     } else this.exits.push(bracket); // keep the trailing ratchet
   }
 
+  // ── strategy.risk.* (risk-management rules) ───────────────
+  /** Most-restrictive merge for a repeated risk-rule call (na/undefined → keep current). */
+  private static riskMin(cur: number | undefined, v: number | undefined): number | undefined {
+    if (v == null || Number.isNaN(v)) return cur;
+    return cur == null ? v : Math.min(cur, v);
+  }
+  setRiskAllowEntryIn(value: string): void {
+    if (!this.active) return;
+    if (value === 'all' || value === 'long' || value === 'short') this.riskDirection = value;
+  }
+  setRiskMaxPositionSize(contracts?: number): void {
+    if (!this.active) return;
+    this.riskMaxPositionSize = StrategyBroker.riskMin(this.riskMaxPositionSize, contracts);
+  }
+  setRiskMaxConsLossDays(count?: number): void {
+    if (!this.active) return;
+    this.riskMaxConsLossDays = StrategyBroker.riskMin(this.riskMaxConsLossDays, count);
+  }
+  setRiskMaxDrawdown(value?: number, type?: string): void {
+    if (!this.active) return;
+    if (type === 'percent_of_equity')
+      this.riskMaxDrawdownPct = StrategyBroker.riskMin(this.riskMaxDrawdownPct, value);
+    else this.riskMaxDrawdownCash = StrategyBroker.riskMin(this.riskMaxDrawdownCash, value);
+  }
+  setRiskMaxIntradayFilledOrders(count?: number): void {
+    if (!this.active) return;
+    this.riskMaxIntradayOrders = StrategyBroker.riskMin(this.riskMaxIntradayOrders, count);
+  }
+  setRiskMaxIntradayLoss(value?: number, type?: string): void {
+    if (!this.active) return;
+    if (type === 'percent_of_equity')
+      this.riskMaxIntradayLossPct = StrategyBroker.riskMin(this.riskMaxIntradayLossPct, value);
+    else this.riskMaxIntradayLossCash = StrategyBroker.riskMin(this.riskMaxIntradayLossCash, value);
+  }
+
+  /** True while a risk rule has trading halted (for the current trading day, or for good). */
+  private get riskHaltActive(): boolean {
+    return this.riskHalted || this.riskHaltedDay === this.riskDay;
+  }
+
+  /**
+   * A risk rule fired: cancel every pending order and exit bracket, submit one
+   * emergency market order closing the whole position (it fills on the next tick
+   * pass, like any market order), and halt trading — for the rest of the current
+   * trading day (the intraday rules) or permanently.
+   */
+  private riskTrip(untilDayEnd: boolean): void {
+    if (untilDayEnd) this.riskHaltedDay = this.riskDay;
+    else this.riskHalted = true;
+    this.pending = this.size !== 0 ? [{ id: '', dir: 0, kind: 'closeAll', otype: 'market' }] : [];
+    this.exits = [];
+  }
+
+  /** Trading-day rollover: reset the intraday counters/baselines and score the day
+   *  that just closed against max_cons_loss_days (a day is a loss when its closing
+   *  equity finished below its opening equity). */
+  private riskRollDay(): void {
+    const day = this.host.tradingDayKey;
+    if (day === this.riskDay) return;
+    if (!Number.isNaN(this.riskDay)) {
+      if (this.riskBarCloseEquity < this.riskDayStartEquity - 1e-9) this.riskConsLossDays++;
+      else this.riskConsLossDays = 0;
+      if (this.riskMaxConsLossDays != null && this.riskConsLossDays >= this.riskMaxConsLossDays)
+        this.riskTrip(false);
+    }
+    this.riskDay = day;
+    const eq = Number.isFinite(this.riskBarCloseEquity)
+      ? this.riskBarCloseEquity
+      : this.settings.initialCapital;
+    this.riskDayStartEquity = eq;
+    this.riskDayMaxEquity = eq;
+    this.riskDayFills = 0;
+  }
+
+  /** The equity-based risk rules, checked along the bar's intrabar equity path:
+   *  max_drawdown against the tracked peak-to-trough extremes, max_intraday_loss
+   *  against the day's opening equity (the percent form is a share of the day's
+   *  maximum equity, per the v6 reference). */
+  private riskCheckEquity(pts: number[]): void {
+    if (this.riskHalted) return;
+    if (
+      (this.riskMaxDrawdownCash != null && this.maxDrawdown >= this.riskMaxDrawdownCash - 1e-9) ||
+      (this.riskMaxDrawdownPct != null && this.maxDrawdownPercent >= this.riskMaxDrawdownPct - 1e-9)
+    ) {
+      this.riskTrip(false);
+      return;
+    }
+    const dayHalted = this.riskHaltedDay === this.riskDay;
+    for (const v of pts) {
+      if (v > this.riskDayMaxEquity) this.riskDayMaxEquity = v;
+      if (dayHalted) continue;
+      const loss = this.riskDayStartEquity - v;
+      if (
+        (this.riskMaxIntradayLossCash != null && loss >= this.riskMaxIntradayLossCash - 1e-9) ||
+        (this.riskMaxIntradayLossPct != null &&
+          loss >= (this.riskMaxIntradayLossPct / 100) * this.riskDayMaxEquity - 1e-9)
+      ) {
+        this.riskTrip(true);
+        return;
+      }
+    }
+  }
+
+  /** Percent-of-cost-basis for a per-trade money amount (the *_percent fields). */
+  private static tradePct(amount: number, entryPrice: number, qty: number): number {
+    const basis = Math.abs(entryPrice * qty);
+    return basis > 0 ? (amount / basis) * 100 : 0;
+  }
+
   /** A closed trade's field, or an open entry lot's (one open trade per lot). */
   tradeField(scope: string, field: string, i: number): number | string {
     const k = Math.trunc(i);
@@ -380,6 +577,8 @@ export class StrategyBroker {
       switch (field) {
         case 'profit':
           return t.profit;
+        case 'profit_percent':
+          return StrategyBroker.tradePct(t.profit, t.entryPrice, t.qty);
         case 'entry_price':
           return t.entryPrice;
         case 'exit_price':
@@ -388,15 +587,29 @@ export class StrategyBroker {
           return t.entryBar;
         case 'exit_bar_index':
           return t.exitBar;
+        case 'entry_time':
+          return t.entryTime;
+        case 'exit_time':
+          return t.exitTime;
         case 'size':
           return t.dir * t.qty;
         case 'entry_id':
           return t.entryId;
+        case 'commission':
+          return t.commission;
+        case 'max_runup':
+          return t.maxRunup;
+        case 'max_runup_percent':
+          return StrategyBroker.tradePct(t.maxRunup, t.entryPrice, t.qty);
+        case 'max_drawdown':
+          return t.maxDrawdown;
+        case 'max_drawdown_percent':
+          return StrategyBroker.tradePct(t.maxDrawdown, t.entryPrice, t.qty);
         case 'cumprofit':
         case 'cumulative_profit':
           return t.cumProfit;
         default:
-          return NaN; // commission / max_runup / *_comment etc. not tracked in v1
+          return NaN; // entry_comment / exit_comment / exit_id not tracked in v1
       }
     }
     const lot = this.entryLots[k];
@@ -405,14 +618,32 @@ export class StrategyBroker {
     switch (field) {
       case 'profit':
         return dir * (this.host.close - lot.price) * lot.qty;
+      case 'profit_percent':
+        return StrategyBroker.tradePct(
+          dir * (this.host.close - lot.price) * lot.qty,
+          lot.price,
+          lot.qty,
+        );
       case 'entry_price':
         return lot.price;
       case 'entry_bar_index':
         return lot.bar;
+      case 'entry_time':
+        return lot.time;
       case 'size':
         return dir * lot.qty;
       case 'entry_id':
         return lot.id;
+      case 'commission':
+        return lot.fee; // the (remaining) entry-side commission carried by the open trade
+      case 'max_runup':
+        return lot.maxFavMove * lot.qty;
+      case 'max_runup_percent':
+        return StrategyBroker.tradePct(lot.maxFavMove * lot.qty, lot.price, lot.qty);
+      case 'max_drawdown':
+        return lot.maxAdvMove * lot.qty;
+      case 'max_drawdown_percent':
+        return StrategyBroker.tradePct(lot.maxAdvMove * lot.qty, lot.price, lot.qty);
       default:
         return NaN;
     }
@@ -432,8 +663,11 @@ export class StrategyBroker {
   /** Bar open (before the script body): fill against the bar's full range. */
   onBar(): void {
     if (!this.active) return;
+    this.riskRollDay();
     const { open, high, low } = this.host;
     this.processTick(open, high, low, open);
+    this.barsProcessed++;
+    if (this.size !== 0) this.barsInMarket++;
   }
 
   /**
@@ -493,8 +727,18 @@ export class StrategyBroker {
     // 2. exit brackets against the tick's range
     if (this.size !== 0 && this.exits.length) this.processExits(o, h, l);
 
-    // 3. mark-to-market
+    // 2b. strategy.risk.max_intraday_filled_orders — reaching the cap cancels
+    // everything, closes the position, and halts until the day ends.
+    if (
+      this.riskMaxIntradayOrders != null &&
+      !this.riskHaltActive &&
+      this.riskDayFills >= this.riskMaxIntradayOrders
+    )
+      this.riskTrip(true);
+
+    // 3. mark-to-market (also runs the equity-based risk rules)
     this.markToMarket(o, h, l);
+    this.riskBarCloseEquity = this.equity;
   }
 
   /** Update the equity curve and drawdown/run-up extremes. TradingView computes the
@@ -523,7 +767,20 @@ export class StrategyBroker {
       if (this.valleyEquity > 0)
         this.maxRunupPercent = Math.max(this.maxRunupPercent, (ru / this.valleyEquity) * 100);
     }
+    // Per-lot trade excursions: the bar's favorable/adverse per-contract price
+    // moves relative to each open entry (a lot removed by this pass's fills no
+    // longer marks — its life ended at its exit fill, TradingView-style).
+    if (this.size !== 0) {
+      const dir = sign(this.size);
+      for (const lot of this.entryLots) {
+        const fav = dir === DIR_LONG ? h - lot.price : lot.price - l;
+        const adv = dir === DIR_LONG ? lot.price - l : h - lot.price;
+        if (fav > lot.maxFavMove) lot.maxFavMove = fav;
+        if (adv > lot.maxAdvMove) lot.maxAdvMove = adv;
+      }
+    }
     this.recordExposure();
+    this.riskCheckEquity(pts);
   }
 
   private processExits(o: number, h: number, l: number): void {
@@ -549,6 +806,7 @@ export class StrategyBroker {
         this.closeLot(lot, take, px, fee);
         ex.filled = (ex.filled ?? 0) + take;
         remaining -= take;
+        this.riskDayFills++; // each lot's exit is its own order (risk fill counting)
       };
       // Each eligible entry lot gets its OWN exit order: profit/loss tick levels are
       // measured from that lot's fill price (absolute stop/limit prices are shared).
@@ -659,7 +917,18 @@ export class StrategyBroker {
     return undefined;
   }
 
+  /** Execute an order, counting it toward the intraday filled-orders risk rule when
+   *  it actually trades (a blocked or no-op order is not a fill). */
   private fill(o: Order, price: number): void {
+    const size = this.size,
+      lots = this.entryLots.length,
+      closed = this.closedTrades.length;
+    this.execute(o, price);
+    if (this.size !== size || this.entryLots.length !== lots || this.closedTrades.length !== closed)
+      this.riskDayFills++;
+  }
+
+  private execute(o: Order, price: number): void {
     if (o.kind === 'closeAll') {
       this.closePosition(price, o.qty);
       return;
@@ -671,6 +940,16 @@ export class StrategyBroker {
       return;
     }
     const dir = o.dir;
+    // strategy.risk.allow_entry_in — an entry against the allowed direction never
+    // opens a position: with an open opposite position it closes it (no reversal),
+    // while flat it is a no-op.
+    if (o.kind === 'entry' && this.riskDirection !== 'all') {
+      const allowed = this.riskDirection === 'long' ? DIR_LONG : DIR_SHORT;
+      if (dir !== allowed) {
+        if (this.size !== 0 && sign(this.size) !== dir) this.closePosition(price);
+        return;
+      }
+    }
     if (this.size !== 0 && sign(this.size) !== dir) {
       if (o.kind === 'entry') {
         this.closePosition(price); // entry REVERSES: flat first, then open the full qty
@@ -690,7 +969,11 @@ export class StrategyBroker {
       // exactly N adds rather than an unbounded number.
       if (this.entryCount >= this.settings.pyramiding) return;
     }
-    const qty = this.qtyFor(o, price);
+    let qty = this.qtyFor(o, price);
+    // strategy.risk.max_position_size — reduce an ENTRY's quantity so the resulting
+    // position cannot exceed the cap; an entry with no room left is not placed.
+    if (o.kind === 'entry' && this.riskMaxPositionSize != null)
+      qty = Math.min(qty, this.riskMaxPositionSize - Math.abs(this.size));
     if (qty <= 0) return;
     this.openOrAdd(o, dir, qty, price);
   }
@@ -698,22 +981,33 @@ export class StrategyBroker {
   /** Open a new position (or add a lot to the same-direction one) and book the entry commission. */
   private openOrAdd(o: Order, dir: number, qty: number, price: number): void {
     const fee = this.commission(qty, price);
+    const lot: Lot = {
+      id: o.id,
+      qty,
+      price,
+      bar: this.host.idx,
+      time: this.host.time,
+      fee,
+      maxFavMove: 0,
+      maxAdvMove: 0,
+    };
     if (this.size === 0) {
       this.size = dir * qty;
       this.entryId = o.id;
       this.entryCount = 1;
-      this.entryLots = [{ id: o.id, qty, price, bar: this.host.idx, fee }];
+      this.entryLots = [lot];
     } else {
       this.size += dir * qty;
       this.entryCount += 1;
-      this.entryLots.push({ id: o.id, qty, price, bar: this.host.idx, fee });
+      this.entryLots.push(lot);
     }
     this.recordExposure();
     this.realized -= fee; // carried per-lot; pro-rated into each trade's profit on close
+    this.totalCommission += fee;
   }
 
   /** Live closed-trade list + equity curve for the engine's strategy report. */
-  report() {
+  report(): StrategyReport {
     const c = this.settings;
     return {
       initialCapital: c.initialCapital,
@@ -722,9 +1016,14 @@ export class StrategyBroker {
       grossLoss: this.grossLoss,
       wins: this.wins,
       losses: this.losses,
+      evens: this.evens,
       maxDrawdown: this.maxDrawdown,
+      maxDrawdownPercent: this.maxDrawdownPercent,
+      totalCommission: this.totalCommission,
       closedTrades: this.closedTrades,
       equityCurve: this.equityCurve,
+      barsProcessed: this.barsProcessed,
+      barsInMarket: this.barsInMarket,
     };
   }
 
@@ -771,6 +1070,7 @@ export class StrategyBroker {
     lot.fee -= entryFee;
     const profit = dir * (price - lot.price) * take - exitFee - entryFee;
     this.realized += profit + entryFee;
+    this.totalCommission += exitFee;
     if (profit > 0) {
       this.grossProfit += profit;
       this.wins++;
@@ -786,8 +1086,13 @@ export class StrategyBroker {
       exitPrice: price,
       entryBar: lot.bar,
       exitBar: this.host.idx,
+      entryTime: lot.time,
+      exitTime: this.host.time,
       profit,
       cumProfit: this.realized,
+      commission: entryFee + exitFee,
+      maxRunup: lot.maxFavMove * take,
+      maxDrawdown: lot.maxAdvMove * take,
     });
     lot.qty -= take;
     if (lot.qty <= 1e-9) this.entryLots.splice(this.entryLots.indexOf(lot), 1);
@@ -823,6 +1128,21 @@ export function makeStrategyNs(b: StrategyBroker) {
     },
     oca: { none: 'none', cancel: 'cancel', reduce: 'reduce' },
     direction: { all: 'all', long: 'long', short: 'short' },
+
+    /** strategy.risk.* — risk-management rules (broker halt logic). The
+     *  alert_message args are accepted and ignored (no alert feed in piner). */
+    risk: {
+      allow_entry_in: (value: unknown) => b.setRiskAllowEntryIn(String(value)),
+      max_cons_loss_days: (count: unknown, _alertMessage?: unknown) =>
+        b.setRiskMaxConsLossDays(opt(count)),
+      max_drawdown: (value: unknown, type?: unknown, _alertMessage?: unknown) =>
+        b.setRiskMaxDrawdown(opt(value), typeof type === 'string' ? type : undefined),
+      max_intraday_filled_orders: (count: unknown, _alertMessage?: unknown) =>
+        b.setRiskMaxIntradayFilledOrders(opt(count)),
+      max_intraday_loss: (value: unknown, type?: unknown, _alertMessage?: unknown) =>
+        b.setRiskMaxIntradayLoss(opt(value), typeof type === 'string' ? type : undefined),
+      max_position_size: (contracts: unknown) => b.setRiskMaxPositionSize(opt(contracts)),
+    },
 
     entry: (
       id: unknown,

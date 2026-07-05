@@ -480,8 +480,11 @@ security(site: number, symbol: string, tf: unknown, lookahead: unknown,
 > market/limit/stop/stop-limit, reverse + pyramiding, sizing
 > (fixed/cash/percent_of_equity), commission, slippage, exit brackets (profit/loss/
 > stop/limit/**trailing**, OCA), PnL + closed-trade list + equity curve +
-> drawdown/run-up, live read-backs, per-trade introspection, and performance stats.
-> Tail: OCA-group nuances, `calc_on_every_tick`, `strategy.risk.*`, margin.
+> drawdown/run-up, live read-backs, per-trade introspection, performance stats, and
+> the `strategy.risk.*` rules (direction/size caps + drawdown/intraday-loss/
+> cons-loss-days/filled-orders halts). Tail: OCA-group nuances,
+> `calc_on_every_tick`, margin. **Full design doc:
+> [strategy-broker.md](./strategy-broker.md).**
 
 A deterministic broker simulator driven by the same bar loop.
 

@@ -100,6 +100,36 @@ backtesting/order model, and `alert`/`alertcondition`.
 → [reference](https://www.tradingview.com/pine-script-reference/v6/),
 [built-ins](https://www.tradingview.com/pine-script-docs/language/built-ins/)
 
+### 9.1 `strategy.risk.*` rules
+
+Per the v6 reference + the [Strategies § Risk management](https://www.tradingview.com/pine-script-docs/concepts/strategies/#risk-management)
+doc: risk rules apply to the whole strategy, run on every tick/order event, and
+cannot be deactivated per-execution. Semantics implemented (broker halt logic in
+`runtime/builtins/strategy.ts`):
+
+- **`allow_entry_in(value)`** — `strategy.entry` opens positions only in the
+  allowed direction; an entry against it **closes** an open opposite position
+  (market order, no reversal) and is a no-op while flat.
+- **`max_position_size(contracts)`** — entry quantity is reduced so the resulting
+  position never exceeds the cap; an entry with no room is not placed.
+- **`max_drawdown(value, type)`** — when peak-to-trough equity drawdown reaches
+  `value` (`strategy.cash`, or `strategy.percent_of_equity` = % of maximum
+  equity): cancel all pending orders, close the position, halt **permanently**.
+- **`max_intraday_loss(value, type)`** — loss measured from the trading day's
+  opening equity (the percent form is a share of the day's **maximum** equity, per
+  the reference); on breach: cancel, close, halt **until the day ends**.
+- **`max_intraday_filled_orders(count)`** — after `count` filled orders in a
+  trading day: cancel, close, halt until the day ends.
+- **`max_cons_loss_days(count)`** — after `count` consecutive trading days whose
+  closing equity finished below their opening equity: cancel, close, halt
+  **permanently**.
+
+piner specifics: a "trading day" is the UTC calendar day of bar time (one bucket
+per bar above the daily timeframe, per the reference); the emergency close is a
+market order filling on the next tick pass (next bar open, or the same-bar close
+pass under `process_orders_on_close`); repeated calls to the same rule keep the
+most restrictive value; `alert_message` args are accepted and ignored.
+
 ## Resolved & remaining
 
 The two semantics that were once `[OPEN]` are **resolved and pinned by tests**:
