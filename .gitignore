@@ -20,3 +20,4 @@ src/*.js
 .gemini
 dev-docs
 .vscode
+*.html

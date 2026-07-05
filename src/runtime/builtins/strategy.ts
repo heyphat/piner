@@ -70,11 +70,14 @@ interface Order {
   price?: number; // limit/stop price; for stoplimit this is the STOP trigger
   limit?: number; // stoplimit only: the resting limit price once the stop triggers
   triggered?: boolean; // stoplimit only: the stop has fired → now a resting limit
+  /** Submission sequence — lots inherit it so exit brackets can scope to the
+   *  entries that existed when the bracket was called (Pine's rule). */
+  seq?: number;
 }
 
 interface ExitBracket {
   id: string;
-  fromEntry: string; // '' → applies to every open entry (and future ones, per Pine)
+  fromEntry: string; // '' → every entry in scope, regardless of id
   qty?: number;
   profit?: number; // ticks (measured from each entry lot's own fill price)
   loss?: number; // ticks (measured from each entry lot's own fill price)
@@ -85,6 +88,10 @@ interface ExitBracket {
   trailOffset?: number; // trail distance behind the extreme (ticks)
   trailStop?: number; // current ratcheting trailing-stop level (price), NaN until armed
   filled?: number; // contracts this bracket has closed (caps at `qty` when set)
+  /** Call-time scope: only lots from orders submitted at-or-before this sequence
+   *  are eligible — per Pine, an exit call covers entries created before or on
+   *  its bar and "does not affect subsequent entries" (exit-persist demo). */
+  maxSeq: number;
 }
 
 /** One open entry: `strategy.entry`/`order` fills append these; closes consume them FIFO. */
@@ -94,6 +101,8 @@ interface Lot {
   price: number; // this entry's fill price
   bar: number; // bar index of the fill
   time: number; // fill time (bar time, ms) — serves entry_time
+  orderSeq: number; // submission seq of the order that opened this lot (exit scoping)
+  entryCmd: boolean; // opened by strategy.entry (counts toward the pyramiding cap)
   fee: number; // entry-side commission still carried (pro-rated out as the lot closes)
   // Per-CONTRACT favorable/adverse price excursions over the lot's life (≥ 0,
   // price units), updated each mark-to-market from the bar's high/low. Being
@@ -170,10 +179,14 @@ export class StrategyBroker {
   // `strategy.exit(from_entry=…)`, per-entry profit/loss tick levels, and the
   // one-trade-row-per-entry ledger all resolve against the right entry.
   private entryLots: Lot[] = [];
-  // Number of same-direction entry adds making up the current position. Drives the
-  // pyramiding cap (TradingView allows `pyramiding` same-side entries); reset to 0
-  // when the position is fully closed.
-  private entryCount = 0;
+  /** OPEN trades opened by `strategy.entry` (the pyramiding cap's basis). Per the
+   *  TV docs, a blocked entry waits "until at least one of the existing trades
+   *  closes" — a close FREES capacity, so this counts live lots, not adds. */
+  private get openEntryCmdCount(): number {
+    let n = 0;
+    for (const lt of this.entryLots) if (lt.entryCmd) n++;
+    return n;
+  }
 
   realized = 0;
   grossProfit = 0;
@@ -202,6 +215,8 @@ export class StrategyBroker {
 
   private pending: Order[] = [];
   private exits: ExitBracket[] = [];
+  /** Monotonic order-submission counter (drives exit-bracket call-time scoping). */
+  private orderSeq = 0;
 
   // ── strategy.risk.* rule settings (declared with simple args, so the setters run
   //    idempotently every bar; repeated calls keep the most restrictive value) ─
@@ -238,7 +253,6 @@ export class StrategyBroker {
   private static readonly SNAP_SCALARS = [
     'size',
     'entryId',
-    'entryCount',
     'realized',
     'grossProfit',
     'grossLoss',
@@ -257,6 +271,7 @@ export class StrategyBroker {
     'barsProcessed',
     'barsInMarket',
     'totalCommission',
+    'orderSeq',
     'riskDirection',
     'riskMaxPositionSize',
     'riskMaxConsLossDays',
@@ -410,18 +425,40 @@ export class StrategyBroker {
   }
   entry(id: string, dir: number, qty?: number, limit?: number, stop?: number): void {
     if (!this.active || this.riskHaltActive) return;
-    this.submit({ id, dir, qty, kind: 'entry', ...orderTrigger(limit, stop) });
+    this.submit({
+      id,
+      dir,
+      qty,
+      kind: 'entry',
+      seq: ++this.orderSeq,
+      ...orderTrigger(limit, stop),
+    });
   }
   order(id: string, dir: number, qty?: number, limit?: number, stop?: number): void {
     if (!this.active || this.riskHaltActive) return;
-    this.submit({ id, dir, qty, kind: 'order', ...orderTrigger(limit, stop) });
+    this.submit({
+      id,
+      dir,
+      qty,
+      kind: 'order',
+      seq: ++this.orderSeq,
+      ...orderTrigger(limit, stop),
+    });
   }
   close(id: string, qty?: number): void {
     if (!this.active || this.riskHaltActive) return;
+    // Per Pine, the command has no effect unless an entry with this id is OPEN at
+    // call time — a same-bar queued entry does not count, so `entry(id)` + `close(id)`
+    // on one bar must not open-and-instantly-close on the next bar's fill pass.
+    if (!this.entryLots.some((lt) => lt.id === id)) return;
     this.pending.push({ id, dir: 0, qty, kind: 'close', otype: 'market' });
   }
   close_all(): void {
     if (!this.active || this.riskHaltActive) return;
+    // Per Pine: "if there is no open position, the function call has no effect" —
+    // gated at CALL time, so it cannot pair with a same-bar entry into an instant
+    // round trip on the next bar (TV's "Order execution demo" behavior).
+    if (this.size === 0) return;
     this.pending.push({ id: '', dir: 0, kind: 'closeAll', otype: 'market' });
   }
   exit(
@@ -451,6 +488,7 @@ export class StrategyBroker {
       trailPoints,
       trailOffset,
       trailStop: NaN,
+      maxSeq: this.orderSeq, // covers entries submitted up to THIS call (incl. same-bar earlier ones)
     };
     const i = this.exits.findIndex((e) => e.id === id);
     if (i >= 0) {
@@ -797,11 +835,41 @@ export class StrategyBroker {
       wantHigh: boolean,
     ): number | undefined =>
       a == null ? b : b == null ? a : wantHigh ? Math.max(a, b) : Math.min(a, b);
+    // A bracket's scope: lots matching its from_entry filter whose originating
+    // order existed when the bracket was called (maxSeq) — later same-id entries
+    // are NOT covered (Pine's exit-persist rule).
+    const eligible = (ex: ExitBracket) => (lt: Lot) =>
+      (!ex.fromEntry || lt.id === ex.fromEntry) && lt.orderSeq <= ex.maxSeq;
+    // Pine RESERVES exit quantity in call order: each bracket may only fill what
+    // earlier brackets left unreserved of its eligible lots — so a later, larger
+    // bracket triggering FIRST still takes only its unreserved share (the
+    // reversed-exit demo: qty-19 limit + qty-20 stop on 20 shares → the stop
+    // covers exactly 1).
+    const unreserved = new Map<Lot, number>();
+    for (const lt of this.entryLots) unreserved.set(lt, lt.qty);
+    const allot = new Map<ExitBracket, number>();
+    for (const ex of this.exits) {
+      const isElig = eligible(ex);
+      let want = ex.qty != null ? Math.max(0, ex.qty - (ex.filled ?? 0)) : Infinity;
+      let granted = 0;
+      for (const lt of this.entryLots) {
+        if (want <= 0) break;
+        if (!isElig(lt)) continue;
+        const take = Math.min(unreserved.get(lt) ?? 0, want);
+        if (take > 0) {
+          unreserved.set(lt, (unreserved.get(lt) ?? 0) - take);
+          granted += take;
+          want -= take;
+        }
+      }
+      allot.set(ex, granted);
+    }
     const keep: ExitBracket[] = [];
     for (const ex of this.exits) {
       if (this.size === 0) break;
       const dir = sign(this.size);
-      let remaining = ex.qty != null ? ex.qty - (ex.filled ?? 0) : Infinity;
+      const isElig = eligible(ex);
+      let remaining = allot.get(ex) ?? 0;
       const book = (lot: Lot, take: number, px: number, fee?: number) => {
         this.closeLot(lot, take, px, fee);
         ex.filled = (ex.filled ?? 0) + take;
@@ -810,7 +878,7 @@ export class StrategyBroker {
       };
       // Each eligible entry lot gets its OWN exit order: profit/loss tick levels are
       // measured from that lot's fill price (absolute stop/limit prices are shared).
-      for (const lot of this.entryLots.filter((lt) => !ex.fromEntry || lt.id === ex.fromEntry)) {
+      for (const lot of this.entryLots.filter(isElig)) {
         if (remaining <= 0 || this.size === 0) break;
         const stopPx = firstOf(
           ex.stop,
@@ -854,7 +922,7 @@ export class StrategyBroker {
         const fillPx = this.trailFill(ex, sign(this.size), o, h, l);
         if (fillPx != null) {
           const px = fillPx - sign(this.size) * slip; // a stop order → adverse slippage
-          const lots = this.entryLots.filter((lt) => !ex.fromEntry || lt.id === ex.fromEntry);
+          const lots = this.entryLots.filter(isElig);
           const group = Math.min(
             remaining,
             lots.reduce((a, lt) => a + lt.qty, 0),
@@ -870,7 +938,7 @@ export class StrategyBroker {
       // A bracket is spent once it has filled its qty cap or exhausted its eligible lots;
       // an unfilled one — or one still holding eligible lots — stays armed. A bracket with
       // no matching lots yet (its from_entry hasn't filled) waits for the entry.
-      const anyLeft = this.entryLots.some((lt) => !ex.fromEntry || lt.id === ex.fromEntry);
+      const anyLeft = this.entryLots.some(isElig);
       const spent =
         (ex.filled ?? 0) > 0 && (!anyLeft || (ex.qty != null && (ex.filled ?? 0) >= ex.qty - 1e-9));
       if (!spent) keep.push(ex);
@@ -964,10 +1032,10 @@ export class StrategyBroker {
         return;
       }
     } else if (this.size !== 0 && o.kind === 'entry') {
-      // pyramiding: cap same-direction ENTRIES at settings.pyramiding (strategy.order is
-      // uncapped, matching TradingView). The count is real, so pyramiding ≥ 2 admits
-      // exactly N adds rather than an unbounded number.
-      if (this.entryCount >= this.settings.pyramiding) return;
+      // pyramiding: cap OPEN strategy.entry trades at settings.pyramiding
+      // (strategy.order is uncapped, matching TradingView). A closed trade frees
+      // capacity — TV: blocked "until at least one of the existing trades closes".
+      if (this.openEntryCmdCount >= this.settings.pyramiding) return;
     }
     let qty = this.qtyFor(o, price);
     // strategy.risk.max_position_size — reduce an ENTRY's quantity so the resulting
@@ -987,6 +1055,8 @@ export class StrategyBroker {
       price,
       bar: this.host.idx,
       time: this.host.time,
+      orderSeq: o.seq ?? 0,
+      entryCmd: o.kind === 'entry',
       fee,
       maxFavMove: 0,
       maxAdvMove: 0,
@@ -994,11 +1064,9 @@ export class StrategyBroker {
     if (this.size === 0) {
       this.size = dir * qty;
       this.entryId = o.id;
-      this.entryCount = 1;
       this.entryLots = [lot];
     } else {
       this.size += dir * qty;
-      this.entryCount += 1;
       this.entryLots.push(lot);
     }
     this.recordExposure();
@@ -1100,7 +1168,6 @@ export class StrategyBroker {
     if (Math.abs(this.size) <= 1e-9 || this.entryLots.length === 0) {
       this.size = 0;
       this.entryId = '';
-      this.entryCount = 0;
       this.entryLots = [];
       this.exits = [];
     }

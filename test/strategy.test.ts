@@ -8,10 +8,10 @@ const bars: Bar[] = Array.from({ length: 10 }, (_, i) => {
 });
 
 /** Run both backends, assert plot outputs agree, return the JS-backend engine. */
-async function bothBackends(src: string, mintick?: number) {
+async function bothBackends(src: string, mintick?: number, data: Bar[] = bars) {
   const c = compile(src);
-  const js = new Engine(c, new ArrayFeed(bars), { backend: 'js' });
-  const ip = new Engine(c, new ArrayFeed(bars), { backend: 'interp' });
+  const js = new Engine(c, new ArrayFeed(data), { backend: 'js' });
+  const ip = new Engine(c, new ArrayFeed(data), { backend: 'interp' });
   await js.run({ symbol: 'BTCUSD', timeframe: '1', mintick });
   await ip.run({ symbol: 'BTCUSD', timeframe: '1', mintick });
   for (const [id, jp] of js.outputs.plots) {
@@ -111,6 +111,145 @@ describe('strategy — broker simulator', () => {
     expect(eng.strategy.closedTrades.length).toBe(1);
     expect(eng.strategy.closedTrades[0].entryId).toBe('B');
     expect(eng.strategy.closedTrades[0].qty).toBe(1);
+  });
+
+  it('close_all while flat is a no-op — a same-bar entry cannot instantly round-trip (was profit-0 trades)', async () => {
+    // TV's "Order execution demo": close_all() runs on EVERY bar, but it only
+    // creates an order when a position is OPEN at call time. Previously the flat
+    // bar-0 call queued a closeAll that filled right after the entry in bar 1's
+    // pass — an instant zero-profit round trip at the same price.
+    const eng = await bothBackends(
+      '//@version=6\nstrategy("s")\nif bar_index == 0\n    strategy.entry("L", strategy.long)\nstrategy.close_all()\nplot(strategy.position_size)\n',
+    );
+    const sz = eng.outputs.plots.get(0)!.data;
+    expect(sz[1]).toBe(1); // entry fills bar1 open — NOT instantly closed
+    expect(sz[2]).toBe(0); // close_all called on bar1 (position open) fills bar2 open
+    expect(eng.strategy.closedTrades.length).toBe(1);
+    expect(eng.strategy.closedTrades[0].entryPrice).toBe(101);
+    expect(eng.strategy.closedTrades[0].exitPrice).toBe(102);
+    expect(eng.strategy.netProfit).toBeCloseTo(1, 9);
+  });
+
+  it('close(id) with no open entry under that id is a no-op at call time', async () => {
+    // entry("A") + close("A") on the same flat bar: the close must not latch onto
+    // the not-yet-filled entry. A later close("A") with the position open works.
+    const eng = await bothBackends(
+      '//@version=6\nstrategy("s")\nif bar_index == 0\n    strategy.entry("A", strategy.long)\n    strategy.close("A")\nif bar_index == 3\n    strategy.close("A")\nplot(strategy.position_size)\n',
+    );
+    const sz = eng.outputs.plots.get(0)!.data;
+    expect(sz[1]).toBe(1); // opened bar1, same-bar close was gated out
+    expect(sz[3]).toBe(1); // still open
+    expect(sz[4]).toBe(0); // bar-3 close (position open at call) fills bar4
+    expect(eng.strategy.closedTrades.length).toBe(1);
+    expect(eng.strategy.closedTrades[0].exitPrice).toBe(104);
+  });
+
+  it('close(id) exits every pyramided lot under the id in one fill (FIFO row per lot)', async () => {
+    // TV's "Multiple close demo" behavior: three "buy" lots (pyramiding = 3), one
+    // close("buy") → all three close in a single market fill, each booking its own
+    // FIFO row at its own entry price.
+    const eng = await bothBackends(
+      '//@version=6\nstrategy("s", pyramiding = 3)\nif bar_index <= 2\n    strategy.entry("buy", strategy.long)\nif bar_index == 5\n    strategy.close("buy")\nplot(strategy.position_size)\n',
+    );
+    const s = eng.strategy;
+    expect(s.closedTrades.length).toBe(3);
+    s.closedTrades.forEach((t, k) => {
+      expect(t.entryBar).toBe(k + 1); // fills at bars 1/2/3 @101/102/103
+      expect(t.entryPrice).toBe(101 + k);
+      expect(t.exitBar).toBe(6); // one market fill closes all three
+      expect(t.exitPrice).toBe(106);
+    });
+    expect(eng.outputs.plots.get(0)!.data[9]).toBe(0);
+  });
+
+  it('pyramiding capacity is freed when an open trade closes (cap counts OPEN entry trades)', async () => {
+    // TV: after the pyramiding limit, entries are blocked "until at least one of
+    // the existing trades closes". With A + B open (cap 2), closing B must allow
+    // C to fill. Previously the gate counted adds-since-flat and never freed.
+    const eng = await bothBackends(
+      '//@version=6\nstrategy("s", pyramiding = 2)\nif bar_index == 0\n    strategy.entry("A", strategy.long)\nif bar_index == 1\n    strategy.entry("B", strategy.long)\nif bar_index == 2\n    strategy.close("B")\nif bar_index == 4\n    strategy.entry("C", strategy.long)\nplot(strategy.position_size)\n',
+    );
+    const sz = eng.outputs.plots.get(0)!.data;
+    expect(sz[2]).toBe(2); // A + B open at the cap
+    expect(sz[3]).toBe(1); // B closed → capacity freed
+    expect(sz[5]).toBe(2); // C fills — was blocked before the fix
+    expect(eng.strategy.closedTrades.length).toBe(1);
+    expect(eng.strategy.closedTrades[0].entryId).toBe('B');
+  });
+
+  it('a canceled resting limit never fills, even when price later reaches its level', async () => {
+    // TV's "Cancel demo" behavior: a limit placed at bar 0 (94, below the range)
+    // and canceled at bar 2 — before any touch. The bar-5 dip through the level
+    // must NOT fill the canceled order.
+    const data: Bar[] = Array.from({ length: 10 }, (_, i) => ({
+      time: i * 60000,
+      open: 100,
+      high: 100.5,
+      low: i === 5 ? 90 : 99.5,
+      close: 100,
+      volume: 1,
+    }));
+    const eng = await bothBackends(
+      '//@version=6\nstrategy("s")\nif bar_index == 0\n    strategy.entry("buy", strategy.long, limit = 94)\nif bar_index == 2\n    strategy.cancel("buy")\nplot(strategy.position_size)\n',
+      undefined,
+      data,
+    );
+    expect(eng.strategy.closedTrades.length).toBe(0);
+    for (const v of eng.outputs.plots.get(0)!.data) expect(v).toBe(0);
+  });
+
+  it('an exit bracket covers only entries created at-or-before its call — not later same-id entries', async () => {
+    // Pine's exit-persist rule: exit("X", "A") called on bar 2 scopes to the "A"
+    // lot already open; the second "A" entry (bar 4) is NOT covered. The bar-7
+    // dip fires the covered lot's stop and leaves the later lot open. Previously
+    // the bracket matched future lots too and closed both.
+    const data: Bar[] = Array.from({ length: 10 }, (_, i) => ({
+      time: i * 60000,
+      open: 100,
+      high: 100.5,
+      low: i === 7 ? 90 : 99.5,
+      close: 100,
+      volume: 1,
+    }));
+    const eng = await bothBackends(
+      '//@version=6\nstrategy("s", pyramiding = 2)\nif bar_index == 0\n    strategy.entry("A", strategy.long)\nif bar_index == 2\n    strategy.exit("X", "A", stop = 95)\nif bar_index == 4\n    strategy.entry("A", strategy.long)\nplot(strategy.position_size)\n',
+      undefined,
+      data,
+    );
+    expect(eng.strategy.closedTrades.length).toBe(1);
+    expect(eng.strategy.closedTrades[0].entryBar).toBe(1); // the covered lot only
+    expect(eng.strategy.closedTrades[0].exitPrice).toBe(95);
+    const sz = eng.outputs.plots.get(0)!.data;
+    expect(sz[6]).toBe(2); // both lots open before the dip
+    expect(sz[9]).toBe(1); // the bar-5 lot survives — no exit covers it
+  });
+
+  it('exit brackets reserve quantity in call order — a later bracket triggering first takes only its share', async () => {
+    // Pine's reserved-exit rule: exit e1 (qty 19, limit) reserves 19 of the 20
+    // shares, so e2 (qty 20, stop) covers only 1 — even though its stop triggers
+    // FIRST. Previously e2 closed all 20.
+    const data: Bar[] = Array.from({ length: 10 }, (_, i) => ({
+      time: i * 60000,
+      open: 100,
+      high: i === 8 ? 115 : 100.5,
+      low: i === 5 ? 90 : 99.5,
+      close: 100,
+      volume: 1,
+    }));
+    const eng = await bothBackends(
+      '//@version=6\nstrategy("s")\nif bar_index == 0\n    strategy.entry("L", strategy.long, qty = 20)\nif bar_index == 2\n    strategy.exit("e1", limit = 110, qty = 19)\n    strategy.exit("e2", stop = 95, qty = 20)\nplot(strategy.position_size)\n',
+      undefined,
+      data,
+    );
+    const s = eng.strategy;
+    expect(s.closedTrades.length).toBe(2);
+    expect(s.closedTrades[0].qty).toBe(1); // the stop takes ONLY its unreserved share
+    expect(s.closedTrades[0].exitPrice).toBe(95);
+    expect(s.closedTrades[0].exitBar).toBe(5);
+    expect(s.closedTrades[1].qty).toBe(19); // the reservation survives for the limit
+    expect(s.closedTrades[1].exitPrice).toBe(110);
+    expect(s.closedTrades[1].exitBar).toBe(8);
+    expect(eng.outputs.plots.get(0)!.data[6]).toBe(19); // 20 − 1 after the stop
   });
 
   it('per-trade commission, fill times, percents, and excursions (documented fields, were NaN)', async () => {
