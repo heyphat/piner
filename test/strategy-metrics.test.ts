@@ -21,6 +21,8 @@ const mkReport = (over: Partial<StrategyReport>): StrategyReport => ({
   evens: 0,
   maxDrawdown: 0,
   maxDrawdownPercent: 0,
+  maxRunup: 0,
+  maxRunupPercent: 0,
   totalCommission: 0,
   closedTrades: [],
   equityCurve: [],
@@ -129,7 +131,7 @@ describe('computeStrategyMetrics — pure reductions', () => {
     expect(m.avgBarsInTrade).toBeCloseTo(4, 9); // (2+4+6)/3
   });
 
-  it('buy & hold enters at the second bar open, exits at the last close', () => {
+  it('buy & hold falls back to the second bar open when there are no closed trades', () => {
     const bars = [
       { open: 100, close: 100 },
       { open: 101, close: 102 },
@@ -142,6 +144,82 @@ describe('computeStrategyMetrics — pure reductions', () => {
     const ret = 110 / 101 - 1;
     expect(m.buyHoldReturnPercent).toBeCloseTo(ret * 100, 9);
     expect(m.outperformance).toBeCloseTo(4 - 100 * ret, 9);
+  });
+
+  it('winner/loser splits: avg bars, avg win/loss ratio, largest-vs-gross percents', () => {
+    // winners: +6 (2 bars), +2 (4 bars); losers: −4 (1 bar), −1 (3 bars); even: 0.
+    const m = computeStrategyMetrics(
+      mkReport({
+        closedTrades: [trade(6, 2), trade(-4, 1), trade(2, 4), trade(0, 9), trade(-1, 3)],
+        netProfit: 3,
+        grossProfit: 8,
+        grossLoss: 5, // stored positive, like the broker
+      }),
+      { periodsPerYear: 1 },
+    );
+    expect(m.avgBarsInWinners).toBeCloseTo(3, 9); // (2+4)/2
+    expect(m.avgBarsInLosers).toBeCloseTo(2, 9); // (1+3)/2
+    expect(m.avgWinLossRatio).toBeCloseTo(4 / 2.5, 9); // (8/2) / (5/2)
+    expect(m.largestWinPercentOfGrossProfit).toBeCloseTo(75, 9); // 6/8
+    expect(m.largestLossPercentOfGrossLoss).toBeCloseTo(80, 9); // 4/5
+    expect(m.netProfitPercentOfLargestLoss).toBeCloseTo(75, 9); // 3/4
+  });
+
+  it('return on initial capital and intrabar extremes rebased to initial capital', () => {
+    const m = computeStrategyMetrics(
+      mkReport({ netProfit: 25, initialCapital: 200, maxRunup: 30, maxDrawdown: 12 }),
+      { periodsPerYear: 1 },
+    );
+    expect(m.returnOnInitialCapitalPercent).toBeCloseTo(12.5, 9);
+    expect(m.maxRunupPercentOfInitialCapital).toBeCloseTo(15, 9);
+    expect(m.maxDrawdownPercentOfInitialCapital).toBeCloseTo(6, 9);
+  });
+
+  it('buy & hold bases on the first trade entry fill when trades exist', () => {
+    const bars = [
+      { open: 100, close: 100 },
+      { open: 101, close: 102 },
+      { open: 105, close: 106 },
+      { open: 107, close: 110 },
+    ];
+    const t = { ...trade(5), entryPrice: 105, entryBar: 2, exitBar: 3 };
+    const m = computeStrategyMetrics(
+      mkReport({ closedTrades: [t], netProfit: 5, initialCapital: 100 }),
+      { periodsPerYear: 1, bars },
+    );
+    const ret = 110 / 105 - 1;
+    expect(m.buyHoldReturnPercent).toBeCloseTo(ret * 100, 9);
+    expect(m.buyHoldPnL).toBeCloseTo(100 * ret, 9);
+    expect(m.outperformance).toBeCloseTo(5 - 100 * ret, 9);
+  });
+
+  it('close-to-close phases: max/avg run-up & drawdown, calendar-day durations', () => {
+    // equity zigzag: 100 →110 (peak) →105 →108 →112 (recovery+new peak) →104 →106.
+    // run-ups: 100→110 (10, 1d) and 105→112 (7, 2d); completed drawdown: 110→105
+    // recovered at 112 (5, 3d). Trailing 112→104 drawdown never recovers →
+    // excluded from averages but still the c2c max drawdown (8).
+    const day = 24 * 60 * 60 * 1000;
+    const m = computeStrategyMetrics(
+      mkReport({ equityCurve: [100, 110, 105, 108, 112, 104, 106] }),
+      { periodsPerYear: 1, barTimes: [0, 1, 2, 3, 4, 5, 6].map((d) => d * day) },
+    );
+    expect(m.maxRunupCloseToClose).toBeCloseTo(12, 9); // 112 − 100
+    expect(m.maxDrawdownCloseToClose).toBeCloseTo(8, 9); // 112 − 104
+    expect(m.avgRunupCloseToClose).toBeCloseTo(8.5, 9); // (10 + 7) / 2
+    expect(m.avgDrawdownCloseToClose).toBeCloseTo(5, 9);
+    expect(m.avgRunupDurationDays).toBeCloseTo(1.5, 9); // (1 + 2) / 2
+    expect(m.avgDrawdownDurationDays).toBeCloseTo(3, 9); // peak d1 → recovery d4
+  });
+
+  it('close-to-close: monotonic rise is one run-up and no completed drawdown', () => {
+    const m = computeStrategyMetrics(mkReport({ equityCurve: [100, 104, 109, 120] }), {
+      periodsPerYear: 1,
+    });
+    expect(m.maxRunupCloseToClose).toBe(20);
+    expect(m.avgRunupCloseToClose).toBe(20);
+    expect(m.maxDrawdownCloseToClose).toBe(0);
+    expect(m.avgDrawdownCloseToClose).toBe(0);
+    expect(m.avgRunupDurationDays).toBe(0); // no barTimes → durations unavailable
   });
 
   it('degenerate inputs: empty/flat runs produce zeros, never NaN', () => {

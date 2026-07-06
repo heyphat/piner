@@ -384,9 +384,9 @@ marks the open position against the current bar's close.
 - Convenience (not Pine builtins, used by the engine report/hosts):
   `profitFactor`, `winRate`, `defaultQty`, `report()` — the typed
   `StrategyReport`: initial capital, PnL aggregates, win/loss/even counts, max
-  drawdown (+%), `totalCommission` (both sides, TradingView's "Commission
-  Paid"), the trade list (each row carries fill times, its commission, and its
-  trade-life run-up/drawdown), the equity curve, and the exposure counters
+  drawdown and max run-up (+%), `totalCommission` (both sides, TradingView's
+  "Commission Paid"), the trade list (each row carries fill times, its
+  commission, and its trade-life run-up/drawdown), the equity curve, and the exposure counters
   (`barsProcessed` / `barsInMarket` — a bar is _in market_ when a position is
   open after its `onBar` fill pass).
 
@@ -395,11 +395,19 @@ marks the open position against the current bar's close.
 `src/engine/strategy-metrics.ts` — a **pure reduction of the `StrategyReport`**
 (plus bar times / timeframe for annualization) computing the tearsheet family:
 **Sharpe, Sortino, annualized volatility, CAGR, Calmar, exposure %, expectancy,
-max consecutive wins/losses, largest win/loss, avg bars per trade, and the
-buy-&-hold benchmark** (`buyHoldReturnPercent` + `outperformance`, entering at
-the second bar's open to mirror next-bar-open fills — pass `bars`). Exposed as
-`Engine.strategyMetrics(opts?)` and exported standalone for hosts that persist
-reports (pinestack's pinerun, fractal-chart's adapter).
+max consecutive wins/losses, largest win/loss, avg bars per trade (plus
+winner/loser splits), the TV report ratios** (`avgWinLossRatio`,
+largest-win/loss as % of gross profit/loss, net profit as % of largest loss,
+return on initial capital, max run-up/drawdown as % of initial capital), **the
+close-to-close run-up/drawdown family** (max/average magnitudes + average
+calendar-day durations, from the bar-close equity curve — see
+`docs/tradingview-strategy-report-metrics.md` §6–7 for the phase rules), **and
+the buy-&-hold benchmark** (`buyHoldReturnPercent` + `buyHoldPnL` +
+`outperformance`, entering at the first closed trade's entry fill per TV's
+stated basis, falling back to the second bar's open when there are no trades —
+pass `bars`). Exposed as `Engine.strategyMetrics(opts?)` and exported
+standalone for hosts that persist reports (pinestack's pinerun, fractal-chart's
+adapter).
 
 Deliberate boundaries:
 
