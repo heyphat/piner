@@ -63,10 +63,50 @@ export interface StrategyMetrics {
   largestLoss: number;
   /** Mean bars held per closed trade (TradingView's "avg # bars in trades"). */
   avgBarsInTrade: number;
-  /** Buy-&-hold benchmark return over the same bars, percent (0 without `bars`). */
+  /** Mean bars held per winning / losing closed trade (TV "avg # bars in
+   *  winning/losing trades"; 0 when there are none). */
+  avgBarsInWinners: number;
+  avgBarsInLosers: number;
+  /** TV "Average profit / average loss": mean winning-trade profit divided by the
+   *  mean losing-trade loss magnitude (0 when there are no losers). */
+  avgWinLossRatio: number;
+  /** TV "Largest profit as % of gross profit" (0 when gross profit is 0). */
+  largestWinPercentOfGrossProfit: number;
+  /** TV "Largest loss as % of gross loss", positive percent (0 when gross loss is 0). */
+  largestLossPercentOfGrossLoss: number;
+  /** TV "Net profit as % of largest loss": net profit over the largest single
+   *  loss magnitude, percent (0 when there is no losing trade). */
+  netProfitPercentOfLargestLoss: number;
+  /** TV "Return on initial capital": net profit as % of initial capital. */
+  returnOnInitialCapitalPercent: number;
+  /** Buy-&-hold benchmark return over the same bars, percent (0 without `bars`).
+   *  Basis: the first closed trade's entry fill (TV: "from when the strategy's
+   *  first position was opened"), falling back to the second bar's open when the
+   *  run produced no closed trades. */
   buyHoldReturnPercent: number;
+  /** TV "Buy and hold PnL" ($): initial capital × the buy-&-hold return. */
+  buyHoldPnL: number;
   /** Net profit minus the buy-&-hold PnL on the same capital (0 without `bars`). */
   outperformance: number;
+  /** TV "Max run-up / drawdown as % of initial capital (intrabar)": the broker's
+   *  intrabar-path extremes rebased onto initial capital (the Pine builtins'
+   *  `_percent` fields use the running valley/peak instead). */
+  maxRunupPercentOfInitialCapital: number;
+  maxDrawdownPercentOfInitialCapital: number;
+  /** Close-to-close (bar-close equity only) extremes, currency. TV: "the largest
+   *  increase/drop in account equity measured using only bar closing prices". */
+  maxRunupCloseToClose: number;
+  maxDrawdownCloseToClose: number;
+  /** TV "Average run-up/drawdown (close-to-close)": mean phase magnitude, currency.
+   *  A drawdown phase spans a peak → recovery to that peak (incomplete trailing
+   *  phases are excluded); a run-up phase spans a local minimum → the last new
+   *  peak it produces. */
+  avgRunupCloseToClose: number;
+  avgDrawdownCloseToClose: number;
+  /** TV "Average run-up/drawdown duration (close-to-close)": mean phase length in
+   *  calendar days (0 without `barTimes`). */
+  avgRunupDurationDays: number;
+  avgDrawdownDurationDays: number;
   /** The annualization actually used (for reproducibility/debugging). */
   periodsPerYear: number;
 }
@@ -95,6 +135,94 @@ function spanYears(time: number[]): number {
   const last = [...time].reverse().find((t) => Number.isFinite(t));
   if (first == null || last == null || !(last > first)) return NaN;
   return (last - first) / MS_PER_YEAR;
+}
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/** Close-to-close run-up/drawdown decomposition of the bar-close equity curve,
+ *  per the TradingView report definitions (docs/tradingview-strategy-report-metrics.md):
+ *  - a DRAWDOWN phase runs "from a peak to the recovery to the previous peak";
+ *    magnitude = peak − lowest trough within the phase. A trailing drawdown that
+ *    never recovers is not a completed phase → excluded from the averages.
+ *  - a RUN-UP phase runs "from a local minimum to a new peak": from the previous
+ *    drawdown's trough (or the curve's start) to the last new equity high made
+ *    before the next decline.
+ *  - the MAX extremes need no phase completion: the largest rise above the
+ *    running minimum / largest drop below the running maximum.
+ *  Durations are calendar days between the phase's boundary bar times; phases
+ *  with non-finite times are skipped for duration averaging only.
+ */
+function closeToClosePhases(equity: number[], time: number[]) {
+  const out = {
+    maxRunup: 0,
+    maxDrawdown: 0,
+    avgRunup: 0,
+    avgDrawdown: 0,
+    avgRunupDays: 0,
+    avgDrawdownDays: 0,
+  };
+  if (equity.length < 2) return out;
+
+  let runMin = equity[0];
+  let peak = equity[0];
+  let peakT = time[0];
+  let runStart = equity[0]; // current run-up's origin (a local minimum)
+  let runStartT = time[0];
+  let inDD = false;
+  let ddTrough = 0;
+  let ddTroughT = NaN;
+  const ruMag: number[] = [];
+  const ruDays: number[] = [];
+  const ddMag: number[] = [];
+  const ddDays: number[] = [];
+
+  const pushRunup = () => {
+    if (peak > runStart) {
+      ruMag.push(peak - runStart);
+      const d = (peakT - runStartT) / MS_PER_DAY;
+      if (Number.isFinite(d)) ruDays.push(d);
+    }
+  };
+
+  for (let i = 1; i < equity.length; i++) {
+    const v = equity[i];
+    if (v < runMin) runMin = v;
+    if (v - runMin > out.maxRunup) out.maxRunup = v - runMin;
+    if (peak - v > out.maxDrawdown) out.maxDrawdown = peak - v;
+
+    if (v >= peak) {
+      if (inDD) {
+        // recovery to the previous peak: the drawdown phase completes, and the
+        // next run-up phase originates at its trough.
+        ddMag.push(peak - ddTrough);
+        const d = (time[i] - peakT) / MS_PER_DAY;
+        if (Number.isFinite(d)) ddDays.push(d);
+        runStart = ddTrough;
+        runStartT = ddTroughT;
+        inDD = false;
+      }
+      peak = v;
+      peakT = time[i];
+    } else if (!inDD) {
+      // decline below the running peak: the run-up that ended at that peak is
+      // complete; a drawdown phase begins.
+      pushRunup();
+      inDD = true;
+      ddTrough = v;
+      ddTroughT = time[i];
+    } else if (v < ddTrough) {
+      ddTrough = v;
+      ddTroughT = time[i];
+    }
+  }
+  if (!inDD) pushRunup(); // curve ended at/above water: the final run-up completed
+
+  const mean = (a: number[]) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0);
+  out.avgRunup = mean(ruMag);
+  out.avgDrawdown = mean(ddMag);
+  out.avgRunupDays = mean(ruDays);
+  out.avgDrawdownDays = mean(ddDays);
+  return out;
 }
 
 export function computeStrategyMetrics(
@@ -154,14 +282,27 @@ export function computeStrategyMetrics(
     lossStreak = 0,
     largestWin = 0,
     largestLoss = 0,
-    barsHeld = 0;
+    barsHeld = 0,
+    winCount = 0,
+    lossCount = 0,
+    winSum = 0,
+    lossSum = 0, // magnitude (≥ 0)
+    winBars = 0,
+    lossBars = 0;
   for (const t of trades) {
+    const held = t.exitBar - t.entryBar;
     if (t.profit > 0) {
       winStreak++;
       lossStreak = 0;
+      winCount++;
+      winSum += t.profit;
+      winBars += held;
     } else if (t.profit < 0) {
       lossStreak++;
       winStreak = 0;
+      lossCount++;
+      lossSum += -t.profit;
+      lossBars += held;
     } else {
       winStreak = 0;
       lossStreak = 0; // an even trade breaks both streaks
@@ -170,23 +311,36 @@ export function computeStrategyMetrics(
     if (lossStreak > maxConsecutiveLosses) maxConsecutiveLosses = lossStreak;
     if (t.profit > largestWin) largestWin = t.profit;
     if (t.profit < largestLoss) largestLoss = t.profit;
-    barsHeld += t.exitBar - t.entryBar;
+    barsHeld += held;
   }
+  const avgWin = winCount ? winSum / winCount : 0;
+  const avgLoss = lossCount ? lossSum / lossCount : 0;
 
-  // ── buy-&-hold benchmark: enter at the second bar's open (the first possible
-  //    next-bar-open fill), exit at the last close ─
+  // ── buy-&-hold benchmark: enter when the strategy's first position was opened
+  //    (TV's stated basis — the first closed trade's entry fill), exit at the
+  //    last close. Falls back to the second bar's open (the first possible
+  //    next-bar-open fill) when the run produced no closed trades. ─
   let buyHoldReturnPercent = 0;
+  let buyHoldPnL = 0;
   let outperformance = 0;
   const bars = opts.bars;
   if (bars && bars.length > 0) {
-    const base = bars.length > 1 ? bars[1].open : bars[0].close;
+    let base = bars.length > 1 ? bars[1].open : bars[0].close;
+    if (trades.length) {
+      const first = trades.reduce((a, t) => (t.entryBar < a.entryBar ? t : a));
+      if (first.entryPrice > 0) base = first.entryPrice;
+    }
     const last = bars[bars.length - 1].close;
     if (base > 0 && Number.isFinite(last)) {
       const ret = last / base - 1;
       buyHoldReturnPercent = ret * 100;
-      outperformance = report.netProfit - initial * ret;
+      buyHoldPnL = initial * ret;
+      outperformance = report.netProfit - buyHoldPnL;
     }
   }
+
+  // ── close-to-close run-up/drawdown phases over the bar-close equity curve ─
+  const c2c = closeToClosePhases(equity, time);
 
   return {
     sharpe,
@@ -202,8 +356,27 @@ export function computeStrategyMetrics(
     largestWin,
     largestLoss,
     avgBarsInTrade: trades.length ? barsHeld / trades.length : 0,
+    avgBarsInWinners: winCount ? winBars / winCount : 0,
+    avgBarsInLosers: lossCount ? lossBars / lossCount : 0,
+    avgWinLossRatio: avgLoss > 0 ? avgWin / avgLoss : 0,
+    largestWinPercentOfGrossProfit:
+      report.grossProfit > 0 ? (largestWin / report.grossProfit) * 100 : 0,
+    largestLossPercentOfGrossLoss:
+      report.grossLoss > 0 ? (-largestLoss / report.grossLoss) * 100 : 0,
+    netProfitPercentOfLargestLoss: largestLoss < 0 ? (report.netProfit / -largestLoss) * 100 : 0,
+    returnOnInitialCapitalPercent: initial > 0 ? (report.netProfit / initial) * 100 : 0,
     buyHoldReturnPercent,
+    buyHoldPnL,
     outperformance,
+    // ?? 0: tolerate reports persisted before maxRunup existed on StrategyReport
+    maxRunupPercentOfInitialCapital: initial > 0 ? ((report.maxRunup ?? 0) / initial) * 100 : 0,
+    maxDrawdownPercentOfInitialCapital: initial > 0 ? (report.maxDrawdown / initial) * 100 : 0,
+    maxRunupCloseToClose: c2c.maxRunup,
+    maxDrawdownCloseToClose: c2c.maxDrawdown,
+    avgRunupCloseToClose: c2c.avgRunup,
+    avgDrawdownCloseToClose: c2c.avgDrawdown,
+    avgRunupDurationDays: c2c.avgRunupDays,
+    avgDrawdownDurationDays: c2c.avgDrawdownDays,
     periodsPerYear,
   };
 }

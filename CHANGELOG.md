@@ -4,6 +4,32 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0]
+
+### Added
+
+- **`computeStrategyMetrics` gains the rest of TradingView's Strategy Report
+  ratios**, closing most of the gap documented in
+  `docs/tradingview-strategy-report-metrics.md`: `avgWinLossRatio`,
+  `largestWinPercentOfGrossProfit`, `largestLossPercentOfGrossLoss`,
+  `netProfitPercentOfLargestLoss`, `avgBarsInWinners`/`avgBarsInLosers`,
+  `returnOnInitialCapitalPercent`, `buyHoldPnL`, and
+  `maxRunupPercentOfInitialCapital`/`maxDrawdownPercentOfInitialCapital`.
+- **Close-to-close run-up/drawdown family**: `maxRunupCloseToClose`,
+  `maxDrawdownCloseToClose`, `avgRunupCloseToClose`, `avgDrawdownCloseToClose`,
+  `avgRunupDurationDays`, `avgDrawdownDurationDays` — computed from the
+  bar-close equity curve, distinct from the existing intrabar `max_runup`/
+  `max_drawdown` Pine builtins.
+- `StrategyReport` now also reports `maxRunup`/`maxRunupPercent` (the broker
+  already tracked them; only `maxDrawdown` was previously exposed).
+
+### Changed
+
+- `buyHoldReturnPercent`/`buyHoldPnL`/`outperformance` now enter at the
+  **first closed trade's entry fill**, matching TradingView's stated basis
+  ("from when the strategy's first position was opened"), instead of always
+  the second bar's open. Runs with no closed trades keep the old fallback.
+
 ## [0.5.1]
 
 ### Fixed
@@ -327,6 +353,7 @@ Initial release: clean-room Pine Script v6 engine. `compile(src)` lexes → pars
 → analyzes → emits JS and an interpreter oracle, cross-checked for identical
 output. Real indicators (SMA/EMA cross, RSI, Bollinger, ATR, …) run end-to-end.
 
+[0.6.0]: https://github.com/heyphat/piner/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/heyphat/piner/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/heyphat/piner/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/heyphat/piner/compare/v0.3.0...v0.4.0

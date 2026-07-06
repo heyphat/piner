@@ -145,6 +145,9 @@ export interface StrategyReport {
   evens: number;
   maxDrawdown: number;
   maxDrawdownPercent: number;
+  /** Intrabar-path run-up extremes, mirroring maxDrawdown(_percent). */
+  maxRunup: number;
+  maxRunupPercent: number;
   /** All commission charged, both sides (TradingView's "Commission Paid"). */
   totalCommission: number;
   closedTrades: ClosedTrade[];
@@ -1087,6 +1090,8 @@ export class StrategyBroker {
       evens: this.evens,
       maxDrawdown: this.maxDrawdown,
       maxDrawdownPercent: this.maxDrawdownPercent,
+      maxRunup: this.maxRunup,
+      maxRunupPercent: this.maxRunupPercent,
       totalCommission: this.totalCommission,
       closedTrades: this.closedTrades,
       equityCurve: this.equityCurve,
