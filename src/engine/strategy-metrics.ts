@@ -363,8 +363,7 @@ export function computeStrategyMetrics(
       report.grossProfit > 0 ? (largestWin / report.grossProfit) * 100 : 0,
     largestLossPercentOfGrossLoss:
       report.grossLoss > 0 ? (-largestLoss / report.grossLoss) * 100 : 0,
-    netProfitPercentOfLargestLoss:
-      largestLoss < 0 ? (report.netProfit / -largestLoss) * 100 : 0,
+    netProfitPercentOfLargestLoss: largestLoss < 0 ? (report.netProfit / -largestLoss) * 100 : 0,
     returnOnInitialCapitalPercent: initial > 0 ? (report.netProfit / initial) * 100 : 0,
     buyHoldReturnPercent,
     buyHoldPnL,
