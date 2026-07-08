@@ -385,6 +385,7 @@ Initial release: clean-room Pine Script v6 engine. `compile(src)` lexes → pars
 → analyzes → emits JS and an interpreter oracle, cross-checked for identical
 output. Real indicators (SMA/EMA cross, RSI, Bollinger, ATR, …) run end-to-end.
 
+[0.7.0]: https://github.com/heyphat/piner/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/heyphat/piner/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/heyphat/piner/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/heyphat/piner/compare/v0.4.0...v0.5.0

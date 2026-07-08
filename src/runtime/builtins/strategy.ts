@@ -353,8 +353,7 @@ export class StrategyBroker {
     const m = (D === DIR_LONG ? this.settings.marginLong : this.settings.marginShort) / 100;
     if (m <= 0 || m === D) return NaN;
     const raw =
-      ((this.settings.initialCapital + this.realized) / Math.abs(this.size) -
-        D * this.avgPrice) /
+      ((this.settings.initialCapital + this.realized) / Math.abs(this.size) - D * this.avgPrice) /
       (m - D);
     const mt = this.host.mintick;
     return mt > 0 ? Math.round(raw / mt) * mt : raw;

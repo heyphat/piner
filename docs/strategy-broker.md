@@ -596,27 +596,27 @@ Backend routing specifics (`emit.ts` / `interpreter.ts`, kept mirror-identical):
 
 ## 12. Known deviations & not-yet-modeled
 
-| Area                                         | Status                                                                                         |
-| -------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| OCA groups (`oca_name`/`oca_type`)           | constants accepted, grouping not enforced                                                      |
-| `calc_on_every_tick` / `calc_on_order_fills` | driver runs the Pine default (bar close); realtime ticks do run fill passes                    |
+| Area                                         | Status                                                                                                                                                                |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OCA groups (`oca_name`/`oca_type`)           | constants accepted, grouping not enforced                                                                                                                             |
+| `calc_on_every_tick` / `calc_on_order_fills` | driver runs the Pine default (bar close); realtime ticks do run fill passes                                                                                           |
 | Margin (`margin_long/short`, liquidation)    | modeled (§9): v6 defaults 100/100, order gating, 4× margin-call liquidation; fill price = violating path point (parity pending, `dev-docs/margin-parity-findings.md`) |
-| Currency conversion                          | single-currency identity; `account_currency` = `'USD'`                                         |
-| `closedtrades.*` comments / `exit_id`        | na (order comments not plumbed; commissions, times, and per-trade run-up/drawdown ARE tracked) |
-| Trailing stop                                | position-aggregate activation + group fill (TV: per entry)                                     |
-| Risk emergency close                         | fills next tick pass (TV: next tick of its 4-tick bar walk)                                    |
-| `alert_message` on risk rules & orders       | accepted, ignored (no alert routing in the engine core)                                        |
+| Currency conversion                          | single-currency identity; `account_currency` = `'USD'`                                                                                                                |
+| `closedtrades.*` comments / `exit_id`        | na (order comments not plumbed; commissions, times, and per-trade run-up/drawdown ARE tracked)                                                                        |
+| Trailing stop                                | position-aggregate activation + group fill (TV: per entry)                                                                                                            |
+| Risk emergency close                         | fills next tick pass (TV: next tick of its 4-tick bar walk)                                                                                                           |
+| `alert_message` on risk rules & orders       | accepted, ignored (no alert routing in the engine core)                                                                                                               |
 
 ## 13. Where it's tested
 
-| File                                          | Covers                                                                                                                                                                          |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test/strategy.test.ts`                       | fills & timing, reverse/netting, pyramiding, close-by-id, exits (brackets, trailing, qty caps), sizing/commission/slippage, `process_orders_on_close`, stats, introspection     |
-| `test/strategy-risk.test.ts`                  | all six risk rules (behavioral, multi-day feeds), most-restrictive merging, speculative-tick halt rollback, indicator inertness                                                 |
+| File                                          | Covers                                                                                                                                                                                                             |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `test/strategy.test.ts`                       | fills & timing, reverse/netting, pyramiding, close-by-id, exits (brackets, trailing, qty caps), sizing/commission/slippage, `process_orders_on_close`, stats, introspection                                        |
+| `test/strategy-risk.test.ts`                  | all six risk rules (behavioral, multi-day feeds), most-restrictive merging, speculative-tick halt rollback, indicator inertness                                                                                    |
 | `test/strategy-margin.test.ts`                | margin header parsing, order gating (reject-not-reduce, pyramiding, percent_of_equity), full/partial 4× margin calls, short-at-default liquidation, liquidation price, bracket survival, speculative-tick rollback |
-| `test/strategy-metrics.test.ts`               | derived metrics: hand-computed Sharpe/Sortino/volatility/CAGR/Calmar, annualization resolution, exposure counters, streaks, report backward-compat, two-backend metric equality |
-| `test/cross-check.test.ts` / `parity.test.ts` | two-backend identical outputs incl. strategy scripts                                                                                                                            |
-| `test/ontick-equivalence.test.ts`             | incremental tick processing vs full recompute (broker rollback contract)                                                                                                        |
+| `test/strategy-metrics.test.ts`               | derived metrics: hand-computed Sharpe/Sortino/volatility/CAGR/Calmar, annualization resolution, exposure counters, streaks, report backward-compat, two-backend metric equality                                    |
+| `test/cross-check.test.ts` / `parity.test.ts` | two-backend identical outputs incl. strategy scripts                                                                                                                                                               |
+| `test/ontick-equivalence.test.ts`             | incremental tick processing vs full recompute (broker rollback contract)                                                                                                                                           |
 
 Every fill/PnL expectation in those tests is hand-computed from the rules in
 this document — if you change a rule here, a test should break.
