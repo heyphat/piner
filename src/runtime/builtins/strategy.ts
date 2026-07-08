@@ -59,6 +59,13 @@ export interface StrategySettings {
    *  process_orders_on_close) so market orders fill at the same bar's close instead
    *  of the next bar's open. Default false. */
   processOrdersOnClose: boolean;
+  /** Percent of a long position's value that must be covered by the strategy's own
+   *  equity (margin_long). 0 disables the funds check and margin calls for longs —
+   *  the Pine v5 default; v6 defaults to 100 (no leverage). */
+  marginLong: number;
+  /** Same for shorts (margin_short). Note that at 100 a short can still be margin
+   *  called (its liquidation price is finite), unlike a fully-funded long. */
+  marginShort: number;
 }
 
 interface Order {
@@ -157,6 +164,9 @@ export interface StrategyReport {
   barsProcessed: number;
   /** Bars on which a position was open after the bar's fill pass. */
   barsInMarket: number;
+  /** Forced liquidations by the margin simulation (TradingView's "Margin Calls"
+   *  Performance Summary field). Always 0 when margin_long/short are 0. */
+  marginCalls: number;
 }
 
 export class StrategyBroker {
@@ -171,6 +181,9 @@ export class StrategyBroker {
     pyramiding: 1,
     slippage: 0,
     processOrdersOnClose: false,
+    // Pine v6 defaults (v5 was 0/0 — declare margin_long=0, margin_short=0 to opt out).
+    marginLong: 100,
+    marginShort: 100,
   };
 
   // position (aggregate size; per-entry detail lives in entryLots)
@@ -215,6 +228,8 @@ export class StrategyBroker {
   private barsInMarket = 0;
   /** All commission charged so far, both sides (TradingView's "Commission Paid"). */
   totalCommission = 0;
+  /** Forced liquidations booked by the margin simulation (report `marginCalls`). */
+  private marginCallCount = 0;
 
   private pending: Order[] = [];
   private exits: ExitBracket[] = [];
@@ -274,6 +289,7 @@ export class StrategyBroker {
     'barsProcessed',
     'barsInMarket',
     'totalCommission',
+    'marginCallCount',
     'orderSeq',
     'riskDirection',
     'riskMaxPositionSize',
@@ -323,6 +339,25 @@ export class StrategyBroker {
   }
   get netProfit(): number {
     return this.realized;
+  }
+  /** The price at which the open position gets margin called — where marked equity
+   *  meets the required margin (Help Center "How do I simulate trading with
+   *  leverage?", PointValue = 1):
+   *    P = ((initialCapital + netProfit)/|size| − D·avgPrice) / (m − D)
+   *  na while flat, when the position's margin percent is 0 (no margin simulation),
+   *  or for a fully-funded long (m = 1 = D → no finite liquidation price). Rounded
+   *  to the nearest tick (parity question P2, dev-docs/margin-plan.md §4). */
+  get marginLiquidationPrice(): number {
+    if (this.size === 0) return NaN;
+    const D = sign(this.size);
+    const m = (D === DIR_LONG ? this.settings.marginLong : this.settings.marginShort) / 100;
+    if (m <= 0 || m === D) return NaN;
+    const raw =
+      ((this.settings.initialCapital + this.realized) / Math.abs(this.size) -
+        D * this.avgPrice) /
+      (m - D);
+    const mt = this.host.mintick;
+    return mt > 0 ? Math.round(raw / mt) * mt : raw;
   }
   /** Profit factor: gross profit / |gross loss| (Infinity when there are no losing
    *  trades, 0 when flat). Not a Pine `strategy.*` builtin — a convenience metric
@@ -822,6 +857,46 @@ export class StrategyBroker {
     }
     this.recordExposure();
     this.riskCheckEquity(pts);
+    this.marginCheck(o, h, l);
+  }
+
+  /**
+   * Margin-call simulation (Help Center "How do I simulate trading with leverage?",
+   * PointValue = 1): walk the bar's assumed price path — the same open → nearer
+   * extreme → farther extreme → close heuristic markToMarket uses — and at the
+   * first point where marked equity ≤ required margin, force-close FOUR TIMES the
+   * quantity needed to cover the deficit ("the broker emulator liquidates four
+   * times the amount required … preventing constant Margin Call events"), capped
+   * at the whole position. Selling q at price p leaves equity unchanged but cuts
+   * the requirement by p·q·m, so qToCover = deficit / (p·m). The walk continues
+   * with the reduced position — a second violation liquidates again (the loop
+   * terminates because |size| shrinks). Unlike a risk-rule trip this is NOT a
+   * halt: pending orders and exit brackets survive, now covering a smaller
+   * position. Fill price is the violating path point (parity question P1).
+   */
+  private marginCheck(o: number, h: number, l: number): void {
+    if (this.size === 0) return;
+    const pct = this.size > 0 ? this.settings.marginLong : this.settings.marginShort;
+    const m = pct / 100;
+    if (m <= 0) return;
+    const path = h - o < o - l ? [o, h, l, this.host.close] : [o, l, h, this.host.close];
+    let called = false;
+    for (const p of path) {
+      if (this.size === 0) break;
+      const equity = this.settings.initialCapital + this.realized + this.size * (p - this.avgPrice);
+      const required = p * Math.abs(this.size) * m;
+      const deficit = required - equity;
+      if (deficit <= 1e-9) continue; // no loss to cover (incl. the exact-boundary case)
+      const qLiquidate = Math.min((4 * deficit) / (p * m), Math.abs(this.size));
+      this.closePosition(p, qLiquidate);
+      this.marginCallCount++;
+      called = true;
+    }
+    // The bar's equity was curve-marked before the walk; a liquidation realizes the
+    // loss mid-bar, so re-mark the close with the post-call position. (Drawdown
+    // extremes keep the pre-call path marks — the dip through the violating point
+    // genuinely happened.)
+    if (called) this.equityCurve[this.host.idx] = this.equity;
   }
 
   private processExits(o: number, h: number, l: number): void {
@@ -1052,6 +1127,20 @@ export class StrategyBroker {
   /** Open a new position (or add a lot to the same-direction one) and book the entry commission. */
   private openOrAdd(o: Order, dir: number, qty: number, price: number): void {
     const fee = this.commission(qty, price);
+    // Margin gate (Pine v6): an exposure-increasing fill whose resulting position
+    // would require more equity than is available at the fill price is REJECTED
+    // outright — not reduced ("the strategy does not open entries that require more
+    // money than is available", v6 migration guide). Only this opening path is
+    // gated; closes and the reducing leg of a netting order always execute. The
+    // entry fee debits equity at fill, so it counts against affordability (parity
+    // question P4). m = 0 restores the v5 no-funds-check behavior.
+    const m = (dir === DIR_LONG ? this.settings.marginLong : this.settings.marginShort) / 100;
+    if (m > 0) {
+      const base = this.settings.initialCapital + this.realized;
+      const equityAtFill = this.size === 0 ? base : base + this.size * (price - this.avgPrice);
+      const required = price * (Math.abs(this.size) + qty) * m;
+      if (equityAtFill - fee < required - 1e-9) return;
+    }
     const lot: Lot = {
       id: o.id,
       qty,
@@ -1097,6 +1186,7 @@ export class StrategyBroker {
       equityCurve: this.equityCurve,
       barsProcessed: this.barsProcessed,
       barsInMarket: this.barsInMarket,
+      marginCalls: this.marginCallCount,
     };
   }
 
@@ -1369,10 +1459,10 @@ export function makeStrategyNs(b: StrategyBroker) {
     get position_entry_name() {
       return b.positionEntryName;
     },
-    /** Margin liquidation price — piner does not model margin, so na (matches Pine
-     *  when the strategy declares no margin_long/short). */
+    /** Margin liquidation price of the open position (na while flat, when the
+     *  position side's margin percent is 0, or for a fully-funded long). */
     get margin_liquidation_price() {
-      return NaN;
+      return b.marginLiquidationPrice;
     },
   };
 }

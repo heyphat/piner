@@ -11,7 +11,11 @@
  *   - lookahead_on: it sees bucket b's final value (future leak on history).
  *
  * Calendar bucketing (D/W/M) is UTC-approximate; intraday is exact. Cross-symbol
- * requests need an external feed and are rejected in this build.
+ * requests are supported via host-injected bars: the host fetches the other
+ * symbol's bars (declared through `out.securityRequests`) into `ctx.securityBars`,
+ * and `computeCrossSecurity` (runtime/context.ts) maps each chart bar to the other
+ * symbol's bucket by time. This module holds only the shared bucketing/resampling
+ * helpers.
  */
 
 export interface HtfBar {
