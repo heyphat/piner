@@ -276,6 +276,12 @@ function extractStrategySettings(call: Call): Partial<StrategySettings> {
   if (pyramiding !== undefined) s.pyramiding = pyramiding;
   const slippage = num('slippage');
   if (slippage !== undefined) s.slippage = slippage;
+  // margin_long/margin_short: omitted → the broker's v6 defaults (100/100);
+  // an explicit 0 opts back into the v5 no-margin behavior.
+  const marginLong = num('margin_long');
+  if (marginLong !== undefined) s.marginLong = marginLong;
+  const marginShort = num('margin_short');
+  if (marginShort !== undefined) s.marginShort = marginShort;
   const poc = call.args.find((a) => a.name === 'process_orders_on_close')?.value;
   if (poc?.kind === 'Bool') s.processOrdersOnClose = poc.value;
   return s;

@@ -4,6 +4,38 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0]
+
+### Added
+
+- **Margin simulation** (`margin_long` / `margin_short`), modeled from
+  TradingView's public margin documentation (design record:
+  `dev-docs/margin-plan.md`; broker doc: `docs/strategy-broker.md` §9):
+  - **Order gating** — an exposure-increasing fill whose resulting position
+    would require more equity than is available at the fill price is rejected
+    outright (never reduced), per the v6 migration guide. Closes, exit
+    brackets, and the reducing leg of a netting order are never gated.
+  - **Margin calls** — walking the bar's assumed intrabar path, the broker
+    force-closes 4× the quantity needed to cover a margin deficit (TV's rule
+    for "preventing constant Margin Call events"), capped at the whole
+    position, booked through the normal FIFO close path. Not a halt: pending
+    orders and exit brackets survive.
+  - **`strategy.margin_liquidation_price`** now reports the live liquidation
+    level (was a hardcoded `na`): na while flat, when the side's margin is 0,
+    or for a fully-funded long.
+  - `StrategyReport.marginCalls` — TradingView's "Margin Calls" Performance
+    Summary count.
+
+### Changed
+
+- **BREAKING (behavior): margin defaults are now the Pine v6 `100/100`**
+  (was: no margin model, i.e. the v5 `0/0`). Strategies that open positions
+  larger than their equity — or shorts that lose enough — now get rejected
+  entries and margin-call liquidations, exactly as on TradingView v6. To keep
+  the old unlimited-buying-power behavior, declare
+  `strategy(..., margin_long = 0, margin_short = 0)` (the migration guide's
+  own escape hatch).
+
 ## [0.6.0]
 
 ### Added
@@ -353,6 +385,7 @@ Initial release: clean-room Pine Script v6 engine. `compile(src)` lexes → pars
 → analyzes → emits JS and an interpreter oracle, cross-checked for identical
 output. Real indicators (SMA/EMA cross, RSI, Bollinger, ATR, …) run end-to-end.
 
+[0.7.0]: https://github.com/heyphat/piner/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/heyphat/piner/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/heyphat/piner/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/heyphat/piner/compare/v0.4.0...v0.5.0

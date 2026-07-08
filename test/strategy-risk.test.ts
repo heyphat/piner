@@ -101,8 +101,10 @@ describe('strategy.risk — risk-management rules', () => {
 
   it('max_drawdown(percent_of_equity) trips on the percent form', async () => {
     // initial_capital=100 → same price path: dd 5 off a 102 peak = 4.90% ≥ 4.5%.
+    // margin 0/0: 1 contract @ ~109 exceeds the $100 capital, which the v6-default
+    // margin gate would (correctly) reject — this fixture tests the risk rule only.
     const eng = await bothBackends(
-      '//@version=6\nstrategy("s", initial_capital = 100)\nstrategy.risk.max_drawdown(4.5, strategy.percent_of_equity)\nstrategy.entry("L", strategy.long)\nplot(strategy.position_size)\n',
+      '//@version=6\nstrategy("s", initial_capital = 100, margin_long = 0, margin_short = 0)\nstrategy.risk.max_drawdown(4.5, strategy.percent_of_equity)\nstrategy.entry("L", strategy.long)\nplot(strategy.position_size)\n',
       mkBars((i) => 110 - i, 10),
     );
     const sz = eng.outputs.plots.get(0)!.data;

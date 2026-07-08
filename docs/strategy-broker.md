@@ -75,7 +75,7 @@ for each bar i:
   predates those orders and must not fill them.
 - **Realtime ticks** run the same sequence (`Driver.onTick`), so orders can fill
   intrabar on live ticks; correctness across speculative ticks comes from
-  rollback (§9).
+  rollback (§10).
 
 Within one `processTick(o, h, l, marketPx)` pass, the steps are ordered:
 
@@ -129,7 +129,7 @@ bar (each later section details one box):
 │           └─ exposure counters (barsProcessed / barsInMarket)                   §7     │
 │      │                                                                                 │
 │      ▼                                                                                 │
-│  main($) ─── SCRIPT BODY (both backends call the same facade)                   §10    │
+│  main($) ─── SCRIPT BODY (both backends call the same facade)                   §11    │
 │      strategy.entry/order/close/close_all/exit/cancel → queue / re-key / cancel        │
 │        pending orders + brackets    (rejected while a risk halt is active)             │
 │      strategy.risk.* → idempotent rule setters (most restrictive value wins)    §8     │
@@ -145,7 +145,7 @@ bar (each later section details one box):
        │                                            ▲
        │ realtime tick arrives                      │  rollback(): truncate series to the
        └────────────────────────────────────────────┘  committed length, restore the broker
-          (a closing tick commits + re-snapshots)      snapshot (§9), replay the open bar
+          (a closing tick commits + re-snapshots)      snapshot (§10), replay the open bar
 
 after (or during) the run:
   Engine.strategy           →  broker.report()             StrategyReport (broker-verbatim)
@@ -487,7 +487,66 @@ Known approximations (documented deviations from TradingView's tick engine):
   price-triggered orders).
 - Trailing-group exits count one fill per lot closed.
 
-## 9. Realtime rollback
+## 9. Margin (`margin_long` / `margin_short`)
+
+Modeled per TradingView's public margin documentation (Help Center "How do I
+simulate trading with leverage?" / "Strategy properties", and the Pine v6
+migration guide); design record in `dev-docs/margin-plan.md`, empirically
+unverified choices in `dev-docs/margin-parity-findings.md`. `PointValue = 1`
+throughout (piner has no futures point-value model), and `m` below is the
+position side's margin percent ÷ 100.
+
+**Settings & defaults.** `margin_long`/`margin_short` are the percent of a
+position's value the strategy's own equity must cover. **Defaults are the Pine
+v6 `100/100`** (no leverage; funds-checked). An explicit `0` opts back into the
+v5 behavior — no funds check, no margin calls (piner's pre-0.7 behavior).
+
+**Order gating (blocked fills).** An exposure-increasing fill (`openOrAdd`) is
+**rejected outright — never reduced** when, at the fill price,
+
+```
+equityAtFill − entryFee  <  fillPrice · (|size| + qty) · m
+```
+
+Closes, `closeAll`, exit brackets, and the reducing leg of a netting
+`strategy.order` are never gated; a reversal is gated only on its opening leg
+(post-flatten equity). `m = 0` short-circuits the gate entirely.
+
+**Margin calls (forced liquidation).** After each mark-to-market, the broker
+walks the same assumed intrabar path (open → nearer extreme → farther extreme →
+close). At the first point `p` where marked equity ≤ required margin
+(`p·|size|·m`) with a real deficit, it force-closes **four times** the quantity
+needed to cover the deficit — TV: "the broker emulator liquidates four times
+the amount required … preventing constant Margin Call events" — capped at the
+whole position:
+
+```
+deficit    = required(p) − equity(p)
+qLiquidate = min(4 · deficit / (p · m), |size|)
+```
+
+The liquidation books through the normal `closePosition` path (FIFO lots,
+commission, ClosedTrade rows) at the violating point's price, increments the
+report's `marginCalls`, and — unlike a risk-rule trip — does **not** halt:
+pending orders and exit brackets survive, covering the reduced position. The
+bar's equity-curve mark is refreshed afterwards (the loss realized mid-bar);
+drawdown extremes keep the pre-call path marks.
+
+**`strategy.margin_liquidation_price`.** Live level where marked equity meets
+required margin, from the Help Center formula (PV = 1, `D` = ±1 direction):
+
+```
+P = ((initialCapital + netProfit)/|size| − D·avgPrice) / (m − D)
+```
+
+na while flat, when `m = 0`, or for a fully-funded long (`m = 1 = D`, no finite
+solution — which is why, at the v6 defaults, longs are only size-limited while
+shorts can genuinely be liquidated). Rounded to the nearest tick.
+
+`marginCallCount` is snapshot state (`SNAP_SCALARS`), so a margin call fired by
+a speculative realtime tick rolls back cleanly (§10).
+
+## 10. Realtime rollback
 
 The driver snapshots all mutable engine state after each committed bar and
 **restores it before every realtime tick** (`Driver.onTick` → `rollback()`), so
@@ -510,7 +569,7 @@ _speculative_ tick roll back cleanly when the real closing tick arrives
 > `SNAP_*` lists (deep if its objects mutate in place), or realtime replays will
 > leak it.
 
-## 10. The facade (`makeStrategyNs`)
+## 11. The facade (`makeStrategyNs`)
 
 The object exposed as `$.strategy` to both backends:
 
@@ -521,8 +580,9 @@ The object exposed as `$.strategy` to both backends:
 - **`risk.*`** — the six rule setters (§8).
 - **Read-back getters** and stats (§7), plus `account_currency` (fixed `'USD'`;
   piner is single-currency — `strategy.convert_to_account/symbol` are identity
-  passthroughs in the backends) and `margin_liquidation_price` (na — margin is
-  not modeled, matching Pine when no `margin_long/short` is declared).
+  passthroughs in the backends) and `margin_liquidation_price` (the open
+  position's live liquidation level, §9 — na while flat, when the side's margin
+  percent is 0, or for a fully-funded long).
 
 Backend routing specifics (`emit.ts` / `interpreter.ts`, kept mirror-identical):
 
@@ -534,28 +594,29 @@ Backend routing specifics (`emit.ts` / `interpreter.ts`, kept mirror-identical):
   the shared `STRATEGY_RISK_PARAMS` table; unknown risk fns evaluate to na.
 - Any other unmodeled `strategy.*` helper evaluates to na (never a JS error).
 
-## 11. Known deviations & not-yet-modeled
+## 12. Known deviations & not-yet-modeled
 
-| Area                                         | Status                                                                                         |
-| -------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| OCA groups (`oca_name`/`oca_type`)           | constants accepted, grouping not enforced                                                      |
-| `calc_on_every_tick` / `calc_on_order_fills` | driver runs the Pine default (bar close); realtime ticks do run fill passes                    |
-| Margin (`margin_long/short`, liquidation)    | not modeled; `margin_liquidation_price` = na                                                   |
-| Currency conversion                          | single-currency identity; `account_currency` = `'USD'`                                         |
-| `closedtrades.*` comments / `exit_id`        | na (order comments not plumbed; commissions, times, and per-trade run-up/drawdown ARE tracked) |
-| Trailing stop                                | position-aggregate activation + group fill (TV: per entry)                                     |
-| Risk emergency close                         | fills next tick pass (TV: next tick of its 4-tick bar walk)                                    |
-| `alert_message` on risk rules & orders       | accepted, ignored (no alert routing in the engine core)                                        |
+| Area                                         | Status                                                                                                                                                                |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OCA groups (`oca_name`/`oca_type`)           | constants accepted, grouping not enforced                                                                                                                             |
+| `calc_on_every_tick` / `calc_on_order_fills` | driver runs the Pine default (bar close); realtime ticks do run fill passes                                                                                           |
+| Margin (`margin_long/short`, liquidation)    | modeled (§9): v6 defaults 100/100, order gating, 4× margin-call liquidation; fill price = violating path point (parity pending, `dev-docs/margin-parity-findings.md`) |
+| Currency conversion                          | single-currency identity; `account_currency` = `'USD'`                                                                                                                |
+| `closedtrades.*` comments / `exit_id`        | na (order comments not plumbed; commissions, times, and per-trade run-up/drawdown ARE tracked)                                                                        |
+| Trailing stop                                | position-aggregate activation + group fill (TV: per entry)                                                                                                            |
+| Risk emergency close                         | fills next tick pass (TV: next tick of its 4-tick bar walk)                                                                                                           |
+| `alert_message` on risk rules & orders       | accepted, ignored (no alert routing in the engine core)                                                                                                               |
 
-## 12. Where it's tested
+## 13. Where it's tested
 
-| File                                          | Covers                                                                                                                                                                          |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test/strategy.test.ts`                       | fills & timing, reverse/netting, pyramiding, close-by-id, exits (brackets, trailing, qty caps), sizing/commission/slippage, `process_orders_on_close`, stats, introspection     |
-| `test/strategy-risk.test.ts`                  | all six risk rules (behavioral, multi-day feeds), most-restrictive merging, speculative-tick halt rollback, indicator inertness                                                 |
-| `test/strategy-metrics.test.ts`               | derived metrics: hand-computed Sharpe/Sortino/volatility/CAGR/Calmar, annualization resolution, exposure counters, streaks, report backward-compat, two-backend metric equality |
-| `test/cross-check.test.ts` / `parity.test.ts` | two-backend identical outputs incl. strategy scripts                                                                                                                            |
-| `test/ontick-equivalence.test.ts`             | incremental tick processing vs full recompute (broker rollback contract)                                                                                                        |
+| File                                          | Covers                                                                                                                                                                                                             |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `test/strategy.test.ts`                       | fills & timing, reverse/netting, pyramiding, close-by-id, exits (brackets, trailing, qty caps), sizing/commission/slippage, `process_orders_on_close`, stats, introspection                                        |
+| `test/strategy-risk.test.ts`                  | all six risk rules (behavioral, multi-day feeds), most-restrictive merging, speculative-tick halt rollback, indicator inertness                                                                                    |
+| `test/strategy-margin.test.ts`                | margin header parsing, order gating (reject-not-reduce, pyramiding, percent_of_equity), full/partial 4× margin calls, short-at-default liquidation, liquidation price, bracket survival, speculative-tick rollback |
+| `test/strategy-metrics.test.ts`               | derived metrics: hand-computed Sharpe/Sortino/volatility/CAGR/Calmar, annualization resolution, exposure counters, streaks, report backward-compat, two-backend metric equality                                    |
+| `test/cross-check.test.ts` / `parity.test.ts` | two-backend identical outputs incl. strategy scripts                                                                                                                                                               |
+| `test/ontick-equivalence.test.ts`             | incremental tick processing vs full recompute (broker rollback contract)                                                                                                                                           |
 
 Every fill/PnL expectation in those tests is hand-computed from the rules in
 this document — if you change a rule here, a test should break.

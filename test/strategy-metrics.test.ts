@@ -28,6 +28,7 @@ const mkReport = (over: Partial<StrategyReport>): StrategyReport => ({
   equityCurve: [],
   barsProcessed: 0,
   barsInMarket: 0,
+  marginCalls: 0,
   ...over,
 });
 
