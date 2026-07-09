@@ -66,7 +66,14 @@ export type {
   SecurityRequest,
 } from './runtime/output.js';
 export type { BarState } from './runtime/barstate.js';
-export { StrategyBroker } from './runtime/builtins/strategy.js';
+export { StrategyBroker, Account } from './runtime/builtins/strategy.js';
+export { PortfolioEngine } from './engine/portfolio-engine.js';
+export type {
+  PortfolioEngineOptions,
+  PortfolioSleeveSpec,
+  PortfolioSleeveResult,
+  PortfolioReport,
+} from './engine/portfolio-engine.js';
 export type { StrategySettings, ClosedTrade, StrategyReport } from './runtime/builtins/strategy.js';
 export { computeStrategyMetrics } from './engine/strategy-metrics.js';
 export type { StrategyMetrics, StrategyMetricsOptions } from './engine/strategy-metrics.js';
