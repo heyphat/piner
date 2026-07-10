@@ -41,7 +41,9 @@ async function assertStepParity(src: string, data: Bar[] = bars, backend: 'js' |
   }
   // strategy report: whole object, trades and equity curve included
   expect(viaStep.strategy).toEqual(viaRun.strategy);
-  expect(viaStep.drawings.length).toBe(viaRun.drawings.length);
+  // drawings: full CONTENT, not just count — a barstate-sensitive drawing (e.g.
+  // a label gated on barstate.islast) is exactly where a stepper bug would show.
+  expect(JSON.stringify(viaStep.drawings)).toBe(JSON.stringify(viaRun.drawings));
   return { viaRun, viaStep };
 }
 
@@ -105,6 +107,20 @@ describe('G1 — prepare()/step() historical stepper (gate V1)', () => {
     expect(b.strategy).toEqual(soloB.strategy);
   });
 
+  it('drawings match by content — including a barstate.islast-gated label', async () => {
+    // Lines drawn on a bar-index cadence + one label drawn ONLY on the last bar:
+    // if the stepper mis-handled islast/last_bar_index (the tick() divergence),
+    // the label would appear on every bar and the content compare would fail.
+    const src =
+      '//@version=6\nindicator("d", overlay=true)\n' +
+      'if bar_index % 4 == 0\n    line.new(bar_index - 1, close - 1, bar_index, close + 1)\n' +
+      'if barstate.islast\n    label.new(bar_index, high, text="last")\n' +
+      'plot(close)\n';
+    const { viaRun } = await assertStepParity(src);
+    expect(viaRun.drawings.length).toBeGreaterThan(0); // non-vacuous: it actually draws
+    await assertStepParity(src, bars, 'interp');
+  });
+
   it('empty dataset: step() is false immediately; realtime ticks still work after', async () => {
     const c = compile('//@version=6\nindicator("e")\nplot(close)\n');
     const eng = new Engine(c, new ArrayFeed([]), {});
@@ -164,9 +180,13 @@ describe('G2 — EngineOptions.strategy header override (the funding primitive)'
   });
 
   it('a compiled indicator ignores the override (broker stays inactive)', async () => {
-    const eng = new Engine(compile('//@version=6\nindicator("i")\nplot(close)\n'), new ArrayFeed(bars), {
-      strategy: { initialCapital: 12345 },
-    });
+    const eng = new Engine(
+      compile('//@version=6\nindicator("i")\nplot(close)\n'),
+      new ArrayFeed(bars),
+      {
+        strategy: { initialCapital: 12345 },
+      },
+    );
     await eng.run({ symbol: 'BTCUSD', timeframe: '1' });
     expect(eng.strategy.closedTrades.length).toBe(0);
     expect(eng.strategy.equityCurve.length).toBe(0);

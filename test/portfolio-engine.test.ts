@@ -8,7 +8,14 @@
  * zero drift before shared mode adds new semantics (gate V4).
  */
 import { describe, it, expect } from 'bun:test';
-import { compile, Engine, ArrayFeed, PortfolioEngine, type Bar, type StrategyReport } from '../src/index.js';
+import {
+  compile,
+  Engine,
+  ArrayFeed,
+  PortfolioEngine,
+  type Bar,
+  type StrategyReport,
+} from '../src/index.js';
 
 /** Deterministic per-symbol walk: distinct phase/amplitude per seed. */
 const mkBars = (n: number, seed: number, t0 = 0, dtMin = 1): Bar[] =>
@@ -99,7 +106,11 @@ describe('V3 — PortfolioEngine isolated ≡ post-hoc oracle', () => {
     const weights = [0.5, 0.3, 0.2];
     const pe = new PortfolioEngine(script, { mode: 'isolated', capital: P, weights });
     const res = pe.run(sleeves.map((s) => ({ ...s, timeframe: '1' })));
-    const ref = await oracle(script, sleeves, weights.map((w) => w * P));
+    const ref = await oracle(
+      script,
+      sleeves,
+      weights.map((w) => w * P),
+    );
 
     expect(res.report.initialCapital).toBe(P);
     expect(res.times).toEqual(ref.times);
@@ -137,6 +148,33 @@ describe('V3 — PortfolioEngine isolated ≡ post-hoc oracle', () => {
     expect(res.report.barsProcessed).toBe(res.times.length);
     expect(res.report.barsInMarket).toBeGreaterThan(0);
     expect(res.report.barsInMarket).toBeLessThanOrEqual(res.report.barsProcessed);
+  });
+
+  it('exposure pins the ANY-sleeve semantics: disjoint holding windows add up', () => {
+    // A holds master bars 2..4 (entry bar1 → fills bar2; close bar4 → fills bar5),
+    // B holds 8..10 — never simultaneously. ANY-sleeve exposure = 3 + 3 = 6.
+    // A regression to sleeve[0]-only would report 3; to ALL-sleeves, 0.
+    const flat = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        time: i * 60000,
+        open: 100,
+        high: 100,
+        low: 100,
+        close: 100,
+        volume: 1,
+      }));
+    const src =
+      '//@version=6\nstrategy("e", initial_capital=10000)\n' +
+      'if syminfo.ticker == "AAA" and bar_index == 1\n    strategy.entry("L", strategy.long, qty=10)\n' +
+      'if syminfo.ticker == "AAA" and bar_index == 4\n    strategy.close("L")\n' +
+      'if syminfo.ticker == "BBB" and bar_index == 7\n    strategy.entry("L", strategy.long, qty=10)\n' +
+      'if syminfo.ticker == "BBB" and bar_index == 10\n    strategy.close("L")\n';
+    const res = new PortfolioEngine(compile(src), {}).run([
+      { symbol: 'AAA', timeframe: '1', bars: flat(14) },
+      { symbol: 'BBB', timeframe: '1', bars: flat(14) },
+    ]);
+    expect(res.report.barsProcessed).toBe(14);
+    expect(res.report.barsInMarket).toBe(6);
   });
 
   it('portfolio metrics come from computeStrategyMetrics on the master clock', async () => {

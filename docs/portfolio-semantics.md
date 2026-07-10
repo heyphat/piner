@@ -1,6 +1,9 @@
 # Portfolio semantics (PortfolioEngine)
 
-**Status: v1 — shipped with the `PortfolioEngine`.**
+**Status: v1.1** — v1 shipped with the `PortfolioEngine` (0.8.0); v1.1
+(2026-07-10) hardened S7 with the Account mark broadcast (disjoint-clock halts,
+found by the pinestack audit) and made per-sleeve `report().initialCapital`
+read the account (the pot under shared mode), matching S2.
 
 TradingView has no multi-symbol strategy, so nothing in Pine specifies what a
 shared account means across symbols. This document IS that specification for
@@ -17,17 +20,17 @@ per-sleeve arithmetic oracle, bit-for-bit) and `test/portfolio-shared.test.ts`
 
 ## The allocation policy
 
-| Mode                          | Meaning                                                                 |
-| ----------------------------- | ----------------------------------------------------------------------- |
-| `isolated` (default)          | N private accounts funded `wᵢ·P`. Reproduces per-symbol runs exactly — equal-weight and weighted sleeve models are configurations of this mode. |
-| `shared`                      | One `Account(P)` behind every broker: sizing, funds checks, margin, and risk rules read portfolio equity. Trades can differ from any per-symbol run — that is the point. |
+| Mode                 | Meaning                                                                                                                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `isolated` (default) | N private accounts funded `wᵢ·P`. Reproduces per-symbol runs exactly — equal-weight and weighted sleeve models are configurations of this mode.                          |
+| `shared`             | One `Account(P)` behind every broker: sizing, funds checks, margin, and risk rules read portfolio equity. Trades can differ from any per-symbol run — that is the point. |
 
 ## Clauses
 
 - **S1 — Funding.** The pot `P` defaults to `N ×` the script's
   `initial_capital`. Isolated mode splits it `wᵢ·P` (weights normalized,
   default equal) via the `EngineOptions.strategy` override; shared mode funds
-  one `Account(P)`. *Degenerate identity:* with no equity-referencing logic, no
+  one `Account(P)`. _Degenerate identity:_ with no equity-referencing logic, no
   funds contention, and margins off, shared ≡ isolated.
 - **S2 — Account read-backs are portfolio-level.** Inside any sleeve's script,
   `strategy.initial_capital`, `strategy.equity`, and the `*_percent`
@@ -57,10 +60,16 @@ per-sleeve arithmetic oracle, bit-for-bit) and `test/portfolio-shared.test.ts`
   netting** and no choosing which sleeve to cut.
 - **S7 — Risk rules read portfolio equity and halt every sleeve.**
   `strategy.risk.max_drawdown` / `max_intraday_loss` evaluate on account
-  equity. Each sleeve's rule trips at its own next mark of the shared curve
-  (one-bar basket lag), force-closing and halting it — net effect: the
-  portfolio halts. Contract-denominated rules (`max_position_size`) stay
-  per-sleeve.
+  equity, and **every mark of the pot is broadcast to every attached broker's
+  peak/valley/day-max trackers** (`Account.broadcastMarks` →
+  `foldEquityMarks`) — so a sleeve whose clock has no bar at the pot's peak
+  still observes it (disjoint calendars, listing gaps). Each sleeve's rule
+  then trips at its own next mark, force-closing and halting it — the
+  portfolio halts within one bar per sleeve. Contract-denominated rules
+  (`max_position_size`) stay per-sleeve. _(The 2026-07-09 audit found the
+  original per-sleeve-sampling implementation under-measured shared drawdown
+  on disjoint clocks; fixed 2026-07-10, pinned by the V4 disjoint-clock
+  fixture.)_
 - **S8 — Sleeves execute only on their own bars.** No phantom bars at master
   times where a sleeve has no bar: `barstate.*`, `bar_index`, series history,
   and session/day boundaries (for S7's intraday rules) are per-sleeve and
@@ -79,6 +88,11 @@ else, so this is structural.
   unchanged): plain sums for PnL/counters/commission/`marginCalls`; the merged
   ledger is symbol-tagged (`ClosedTrade.symbol`), exit-time sorted (ties keep
   basket order), `cumProfit` re-accumulated portfolio-wide.
+- A per-sleeve `report().initialCapital` states the **account's** capital —
+  the sleeve's `wᵢ·P` funding under isolated mode, the POT under shared mode —
+  matching what `strategy.initial_capital` reads inside the script (S2). Do
+  not sum it across sleeves under shared mode (it is the same pot N times);
+  the portfolio report's own `initialCapital` is `P`.
 - The portfolio equity curve is indexed by the **master clock** (sorted union
   of sleeve bar times). Isolated: Σ of sleeve marks, funding before a sleeve's
   first bar (pre-activation cash), last mark after its data ends (ragged

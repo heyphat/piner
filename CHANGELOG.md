@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0]
+
+### Added
+
+- **`PortfolioEngine`** — run one compiled strategy across a basket of
+  symbols/timeframes under a single capital model and get a portfolio-level
+  report (`docs/portfolio-semantics.md`). Two capital modes: `isolated`
+  (each sleeve funded `wᵢ·P` from a total pot `P`, with per-sleeve `weights`)
+  and `shared` (all sleeves draw on one pot on a merged master clock). Exposes
+  `PortfolioEngineOptions`, `PortfolioSleeveSpec`, `PortfolioSleeveResult`, and
+  `PortfolioReport`; the portfolio report reuses the `StrategyReport` shape so
+  `computeStrategyMetrics` consumes it unchanged.
+- **`Engine.prepare()` / `Engine.step()`** — the external-clock half of `run()`:
+  bind a run's identity and full bar array without executing, then drive bars
+  one at a time. Stepped bars keep exact historical semantics
+  (`barstate.ishistory` / `islast`, `last_bar_index`) bit-for-bit with `run()`,
+  with none of the realtime rollback overhead. Lets a host interleave several
+  engines on one shared clock (used by `PortfolioEngine`).
+- **`EngineOptions.strategy`** — host override of `strategy()` header settings
+  (`initial_capital`, commission, slippage, margin, …), applied after the header
+  so overrides win. The funding primitive behind weighted/portfolio runs and
+  commission/slippage sensitivity tests, without editing the source. Ignored for
+  compiled non-strategy scripts.
+- **`Account`** exported from the strategy runtime — the funding account a broker
+  draws on, extracted so several brokers can share one pot in a portfolio run
+  while a lone broker keeps today's per-broker behavior bit-for-bit.
+
 ## [0.7.0]
 
 ### Added
@@ -385,6 +412,7 @@ Initial release: clean-room Pine Script v6 engine. `compile(src)` lexes → pars
 → analyzes → emits JS and an interpreter oracle, cross-checked for identical
 output. Real indicators (SMA/EMA cross, RSI, Bollinger, ATR, …) run end-to-end.
 
+[0.8.0]: https://github.com/heyphat/piner/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/heyphat/piner/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/heyphat/piner/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/heyphat/piner/compare/v0.5.0...v0.5.1

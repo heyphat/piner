@@ -231,6 +231,20 @@ export class Account {
     for (const b of this.brokers) if (b !== x) s += b.accountRequiredMargin;
     return s;
   }
+
+  /**
+   * Broadcast one broker's mark-to-market equity path to EVERY OTHER attached
+   * broker (spec S7). Sleeves run on disjoint clocks, so the pot's peak can land
+   * at a master time where a given sleeve has no bar; without this, that
+   * sleeve's peak/valley/day-max trackers under-measure the shared drawdown and
+   * its `strategy.risk.max_drawdown` / `max_intraday_loss` never trip. Folding
+   * every pot mark into every tracker restores S7's contract: each sleeve trips
+   * at its own next mark — the portfolio halts within one bar per sleeve.
+   * No-op for a private account (no other brokers), keeping V2 bit-for-bit.
+   */
+  broadcastMarks(pts: number[], marker: StrategyBroker): void {
+    for (const b of this.brokers) if (b !== marker) b.foldEquityMarks(pts);
+  }
 }
 
 export class StrategyBroker {
@@ -949,6 +963,11 @@ export class StrategyBroker {
       if (this.valleyEquity > 0)
         this.maxRunupPercent = Math.max(this.maxRunupPercent, (ru / this.valleyEquity) * 100);
     }
+    // Spec S7: every pot mark is observed by every OTHER attached broker too, so
+    // a sleeve's trackers see marks that land between its own bars (disjoint
+    // clocks). Trip TESTS still run only at each sleeve's own marks, below.
+    // No-op for a private account.
+    this.account.broadcastMarks(pts, this);
     // Per-lot trade excursions: the bar's favorable/adverse per-contract price
     // moves relative to each open entry (a lot removed by this pass's fills no
     // longer marks — its life ended at its exit fill, TradingView-style).
@@ -964,6 +983,31 @@ export class StrategyBroker {
     this.recordExposure();
     this.riskCheckEquity(pts);
     this.marginCheck(o, h, l);
+  }
+
+  /**
+   * Account hook (spec S7): fold another sleeve's mark-to-market equity path into
+   * THIS broker's running extremes and intraday-max ratchet, so risk trackers
+   * observe the full pot path even between this sleeve's own bars. The exact same
+   * per-point math as markToMarket's extremes loop; trip tests do NOT run here —
+   * per S7 a sleeve trips at its own next mark (riskCheckEquity on its own bars).
+   * Only ever called by a shared Account; a private account has no other brokers.
+   */
+  foldEquityMarks(pts: number[]): void {
+    for (const v of pts) {
+      if (v > this.peakEquity) this.peakEquity = v;
+      if (v < this.valleyEquity) this.valleyEquity = v;
+      const dd = this.peakEquity - v;
+      if (dd > this.maxDrawdown) this.maxDrawdown = dd;
+      if (this.peakEquity > 0)
+        this.maxDrawdownPercent = Math.max(this.maxDrawdownPercent, (dd / this.peakEquity) * 100);
+      const ru = v - this.valleyEquity;
+      if (ru > this.maxRunup) this.maxRunup = ru;
+      if (this.valleyEquity > 0)
+        this.maxRunupPercent = Math.max(this.maxRunupPercent, (ru / this.valleyEquity) * 100);
+      // Intraday-loss % basis (S7): the day's max POT equity, marks from any sleeve.
+      if (v > this.riskDayMaxEquity) this.riskDayMaxEquity = v;
+    }
   }
 
   /**
@@ -990,8 +1034,7 @@ export class StrategyBroker {
     for (const p of path) {
       if (this.size === 0) break;
       const equity = this.account.equityExcludingOpen(this) + this.size * (p - this.avgPrice);
-      const required =
-        p * Math.abs(this.size) * m + this.account.requiredMarginExcluding(this);
+      const required = p * Math.abs(this.size) * m + this.account.requiredMarginExcluding(this);
       const deficit = required - equity;
       if (deficit <= 1e-9) continue; // no loss to cover (incl. the exact-boundary case)
       const qLiquidate = Math.min((4 * deficit) / (p * m), Math.abs(this.size));
@@ -1278,9 +1321,11 @@ export class StrategyBroker {
 
   /** Live closed-trade list + equity curve for the engine's strategy report. */
   report(): StrategyReport {
-    const c = this.settings;
     return {
-      initialCapital: c.initialCapital,
+      // The funding account's capital — identical to settings.initialCapital for a
+      // private account (configure() syncs them); the POT under a shared account,
+      // matching what strategy.initial_capital reads inside the script (spec S2).
+      initialCapital: this.account.initial,
       netProfit: this.netProfit,
       grossProfit: this.grossProfit,
       grossLoss: this.grossLoss,

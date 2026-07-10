@@ -31,6 +31,9 @@ import {
   type StrategyMetricsOptions,
 } from './strategy-metrics.js';
 
+/** Engines get their bars via prepare(); run()/feed.history() is never called. */
+const INERT_FEED = new ArrayFeed([]);
+
 export interface PortfolioSleeveSpec {
   symbol: string;
   timeframe: string;
@@ -109,9 +112,11 @@ export class PortfolioEngine {
 
     // One engine per sleeve. Isolated: fund the private account via the settings
     // override. Shared: leave header funding in place, then swap in the pot.
+    // The feed is inert: bars are injected via prepare(), and the stepper never
+    // calls feed.history() — one shared empty feed serves every engine.
     const engines = sleeves.map(
-      (s, i) =>
-        new Engine(this.script, new ArrayFeed(s.bars), {
+      (_s, i) =>
+        new Engine(this.script, INERT_FEED, {
           backend: this.opts.backend,
           inputs: this.opts.inputs,
           strategy: this.mode === 'isolated' ? { initialCapital: weights[i] * capital } : undefined,
@@ -212,7 +217,13 @@ export class PortfolioEngine {
       marginCalls: sum((r) => r.marginCalls),
     };
 
-    this.result = { mode: this.mode, symbols: sleeves.map((s) => s.symbol), times, report, sleeves: sleeveResults };
+    this.result = {
+      mode: this.mode,
+      symbols: sleeves.map((s) => s.symbol),
+      times,
+      report,
+      sleeves: sleeveResults,
+    };
     return this.result;
   }
 

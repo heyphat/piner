@@ -27,8 +27,21 @@ describe('V4 — shared-mode semantics fixtures', () => {
       'if bar_index % 5 == 3\n    strategy.close("L")\n';
     const script = compile(src);
     const mk = () => [
-      sleeve('AAA', series(30, [[0, 100], [10, 120], [20, 90]])),
-      sleeve('BBB', series(30, [[0, 50], [15, 65]])),
+      sleeve(
+        'AAA',
+        series(30, [
+          [0, 100],
+          [10, 120],
+          [20, 90],
+        ]),
+      ),
+      sleeve(
+        'BBB',
+        series(30, [
+          [0, 50],
+          [15, 65],
+        ]),
+      ),
     ];
     const iso = new PortfolioEngine(script, { mode: 'isolated' }).run(mk());
     const sh = new PortfolioEngine(script, { mode: 'shared' }).run(mk());
@@ -58,7 +71,17 @@ describe('V4 — shared-mode semantics fixtures', () => {
       'if bar_index == 10 and syminfo.ticker == "BBB"\n    strategy.close("L")\n';
     const script = compile(src);
     const mk = () => [
-      sleeve('AAA', series(14, [[0, 100], [1, 101], [2, 102], [3, 103], [4, 104], [5, 105]])),
+      sleeve(
+        'AAA',
+        series(14, [
+          [0, 100],
+          [1, 101],
+          [2, 102],
+          [3, 103],
+          [4, 104],
+          [5, 105],
+        ]),
+      ),
       sleeve('BBB', series(14, [[0, 100]])),
     ];
     const sh = new PortfolioEngine(script, { mode: 'shared' }).run(mk());
@@ -113,7 +136,13 @@ describe('V4 — shared-mode semantics fixtures', () => {
       'if bar_index == 0\n    strategy.entry("L", strategy.long, qty=100)\n';
     const script = compile(src);
     const mk = () => [
-      sleeve('AAA', series(14, [[0, 100], [6, 84]])),
+      sleeve(
+        'AAA',
+        series(14, [
+          [0, 100],
+          [6, 84],
+        ]),
+      ),
       sleeve('BBB', series(14, [[0, 100]])),
     ];
     const sh = new PortfolioEngine(script, { mode: 'shared' }).run(mk());
@@ -123,6 +152,76 @@ describe('V4 — shared-mode semantics fixtures', () => {
     const iso = new PortfolioEngine(script, { mode: 'isolated' }).run(mk());
     expect(iso.sleeves[0].report.closedTrades.length).toBe(1); // its own 16% drawdown
     expect(iso.sleeves[1].report.closedTrades.length).toBe(0); // still holding — never tripped
+  });
+
+  it('risk halt survives DISJOINT clocks: a sleeve that misses the pot’s peak bar still trips (S7)', () => {
+    // The 2026-07-09 audit’s High finding, pinned. Pot P=20000, max_drawdown 8%.
+    // A (full clock t0..t9): long 1000 @100 (fills t1). Its close spikes to 110
+    // at t2 → pot peak 30000 — then erodes to 106 → pot 26000: a TRUE portfolio
+    // drawdown of 4000/30000 = 13.33% ≥ 8%.
+    // B’s clock SKIPS t2 (the peak bar — the holiday / listing-gap case). Its own
+    // marks alone would peak at 26000 (t3) → measured dd 0% → B would never halt
+    // and would happily open at its bar4 (t5) AFTER the breach. The Account mark
+    // broadcast folds A’s t2/t3 marks into B’s trackers, so B trips at its own
+    // t3 mark and opens NOTHING.
+    const src =
+      '//@version=6\nstrategy("s7d", initial_capital=10000, margin_long=0, margin_short=0)\n' +
+      'strategy.risk.max_drawdown(8, strategy.percent_of_equity)\n' +
+      'if bar_index == 0 and syminfo.ticker == "AAA"\n    strategy.entry("L", strategy.long, qty=1000)\n' +
+      'if bar_index == 4 and syminfo.ticker == "BBB"\n    strategy.entry("L", strategy.long, qty=100)\n' +
+      'if bar_index == 7 and syminfo.ticker == "BBB"\n    strategy.close("L")\n';
+    const script = compile(src);
+    const mk = () => [
+      sleeve(
+        'AAA',
+        series(10, [
+          [0, 100],
+          [2, 110],
+          [3, 106],
+        ]),
+      ),
+      // B: constant 50, bar at every master time EXCEPT t2
+      sleeve(
+        'BBB',
+        series(10, [[0, 50]]).filter((b) => b.time !== 2 * 60000),
+      ),
+    ];
+    const sh = new PortfolioEngine(script, { mode: 'shared' }).run(mk());
+    expect(sh.sleeves[0].report.closedTrades.length).toBe(1); // A: tripped at t3, force-closed t4
+    expect(sh.sleeves[0].report.closedTrades[0].profit).toBeCloseTo(6000, 9); // 1000·(106−100)
+    expect(sh.sleeves[1].report.closedTrades.length).toBe(0); // B: halted BEFORE its t5 entry
+    // the portfolio curve records the true close-to-close drawdown
+    expect(sh.report.maxDrawdownPercent).toBeCloseTo((4000 / 30000) * 100, 6);
+
+    // Discriminator: isolated mode (B’s own flat curve never trips) proves B’s
+    // entry+close WOULD have round-tripped absent the shared halt.
+    const iso = new PortfolioEngine(script, { mode: 'isolated' }).run(mk());
+    expect(iso.sleeves[1].report.closedTrades.length).toBe(1);
+  });
+
+  it('a non-stepping sleeve is valued at its LAST mark-to-market close — pinned (S5)', () => {
+    // B holds 1 contract from its t1 bar (open 100 → close 120) and its data ENDS
+    // at t1. A (flat, no trades) keeps marking t2/t3: the pot must value B’s open
+    // position at B’s last close 120 — exactly +20 over the 20000 pot:
+    //   t0: 20000 (B queued only)      t1: 20000 + 1·(120−100) = 20020
+    //   t2: 20020 (A’s mark; B stale)  t3: 20020
+    // A regression valuing B at entry (100 → 20000), at its high (125 → 20025),
+    // or as NaN would each break a pinned point.
+    const src =
+      '//@version=6\nstrategy("s5", initial_capital=10000, margin_long=0, margin_short=0)\n' +
+      'if bar_index == 0 and syminfo.ticker == "BBB"\n    strategy.entry("L", strategy.long, qty=1)\n';
+    const script = compile(src);
+    const sh = new PortfolioEngine(script, { mode: 'shared' }).run([
+      sleeve('AAA', series(4, [[0, 200]])),
+      sleeve('BBB', [
+        { time: 0, open: 100, high: 100, low: 100, close: 100, volume: 1 },
+        { time: 60000, open: 100, high: 125, low: 95, close: 120, volume: 1 },
+      ]),
+    ]);
+    const expected = [20000, 20020, 20020, 20020];
+    expect(sh.report.equityCurve.length).toBe(4);
+    for (let k = 0; k < expected.length; k++)
+      expect(sh.report.equityCurve[k]).toBeCloseTo(expected[k], 9);
   });
 
   it('margin: another sleeve’s open profit cushions a call; its requirement is spoken for (S6)', () => {
@@ -136,8 +235,24 @@ describe('V4 — shared-mode semantics fixtures', () => {
       'if bar_index == 0\n    strategy.entry("L", strategy.long)\n';
     const script = compile(src);
     const mk = () => [
-      sleeve('AAA', series(16, [[0, 100], [4, 96], [6, 90], [8, 84], [10, 78]])),
-      sleeve('BBB', series(16, [[0, 100], [2, 120], [3, 150]])),
+      sleeve(
+        'AAA',
+        series(16, [
+          [0, 100],
+          [4, 96],
+          [6, 90],
+          [8, 84],
+          [10, 78],
+        ]),
+      ),
+      sleeve(
+        'BBB',
+        series(16, [
+          [0, 100],
+          [2, 120],
+          [3, 150],
+        ]),
+      ),
     ];
     const sh = new PortfolioEngine(script, { mode: 'shared', capital: 40000 }).run(mk());
     const iso = new PortfolioEngine(script, { mode: 'isolated', capital: 40000 }).run(mk());
@@ -157,6 +272,10 @@ describe('V4 — shared-mode semantics fixtures', () => {
     const sh = new PortfolioEngine(script, { mode: 'shared', capital: 32000 }).run(mk());
     expect(sh.report.initialCapital).toBe(32000);
     expect(sh.report.equityCurve.every((v) => v === 32000)).toBe(true);
+    // per-sleeve reports state the ACCOUNT's capital — the pot, matching what
+    // strategy.initial_capital reads inside the script (S2), not the header value
+    expect(sh.sleeves[0].report.initialCapital).toBe(32000);
+    expect(sh.sleeves[1].report.initialCapital).toBe(32000);
 
     const iso = new PortfolioEngine(script, { mode: 'isolated', capital: 32000 }).run(mk());
     expect(iso.report.equityCurve.every((v) => v === 32000)).toBe(true);
@@ -170,8 +289,24 @@ describe('V4 — shared-mode semantics fixtures', () => {
       'if bar_index == 8\n    strategy.close("L")\n';
     const script = compile(src);
     const sh = new PortfolioEngine(script, { mode: 'shared' }).run([
-      sleeve('AAA', series(12, [[0, 100], [5, 110]])),
-      sleeve('BBB', series(10, [[0, 40], [4, 44]], 6)), // starts 6 min late
+      sleeve(
+        'AAA',
+        series(12, [
+          [0, 100],
+          [5, 110],
+        ]),
+      ),
+      sleeve(
+        'BBB',
+        series(
+          10,
+          [
+            [0, 40],
+            [4, 44],
+          ],
+          6,
+        ),
+      ), // starts 6 min late
     ]);
     expect(sh.times.length).toBe(16); // union: 0..11 ∪ 6..15
     expect(sh.report.equityCurve.length).toBe(16);
