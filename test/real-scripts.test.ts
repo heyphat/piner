@@ -1043,4 +1043,69 @@ describe('realistic strategy corpus (test/pinescripts/strategies)', () => {
     // exits come from the stop/limit bracket, not market closes
     expect(js.outputs.plots.size).toBeGreaterThanOrEqual(3); // swing/eq level plots
   });
+
+  it('RSI DCA (3Commas): the averaging-down ladder fills as price slides, one TP closes the stack', async () => {
+    // A hand-authored long-only DCA strategy: RSI(14) < 28 arms a base order, then
+    // five safety orders fire at FIXED −2/−5/−9.5/−16/−25% deviations from the base
+    // entry (USDT sizes scaling ~1.8x per rung) and a single +3% take-profit closes
+    // the whole stack. Feed: a deterministic ~35% slide over the first 60 bars —
+    // walking price down the whole AO ladder — then a recovery through the TP.
+    // The RSI timeframe input is forced to the chart's so request.security is an
+    // identity pass-through, and the strategy's 2024→2026 date filter is disabled so
+    // the 2021 feed trades. runReal asserts byte-for-byte plot/drawing/report parity.
+    const data: Bar[] = [];
+    let px = 100;
+    for (let i = 0; i < 140; i++) {
+      px = Math.max(20, px + (i < 60 ? -0.9 : 1.1) + Math.sin(i / 4) * 0.6);
+      data.push({
+        time: Date.UTC(2021, 0, 4) + i * 3_600_000,
+        open: px,
+        high: px + 0.8,
+        low: px - 0.8,
+        close: px,
+        volume: 1000,
+      });
+    }
+    const { c, js } = await runReal('strategies/rsi-dca.pine', {
+      bars: data,
+      inputs: { 'RSI Timeframe': '60', 'Limit Backtest Period': false },
+    });
+    expect(c.metadata.title).toBe('GRAM RSI Strategy [3Commas]');
+    expect(c.metadata.isStrategy).toBe(true);
+    const s = js.strategy;
+    // base order + all five averaging orders fill, in ladder order, all long
+    expect(s.closedTrades.map((t) => t.entryId)).toEqual([
+      'Long_Base',
+      'Long_AO_1',
+      'Long_AO_2',
+      'Long_AO_3',
+      'Long_AO_4',
+      'Long_AO_5',
+    ]);
+    expect(s.closedTrades.every((t) => t.dir > 0)).toBe(true);
+    // the martingale ladder: each rung steps DOWN in price and UP in quantity
+    const eps = s.closedTrades.map((t) => t.entryPrice);
+    const qty = s.closedTrades.map((t) => t.qty);
+    expect(eps.every((p, i) => i === 0 || p < eps[i - 1])).toBe(true);
+    expect(qty.every((q, i) => i === 0 || q > qty[i - 1])).toBe(true);
+    // process_orders_on_close + 3-tick slippage: every market entry fills at ITS
+    // bar's close, nudged adverse (higher for a long) by slippage × mintick (3 × 0.01)
+    for (const t of s.closedTrades) {
+      expect(t.entryPrice).toBeCloseTo(data[t.entryBar].close + 0.03, 10);
+    }
+    // one +3% take-profit closes the ENTIRE stack on a single bar at one price
+    expect(new Set(s.closedTrades.map((t) => t.exitBar)).size).toBe(1);
+    expect(new Set(s.closedTrades.map((t) => t.exitPrice)).size).toBe(1);
+    expect(s.closedTrades[0].exitBar).toBe(84);
+    expect(js.ctx.strategy.position_size).toBe(0); // flat after the TP
+    // net winner: the deep AOs (bought cheap) more than pay for the early lots
+    expect(s.netProfit).toBeCloseTo(1019.8378, 3);
+    // 7 webhook alerts: base entry + 5 add-funds + 1 close
+    expect(js.outputs.alerts.length).toBe(7);
+    // avg-entry + TP level plots; status + watermark tables; one entry label
+    // (the AO ladder viz needs an open position on the last bar — flat here → none)
+    expect(js.outputs.plots.size).toBe(2);
+    expect(js.drawings.filter((d) => d.type === 'table').length).toBe(2);
+    expect(js.drawings.filter((d) => d.type === 'label').length).toBe(1);
+  });
 });

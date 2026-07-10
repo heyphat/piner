@@ -799,7 +799,17 @@ export class ExecutionContext {
         ? this.computeCrossSecurity(symbol, baseBars, tf, lookahead, evalFn)
         : [];
     }
-    // SAME-symbol: resample the chart's own bars; align by base-bar bucket index.
+    // SAME-symbol.
+    // When the host injects the requested timeframe's ACTUAL bars under
+    // `securityBars["<symbol>@<tf>"]`, evaluate the expression over that real series and align it to
+    // the chart by bar CLOSE time — the accurate, TradingView-matching path for ANY timeframe
+    // (finer OR higher than the chart). This avoids resampling the chart's own bars, which both
+    // can't produce a finer timeframe and, for a higher timeframe, surfaces a just-closed HTF bar
+    // one chart-bar too late. Resampling below is only a fallback when no real bars were injected.
+    const injected = this.securityBars.get(`${symbol || sym}@${tf}`);
+    if (injected && injected.length)
+      return this.computeInjectedSameSymbol(injected, tf, sym, lookahead, evalFn);
+    // Fallback (no injected bars): resample the chart's own bars; align by base-bar bucket index.
     const { htf, bucketOf } = resampleToTimeframe(this.allBars, tf);
     const vals = this.evalOverHtf(htf, tf, sym, evalFn);
     // The non-repainting lookahead_off lag (see the previous HTF bar) only applies
@@ -811,6 +821,50 @@ export class ExecutionContext {
     for (let c = 0; c < this.allBars.length; c++) {
       const bk = bucketOf[c];
       out[c] = lookahead || !higherTf ? vals[bk] : bk > 0 ? vals[bk - 1] : NA;
+    }
+    return out;
+  }
+
+  /**
+   * Same-symbol request.security resolved against the host-injected ACTUAL bars for the requested
+   * timeframe (`securityBars["<symbol>@<tf>"]`) — used for any timeframe, finer or higher than the
+   * chart. Evaluate the expression once per injected bar, then map onto each chart bar by CLOSE
+   * time so it matches TradingView bar-for-bar:
+   *   • lookahead_off (default, non-repainting): the value of the last injected bar that has CLOSED
+   *     by the chart bar's own close. A higher-tf bar becomes visible on the LAST chart bar of its
+   *     period (their closes coincide) — NOT one bar later — and a finer-tf bar resolves to the
+   *     last sub-bar that closed within the chart bar. No future information is used.
+   *   • lookahead_on: the injected bar whose period CONTAINS the chart bar (open ≤ chart open) —
+   *     the current, possibly-incomplete bar, i.e. TradingView's future leak on historical bars.
+   * Values carry forward across chart bars that hold no newly-closed injected bar.
+   */
+  private computeInjectedSameSymbol(
+    injected: BaseBar[],
+    tf: string,
+    symbol: string,
+    lookahead: boolean,
+    evalFn: (sub: ExecutionContext) => unknown,
+  ): unknown[] {
+    const vals = this.evalOverHtf(injected, tf, symbol, evalFn);
+    const n = this.allBars.length;
+    const tfMs = tfSeconds(tf) * 1000;
+    const chartTfMs = n > 1 ? this.allBars[1].time - this.allBars[0].time : tfMs;
+    // close time of injected bar j = the next injected bar's open (falls back to open + one tf).
+    const closeOf = (j: number) =>
+      j + 1 < injected.length ? injected[j + 1].time : injected[j].time + tfMs;
+    const out: unknown[] = new Array(n);
+    let j = 0;
+    let carry: unknown = NA;
+    for (let c = 0; c < n; c++) {
+      if (lookahead) {
+        // advance through every injected bar whose PERIOD has started by this chart bar's open
+        while (j < injected.length && injected[j].time <= this.allBars[c].time) carry = vals[j++];
+      } else {
+        // advance through every injected bar that has CLOSED by this chart bar's close
+        const chartClose = c + 1 < n ? this.allBars[c + 1].time : this.allBars[c].time + chartTfMs;
+        while (j < injected.length && closeOf(j) <= chartClose) carry = vals[j++];
+      }
+      out[c] = carry;
     }
     return out;
   }
