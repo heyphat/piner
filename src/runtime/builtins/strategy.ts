@@ -137,6 +137,8 @@ export interface ClosedTrade {
   /** Trade-life intrabar extremes for this row's quantity (money, ≥ 0). */
   maxRunup: number;
   maxDrawdown: number;
+  /** Set on portfolio-merged ledgers only: which sleeve produced this row. */
+  symbol?: string;
 }
 
 /** The broker-verbatim backtest report (`Engine.strategy` / `StrategyBroker.report()`).
@@ -169,6 +171,82 @@ export interface StrategyReport {
   marginCalls: number;
 }
 
+/**
+ * The funding account a broker draws on — extracted (portfolio plan, gate G3) so
+ * several brokers can share one pot in a portfolio run while a lone broker keeps
+ * today's behavior exactly: every quantity below reduces to the broker's own
+ * `initial + realized (+ openProfit)` in the same floating-point order as before.
+ *
+ * The account holds NO PnL state of its own: realized/open PnL stay on the
+ * brokers (so the realtime rollback machinery stays per-broker) and the account
+ * derives portfolio sums on demand.
+ */
+export class Account {
+  private readonly brokers: StrategyBroker[] = [];
+  constructor(public initial: number) {}
+
+  attach(b: StrategyBroker): this {
+    if (!this.brokers.includes(b)) this.brokers.push(b);
+    return this;
+  }
+
+  /** Σ attached brokers' realized PnL (closed trades + booked entry fees). */
+  get realized(): number {
+    let s = 0;
+    for (const b of this.brokers) s += b.realized;
+    return s;
+  }
+
+  /** Account equity: initial + Σ realized + Σ open PnL, each broker valued at its
+   *  live close when its own bar is in progress and at its last mark otherwise
+   *  (between a sleeve's bars the live close is NaN — stale-close reads, spec S5). */
+  get equity(): number {
+    let s = this.initial;
+    for (const b of this.brokers) s += b.realized;
+    for (const b of this.brokers) s += b.accountOpenProfit;
+    return s;
+  }
+
+  /**
+   * Equity with `x`'s own open position excluded — the funds base for x's margin
+   * and intrabar-marking math, where own-open PnL is endogenous (re-added along
+   * the bar's price path). For a private account this is exactly
+   * `initial + realized`, bit-for-bit.
+   */
+  equityExcludingOpen(x: StrategyBroker): number {
+    let s = this.initial;
+    for (const b of this.brokers) s += b.realized;
+    for (const b of this.brokers) if (b !== x) s += b.accountOpenProfit;
+    return s;
+  }
+
+  /**
+   * Σ other brokers' margin requirement at their marks — what the rest of the
+   * basket already consumes of the pot. x's own funds check adds this to its own
+   * requirement (spec S4: first-come-first-served in clock order), and the
+   * liquidation walk treats it as spoken-for equity. 0 for a private account.
+   */
+  requiredMarginExcluding(x: StrategyBroker): number {
+    let s = 0;
+    for (const b of this.brokers) if (b !== x) s += b.accountRequiredMargin;
+    return s;
+  }
+
+  /**
+   * Broadcast one broker's mark-to-market equity path to EVERY OTHER attached
+   * broker (spec S7). Sleeves run on disjoint clocks, so the pot's peak can land
+   * at a master time where a given sleeve has no bar; without this, that
+   * sleeve's peak/valley/day-max trackers under-measure the shared drawdown and
+   * its `strategy.risk.max_drawdown` / `max_intraday_loss` never trip. Folding
+   * every pot mark into every tracker restores S7's contract: each sleeve trips
+   * at its own next mark — the portfolio halts within one bar per sleeve.
+   * No-op for a private account (no other brokers), keeping V2 bit-for-bit.
+   */
+  broadcastMarks(pts: number[], marker: StrategyBroker): void {
+    for (const b of this.brokers) if (b !== marker) b.foldEquityMarks(pts);
+  }
+}
+
 export class StrategyBroker {
   active = false;
   host!: StrategyHost;
@@ -185,6 +263,23 @@ export class StrategyBroker {
     marginLong: 100,
     marginShort: 100,
   };
+  /** The funding account. Private per-broker by default (kept in sync with
+   *  settings.initialCapital by configure()); a portfolio host swaps in a shared
+   *  Account via setAccount(). */
+  account: Account = new Account(this.settings.initialCapital).attach(this);
+  /** False once a portfolio host owns the account — configure() then stops
+   *  syncing settings.initialCapital into it (the pot is the host's to fund). */
+  private ownAccount = true;
+
+  /** Portfolio hook: draw on a shared account instead of the private one.
+   *  Re-seeds the drawdown/run-up baselines from the shared pot. */
+  setAccount(a: Account): void {
+    this.account = a;
+    a.attach(this);
+    this.ownAccount = false;
+    this.peakEquity = a.initial;
+    this.valleyEquity = a.initial;
+  }
 
   // position (aggregate size; per-entry detail lives in entryLots)
   size = 0; // signed
@@ -214,6 +309,8 @@ export class StrategyBroker {
   equityCurve: number[] = [];
   private peakEquity = 0;
   private valleyEquity = 0;
+  /** Last mark-to-market price (this broker's bar close at its latest mark). */
+  private lastMark = NaN;
   maxDrawdown = 0;
   maxDrawdownPercent = 0;
   maxRunup = 0;
@@ -279,6 +376,7 @@ export class StrategyBroker {
     'evens',
     'peakEquity',
     'valleyEquity',
+    'lastMark',
     'maxDrawdown',
     'maxDrawdownPercent',
     'maxRunup',
@@ -326,16 +424,35 @@ export class StrategyBroker {
   configure(s: Partial<StrategySettings>): void {
     this.active = true;
     Object.assign(this.settings, s);
-    this.peakEquity = this.settings.initialCapital;
-    this.valleyEquity = this.settings.initialCapital;
+    if (this.ownAccount) this.account.initial = this.settings.initialCapital;
+    this.peakEquity = this.account.initial;
+    this.valleyEquity = this.account.initial;
   }
 
   // ── live read-backs ───────────────────────────────────────
   get equity(): number {
-    return this.settings.initialCapital + this.realized + this.openProfit;
+    return this.account.equity;
   }
   get openProfit(): number {
     return this.size === 0 ? 0 : this.size * (this.host.close - this.avgPrice);
+  }
+  /** The price the account values this broker at right now: the live close while
+   *  this broker's own bar is in progress (bit-identical to pre-account behavior),
+   *  its last mark-to-market when read between its bars — the stale-close
+   *  cross-sleeve semantics of spec S5. */
+  private get valuationPrice(): number {
+    const c = this.host.close;
+    return Number.isNaN(c) ? this.lastMark : c;
+  }
+  /** Open PnL for account aggregation (see valuationPrice). */
+  get accountOpenProfit(): number {
+    return this.size === 0 ? 0 : this.size * (this.valuationPrice - this.avgPrice);
+  }
+  /** This broker's margin requirement — the share of the pot it has spoken for. */
+  get accountRequiredMargin(): number {
+    if (this.size === 0) return 0;
+    const m = (this.size > 0 ? this.settings.marginLong : this.settings.marginShort) / 100;
+    return m <= 0 ? 0 : Math.abs(this.size) * this.valuationPrice * m;
   }
   get netProfit(): number {
     return this.realized;
@@ -353,7 +470,9 @@ export class StrategyBroker {
     const m = (D === DIR_LONG ? this.settings.marginLong : this.settings.marginShort) / 100;
     if (m <= 0 || m === D) return NaN;
     const raw =
-      ((this.settings.initialCapital + this.realized) / Math.abs(this.size) - D * this.avgPrice) /
+      ((this.account.equityExcludingOpen(this) - this.account.requiredMarginExcluding(this)) /
+        Math.abs(this.size) -
+        D * this.avgPrice) /
       (m - D);
     const mt = this.host.mintick;
     return mt > 0 ? Math.round(raw / mt) * mt : raw;
@@ -602,7 +721,7 @@ export class StrategyBroker {
     this.riskDay = day;
     const eq = Number.isFinite(this.riskBarCloseEquity)
       ? this.riskBarCloseEquity
-      : this.settings.initialCapital;
+      : this.account.initial;
     this.riskDayStartEquity = eq;
     this.riskDayMaxEquity = eq;
     this.riskDayFills = 0;
@@ -820,13 +939,15 @@ export class StrategyBroker {
    *  extremes from INTRABAR equity, so walk the bar's assumed price path
    *  (open → nearer extreme → farther extreme → close), not just the close. */
   private markToMarket(o: number, h: number, l: number): void {
+    // Mark FIRST so this.equity (account-derived, mark-based) reads this bar's close.
+    this.lastMark = this.host.close;
     const eq = this.equity;
     this.equityCurve[this.host.idx] = eq;
     let pts: number[];
     if (this.size === 0) {
       pts = [eq];
     } else {
-      const base = this.settings.initialCapital + this.realized;
+      const base = this.account.equityExcludingOpen(this);
       const path = h - o < o - l ? [o, h, l, this.host.close] : [o, l, h, this.host.close];
       pts = path.map((px) => base + this.size * (px - this.avgPrice));
     }
@@ -842,6 +963,11 @@ export class StrategyBroker {
       if (this.valleyEquity > 0)
         this.maxRunupPercent = Math.max(this.maxRunupPercent, (ru / this.valleyEquity) * 100);
     }
+    // Spec S7: every pot mark is observed by every OTHER attached broker too, so
+    // a sleeve's trackers see marks that land between its own bars (disjoint
+    // clocks). Trip TESTS still run only at each sleeve's own marks, below.
+    // No-op for a private account.
+    this.account.broadcastMarks(pts, this);
     // Per-lot trade excursions: the bar's favorable/adverse per-contract price
     // moves relative to each open entry (a lot removed by this pass's fills no
     // longer marks — its life ended at its exit fill, TradingView-style).
@@ -857,6 +983,31 @@ export class StrategyBroker {
     this.recordExposure();
     this.riskCheckEquity(pts);
     this.marginCheck(o, h, l);
+  }
+
+  /**
+   * Account hook (spec S7): fold another sleeve's mark-to-market equity path into
+   * THIS broker's running extremes and intraday-max ratchet, so risk trackers
+   * observe the full pot path even between this sleeve's own bars. The exact same
+   * per-point math as markToMarket's extremes loop; trip tests do NOT run here —
+   * per S7 a sleeve trips at its own next mark (riskCheckEquity on its own bars).
+   * Only ever called by a shared Account; a private account has no other brokers.
+   */
+  foldEquityMarks(pts: number[]): void {
+    for (const v of pts) {
+      if (v > this.peakEquity) this.peakEquity = v;
+      if (v < this.valleyEquity) this.valleyEquity = v;
+      const dd = this.peakEquity - v;
+      if (dd > this.maxDrawdown) this.maxDrawdown = dd;
+      if (this.peakEquity > 0)
+        this.maxDrawdownPercent = Math.max(this.maxDrawdownPercent, (dd / this.peakEquity) * 100);
+      const ru = v - this.valleyEquity;
+      if (ru > this.maxRunup) this.maxRunup = ru;
+      if (this.valleyEquity > 0)
+        this.maxRunupPercent = Math.max(this.maxRunupPercent, (ru / this.valleyEquity) * 100);
+      // Intraday-loss % basis (S7): the day's max POT equity, marks from any sleeve.
+      if (v > this.riskDayMaxEquity) this.riskDayMaxEquity = v;
+    }
   }
 
   /**
@@ -882,8 +1033,8 @@ export class StrategyBroker {
     let called = false;
     for (const p of path) {
       if (this.size === 0) break;
-      const equity = this.settings.initialCapital + this.realized + this.size * (p - this.avgPrice);
-      const required = p * Math.abs(this.size) * m;
+      const equity = this.account.equityExcludingOpen(this) + this.size * (p - this.avgPrice);
+      const required = p * Math.abs(this.size) * m + this.account.requiredMarginExcluding(this);
       const deficit = required - equity;
       if (deficit <= 1e-9) continue; // no loss to cover (incl. the exact-boundary case)
       const qLiquidate = Math.min((4 * deficit) / (p * m), Math.abs(this.size));
@@ -1135,9 +1286,12 @@ export class StrategyBroker {
     // question P4). m = 0 restores the v5 no-funds-check behavior.
     const m = (dir === DIR_LONG ? this.settings.marginLong : this.settings.marginShort) / 100;
     if (m > 0) {
-      const base = this.settings.initialCapital + this.realized;
+      const base = this.account.equityExcludingOpen(this);
       const equityAtFill = this.size === 0 ? base : base + this.size * (price - this.avgPrice);
-      const required = price * (Math.abs(this.size) + qty) * m;
+      // Under a shared account the rest of the basket's margin is spoken for
+      // (spec S4 — first-come-first-served); 0 for a private account.
+      const required =
+        price * (Math.abs(this.size) + qty) * m + this.account.requiredMarginExcluding(this);
       if (equityAtFill - fee < required - 1e-9) return;
     }
     const lot: Lot = {
@@ -1167,9 +1321,11 @@ export class StrategyBroker {
 
   /** Live closed-trade list + equity curve for the engine's strategy report. */
   report(): StrategyReport {
-    const c = this.settings;
     return {
-      initialCapital: c.initialCapital,
+      // The funding account's capital — identical to settings.initialCapital for a
+      // private account (configure() syncs them); the POT under a shared account,
+      // matching what strategy.initial_capital reads inside the script (spec S2).
+      initialCapital: this.account.initial,
       netProfit: this.netProfit,
       grossProfit: this.grossProfit,
       grossLoss: this.grossLoss,
@@ -1396,8 +1552,10 @@ export function makeStrategyNs(b: StrategyBroker) {
     get opentrades() {
       return b.openTradeCount;
     },
+    // Account-level (portfolio spec S2): under a shared account these read the
+    // pot, not the sleeve's header — identical for a private account.
     get initial_capital() {
-      return b.settings.initialCapital;
+      return b.account.initial;
     },
     get max_drawdown() {
       return b.maxDrawdown;
@@ -1408,16 +1566,16 @@ export function makeStrategyNs(b: StrategyBroker) {
 
     // ── performance statistics (percent / averages / extremes) ──
     get netprofit_percent() {
-      return b.settings.initialCapital ? (b.netProfit / b.settings.initialCapital) * 100 : 0;
+      return b.account.initial ? (b.netProfit / b.account.initial) * 100 : 0;
     },
     get openprofit_percent() {
-      return b.settings.initialCapital ? (b.openProfit / b.settings.initialCapital) * 100 : 0;
+      return b.account.initial ? (b.openProfit / b.account.initial) * 100 : 0;
     },
     get grossprofit_percent() {
-      return b.settings.initialCapital ? (b.grossProfit / b.settings.initialCapital) * 100 : 0;
+      return b.account.initial ? (b.grossProfit / b.account.initial) * 100 : 0;
     },
     get grossloss_percent() {
-      return b.settings.initialCapital ? (b.grossLoss / b.settings.initialCapital) * 100 : 0;
+      return b.account.initial ? (b.grossLoss / b.account.initial) * 100 : 0;
     },
     get max_drawdown_percent() {
       return b.maxDrawdownPercent;

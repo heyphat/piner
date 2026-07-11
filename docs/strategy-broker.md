@@ -342,7 +342,10 @@ restricted to one entry id), booking one `ClosedTrade` row per lot touched via
 ## 7. Mark-to-market, equity & statistics
 
 Equity is always `initialCapital + realized + openProfit`, where `openProfit`
-marks the open position against the current bar's close.
+marks the open position against the current bar's close. (Since the `Account`
+extraction this reads `account.equity`; for a single-symbol run the account is
+private and the two are identical bit-for-bit. Under a shared portfolio account
+the same getter sums the pot — see `docs/portfolio-semantics.md`.)
 
 `markToMarket` runs at the end of every fill pass:
 
@@ -354,7 +357,9 @@ marks the open position against the current bar's close.
   `maxDrawdownPercent` — % of the running peak, `maxRunup`,
   `maxRunupPercent` — % of the running valley) at every path point.
 - Records peak exposure (`maxContracts*`), then hands the path to the risk
-  rules (§8).
+  rules (§8). (Under a shared portfolio account it also broadcasts the path to
+  every other sleeve's trackers so risk rules read the whole pot on any clock —
+  a no-op for a single-symbol run; see `docs/portfolio-semantics.md` S7.)
 
 **Read-backs & stats** (facade getters → broker):
 

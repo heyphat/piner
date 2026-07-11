@@ -10,6 +10,7 @@ import { ExecutionContext, tfSeconds } from '../runtime/context.js';
 import { Driver, type ScriptFn } from './driver.js';
 import type { DataFeed, Bar } from './feed.js';
 import type { CompiledScript } from './compiler.js';
+import type { StrategySettings } from '../runtime/builtins/strategy.js';
 import {
   computeStrategyMetrics,
   type StrategyMetrics,
@@ -32,6 +33,14 @@ export interface EngineOptions {
   inputs?: Record<string, unknown>;
   /** Maximum user-loop iterations allowed per bar/tick. Defaults to 1,000,000. */
   loopIterationBudget?: number;
+  /**
+   * Host override of `strategy()` header settings (initial_capital, commission,
+   * slippage, margin, …), applied after the header so overrides win. This is the
+   * funding primitive: weighted/portfolio runs re-fund a script externally, and
+   * sensitivity tests override commission/slippage, without editing the source.
+   * Ignored for compiled non-strategy scripts (an indicator's broker stays inactive).
+   */
+  strategy?: Partial<StrategySettings>;
 }
 
 export class Engine {
@@ -62,6 +71,10 @@ export class Engine {
     }
     if (opts.inputs) this.ctx.inputOverrides = opts.inputs;
     if (opts.loopIterationBudget != null) this.ctx.loopIterationBudget = opts.loopIterationBudget;
+    // Applied after the header's configureStrategy so the override wins. Gated so a
+    // compiled indicator's broker is not activated; raw ScriptFns are the caller's call.
+    if (opts.strategy && (typeof script === 'function' || script.metadata.isStrategy))
+      this.ctx.configureStrategy(opts.strategy);
     this.driver = new Driver(main, this.ctx);
   }
 
@@ -73,6 +86,28 @@ export class Engine {
     const bars = await this.feed.history(opts.symbol, opts.timeframe);
     this.ctx.allBars = bars; // for request.security resampling
     this.driver.runHistorical(bars);
+  }
+
+  /**
+   * Bind a run's identity and its full bar array without executing — the
+   * external-clock half of run(). Drive the bars one at a time with step();
+   * used by hosts that interleave several engines on one shared clock
+   * (PortfolioEngine). Unlike tick(), stepped bars keep exact historical
+   * semantics: `barstate.ishistory`, `barstate.islast`, and `last_bar_index`
+   * match run() bit-for-bit, with none of the realtime rollback overhead.
+   */
+  prepare(opts: RunOptions, bars: Bar[]): void {
+    this.ctx.symbol = opts.symbol;
+    this.ctx.tfStr = opts.timeframe;
+    if (opts.mintick != null && Number.isFinite(opts.mintick) && opts.mintick > 0)
+      this.ctx.mintick = opts.mintick;
+    this.ctx.allBars = bars; // for request.security resampling
+    this.driver.prepareHistorical(bars);
+  }
+
+  /** Execute the next prepared historical bar. Returns false when exhausted. */
+  step(): boolean {
+    return this.driver.stepHistorical();
   }
 
   tick(bar: Bar, isClose: boolean): void {

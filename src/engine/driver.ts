@@ -24,6 +24,9 @@ export class Driver {
   private snapshot: RollbackSnapshot | null = null;
   /** True once the open realtime bar has received its first tick. */
   private realtimeBarOpen = false;
+  /** Bars bound by prepareHistorical(), consumed one at a time by stepHistorical(). */
+  private pending: Bar[] | null = null;
+  private stepIdx = 0;
 
   constructor(
     private readonly main: ScriptFn,
@@ -32,20 +35,48 @@ export class Driver {
 
   /** Run the full historical dataset, committing each bar. */
   runHistorical(bars: Bar[]): void {
-    const $ = this.$;
-    $.lastBarIndex = bars.length - 1;
-    for (let i = 0; i < bars.length; i++) {
-      const isLast = i === bars.length - 1;
-      this.beginBar(bars[i], i);
-      $.bar = historicalBarState(isLast, i === 0);
-      $.onStrategyBar(); // fill pending strategy orders against this bar's open/range
-      this.main($);
-      $.onStrategyBarClose(); // process_orders_on_close: fill this bar's market orders at close
-      $.series.commitBar();
-      this.committed = $.series.committedBars;
-    }
+    this.$.lastBarIndex = bars.length - 1;
+    for (let i = 0; i < bars.length; i++) this.historicalBar(bars, i);
     // Capture state as of the last confirmed bar so realtime ticks can roll back.
-    this.snapshot = $.snapshotMutable();
+    this.snapshot = this.$.snapshotMutable();
+  }
+
+  /**
+   * Bind the full historical dataset without executing — the external-clock half
+   * of runHistorical(). A host that interleaves several engines on one clock
+   * (PortfolioEngine) prepares each with its complete per-symbol bars, then
+   * drives them bar-by-bar with stepHistorical(). Knowing the array up front is
+   * what keeps `last_bar_index`/`barstate.islast` identical to runHistorical() —
+   * the realtime onTick() path cannot provide that.
+   */
+  prepareHistorical(bars: Bar[]): void {
+    this.pending = bars;
+    this.stepIdx = 0;
+    this.$.lastBarIndex = bars.length - 1;
+  }
+
+  /** Execute the next prepared historical bar. Returns false when exhausted. */
+  stepHistorical(): boolean {
+    const bars = this.pending;
+    if (!bars || this.stepIdx >= bars.length) return false;
+    this.historicalBar(bars, this.stepIdx++);
+    // After the last bar, capture the rollback baseline exactly as runHistorical()
+    // does, so a switch to realtime ticks behaves identically.
+    if (this.stepIdx === bars.length) this.snapshot = this.$.snapshotMutable();
+    return true;
+  }
+
+  /** One committed historical bar — the shared physics of runHistorical/stepHistorical. */
+  private historicalBar(bars: Bar[], i: number): void {
+    const $ = this.$;
+    const isLast = i === bars.length - 1;
+    this.beginBar(bars[i], i);
+    $.bar = historicalBarState(isLast, i === 0);
+    $.onStrategyBar(); // fill pending strategy orders against this bar's open/range
+    this.main($);
+    $.onStrategyBarClose(); // process_orders_on_close: fill this bar's market orders at close
+    $.series.commitBar();
+    this.committed = $.series.committedBars;
   }
 
   /**

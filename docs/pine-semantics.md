@@ -87,6 +87,18 @@ every item maps to a mechanism in [`architecture.md`](./architecture.md) §13.
   the v6 reference (default since v3; v1/v2 defaulted to `lookahead_on`). On
   historical bars `lookahead_off` returns the _last confirmed_ HTF value (no future
   leak); no effect on realtime. piner implements this default (Phase 7).
+- **Injected same-symbol series (any timeframe)** `[verified]` — when the host injects the
+  requested timeframe's ACTUAL bars under `ctx.securityBars["<symbol>@<tf>"]`, piner resolves the
+  request against that real series instead of resampling the chart's own bars, aligning by bar
+  CLOSE time (`ExecutionContext.computeInjectedSameSymbol`). This is required for a **finer**
+  request (e.g. a 4h RSI on a 1D chart — the chart can't produce it) and is more accurate for a
+  **higher** request (resampling surfaces a just-closed HTF bar one chart-bar too late; the real
+  series puts it on the last chart bar of the HTF period, where their closes coincide). Under
+  `lookahead_off` a chart bar takes the last injected bar CLOSED by its own close (no future leak);
+  `lookahead_on` takes the containing (possibly-incomplete) bar. Verified bar-for-bar against
+  TradingView on 1D/2H/1H in `test/rsi-dca-tv-parity.test.ts`. With NO injected series the
+  same-symbol path falls back to resampling the chart bars (a finer request then degrades to the
+  chart timeframe — a documented footgun; hosts should fetch and inject).
   → [other-timeframes-and-data](https://www.tradingview.com/pine-script-docs/concepts/other-timeframes-and-data/),
   [repainting](https://www.tradingview.com/pine-script-docs/concepts/repainting/)
 
