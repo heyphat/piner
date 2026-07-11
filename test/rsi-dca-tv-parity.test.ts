@@ -25,21 +25,25 @@ import { dirname, join } from 'node:path';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const asset = (f: string) => join(HERE, 'pinescripts/strategies', f);
 const loadBars = (f: string): Bar[] =>
-  (JSON.parse(readFileSync(asset(f), 'utf8')) as number[][]).map(([time, open, high, low, close, volume]) => ({
-    time,
-    open,
-    high,
-    low,
-    close,
-    volume,
-  }));
+  (JSON.parse(readFileSync(asset(f), 'utf8')) as number[][]).map(
+    ([time, open, high, low, close, volume]) => ({
+      time,
+      open,
+      high,
+      low,
+      close,
+      volume,
+    }),
+  );
 
 const h4 = loadBars('rsi-dca-xau-4h.json');
 const src = readFileSync(asset('rsi-dca.pine'), 'utf8');
 
 /** TV's export dates are "YYYY-MM-DD" on 1D and "YYYY-MM-DD HH:MM" intraday — format to match. */
 const fmt = (t: number, intraday: boolean) =>
-  intraday ? new Date(t).toISOString().slice(0, 16).replace('T', ' ') : new Date(t).toISOString().slice(0, 10);
+  intraday
+    ? new Date(t).toISOString().slice(0, 16).replace('T', ' ')
+    : new Date(t).toISOString().slice(0, 10);
 
 /** Parse TV's trade list into the entry-ordered [id, dateString] list (as written in the CSV). */
 function tvEntries(csv: string): [string, string][] {
@@ -53,7 +57,11 @@ function tvEntries(csv: string): [string, string][] {
 }
 
 /** Run both backends with the 4h series injected; return the entry-ordered [id, dateString] list. */
-async function pinerEntries(barsFile: string, chartTf: string, intraday: boolean): Promise<[string, string][]> {
+async function pinerEntries(
+  barsFile: string,
+  chartTf: string,
+  intraday: boolean,
+): Promise<[string, string][]> {
   const bars = loadBars(barsFile);
   const engines = (['js', 'interp'] as const).map((backend) => {
     const e = new Engine(compile(src), new ArrayFeed(bars), {
@@ -63,7 +71,9 @@ async function pinerEntries(barsFile: string, chartTf: string, intraday: boolean
     e.ctx.securityBars.set('XAUUSDT@240', h4); // inject the actual 4h series
     return e;
   });
-  await Promise.all(engines.map((e) => e.run({ symbol: 'XAUUSDT', timeframe: chartTf, mintick: 0.01 })));
+  await Promise.all(
+    engines.map((e) => e.run({ symbol: 'XAUUSDT', timeframe: chartTf, mintick: 0.01 })),
+  );
   const [js, ip] = engines;
   expect(JSON.stringify(js.strategy)).toBe(JSON.stringify(ip.strategy)); // two-backend invariant
 
@@ -81,9 +91,27 @@ async function pinerEntries(barsFile: string, chartTf: string, intraday: boolean
 
 describe('RSI-DCA — TradingView parity on real XAUUSDT data (injected 4h RSI)', () => {
   const cases = [
-    { name: '1D chart (4h RSI is FINER than the chart)', bars: 'rsi-dca-xau-1d.json', tf: '1D', csv: 'rsi-dca-1d.csv', intraday: false },
-    { name: '2H chart (4h RSI is HIGHER — real fetch, not resample)', bars: 'rsi-dca-xau-2h.json', tf: '120', csv: 'rsi-dca-2h.csv', intraday: true },
-    { name: '1H chart (4h RSI is HIGHER — real fetch, not resample)', bars: 'rsi-dca-xau-1h.json', tf: '60', csv: 'rsi-dca-1h.csv', intraday: true },
+    {
+      name: '1D chart (4h RSI is FINER than the chart)',
+      bars: 'rsi-dca-xau-1d.json',
+      tf: '1D',
+      csv: 'rsi-dca-1d.csv',
+      intraday: false,
+    },
+    {
+      name: '2H chart (4h RSI is HIGHER — real fetch, not resample)',
+      bars: 'rsi-dca-xau-2h.json',
+      tf: '120',
+      csv: 'rsi-dca-2h.csv',
+      intraday: true,
+    },
+    {
+      name: '1H chart (4h RSI is HIGHER — real fetch, not resample)',
+      bars: 'rsi-dca-xau-1h.json',
+      tf: '60',
+      csv: 'rsi-dca-1h.csv',
+      intraday: true,
+    },
   ];
 
   for (const c of cases) {

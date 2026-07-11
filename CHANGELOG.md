@@ -30,6 +30,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`Account`** exported from the strategy runtime — the funding account a broker
   draws on, extracted so several brokers can share one pot in a portfolio run
   while a lone broker keeps today's per-broker behavior bit-for-bit.
+- **Same-symbol `request.security` resolves from injected real bars on any
+  timeframe.** When the host injects the requested timeframe's actual bars under
+  `securityBars["<symbol>@<tf>"]`, a same-symbol `request.security` now resolves
+  against that real series — aligned by bar **close time** — instead of resampling
+  the chart's own bars. This is required for a timeframe **finer** than the chart
+  (which resampling cannot produce, so it silently degraded to the chart series)
+  and is accurate for a **higher** one (resampling surfaced a just-closed
+  higher-timeframe bar one chart-bar late). `lookahead_off` still holds: a chart
+  bar sees only bars that closed by its own close, so a higher-timeframe value
+  lands on the **last** chart bar of its period. With no injected series the
+  request falls back to resampling the chart bars (unchanged). Verified bar-for-bar
+  against TradingView on real 1D/2H/1H data.
 
 ## [0.7.0]
 
