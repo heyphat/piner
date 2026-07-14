@@ -1016,6 +1016,8 @@ export class ExecutionContext {
     return num(x);
   }
   toBool(x: unknown): boolean {
+    // numeric truthiness per the ?: reference: 0, NaN and ±Infinity are false
+    if (typeof x === 'number') return Number.isFinite(x) && x !== 0;
     return isNa(x) ? false : !!x;
   }
 
@@ -1079,10 +1081,14 @@ export class ExecutionContext {
     return isNa(a) || isNa(b) ? false : (a as number) >= (b as number);
   }
   eq(a: unknown, b: unknown): boolean {
-    return isNa(a) || isNa(b) ? false : a === b;
+    if (isNa(a) || isNa(b)) return false;
+    // ==/!= round float operands to nine fractional digits (v6 reference, op ==/!=)
+    if (typeof a === 'number' && typeof b === 'number')
+      return Math.round(a * 1e9) === Math.round(b * 1e9);
+    return a === b;
   }
   ne(a: unknown, b: unknown): boolean {
-    return isNa(a) || isNa(b) ? false : a !== b;
+    return isNa(a) || isNa(b) ? false : !this.eq(a, b);
   }
   not(a: unknown): boolean {
     return !this.toBool(a);

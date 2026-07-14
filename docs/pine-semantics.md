@@ -28,6 +28,9 @@ every item maps to a mechanism in [`architecture.md`](./architecture.md) §13.
   [operators](https://www.tradingview.com/pine-script-docs/language/operators/)
 - **Out-of-range = `na`.** `[verified]` Referencing before the first bar returns
   `na`, never an error.
+- **Float offsets floor.** `[verified]` A non-integer offset is rounded down
+  (`close[2.9]` = `close[2]`); an `na` offset reads `na`.
+  → [reference, op `[]`](https://www.tradingview.com/pine-script-reference/v6/#op_%5B%5D)
 - **Built-in series.** `open/high/low/close/volume/time` (and `hl2`, `hlc3`, …)
   are series filled by the feed each bar.
 
@@ -42,6 +45,15 @@ every item maps to a mechanism in [`architecture.md`](./architecture.md) §13.
   funnels all comparisons through `$.lt/$.le/$.gt/$.ge/$.eq/$.ne` (one place) and
   lints `x == na` / `x != na` (always false → use `na(x)` / `not na(x)`). Pinned by
   the conformance suite.
+- **`==`/`!=` round floats to nine fractional digits.** `[verified]` The equality
+  operators (and `switch` subject matching, which is `==`) compare float operands
+  after rounding to 9 fractional digits, so `0.1 + 0.2 == 0.3` is `true`. Relational
+  operators (`< <= > >=`) do NOT round. `%` truncates the quotient toward zero
+  (result keeps the dividend's sign: `-1 % 9 = -1`); `/` never truncates, even on
+  two ints (`5/2 = 2.5`). In `?:`/conditions, `0`, `na`, and `±Infinity` are falsy.
+  → [reference, op `==`](https://www.tradingview.com/pine-script-reference/v6/#op_==),
+  [op `%`](https://www.tradingview.com/pine-script-reference/v6/#op_%25),
+  [op `?:`](https://www.tradingview.com/pine-script-reference/v6/#op_?:)
 
 ## 4. Variable persistence
 

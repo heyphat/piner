@@ -96,6 +96,9 @@ export class SeriesStore {
    * a reference value, else the numeric column. Out-of-range → NaN (na), matching Pine.
    */
   getHist(slot: number, offset: number): unknown {
+    // v6 reference (op []): a float offset is rounded down; a na offset reads na.
+    if (!Number.isFinite(offset)) return NaN;
+    offset = Math.floor(offset);
     const i = this.len - offset;
     if (offset < 0 || i < 0) return NaN;
     const o = this.objCols[slot];

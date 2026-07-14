@@ -1,0 +1,236 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © dkcodenut
+// © dkcodenut.com
+//@version=6
+indicator("Intrabar X-Ray Profile by [dk_codenut]", overlay = true,
+     max_boxes_count = 500, max_labels_count = 500, max_lines_count = 250, calc_bars_count = 500)
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Intrabar Volume Profile
+//  Builds a per-candle volume profile from lower-timeframe data and renders it as horizontal bars inside each candle, colored by buy/sell delta.
+//  Features: POC highlight, value area dimming, imbalance detection, optional per-level value labels (footprint layout), candle delta summary,and a stepped POC connector line.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Profile ──
+gp      = "Profile"
+gran    = input.string("1-Minute", "Granularity", options = ["5-Minute", "1-Minute", "1-Second", "1-Tick"], group = gp,
+     tooltip = "Lower timeframe used to build each candle's profile. 1-Second and 1-Tick require the matching TradingView data plan. On most stocks and higher chart timeframes, 1-Minute is the best balance of detail and coverage.")
+rows    = input.int(12, "Profile Rows", minval = 5, maxval = 30, group = gp,
+     tooltip = "Number of price levels per candle. More rows = finer detail but smaller bars.")
+maxBars = input.int(30, "Max Candles Back", minval = 5, maxval = 40, group = gp,
+     tooltip = "How many recent candles get a profile. Kept modest so drawings stay within TradingView limits.")
+profW   = input.int(85, "Profile Width, % of Candle", minval = 30, maxval = 100, group = gp,
+     tooltip = "Maximum bar length as a share of the candle's width. Lower values leave a visual gap between candles.")
+
+// ── POC & Value Area ──
+gv      = "POC & Value Area"
+showPOC = input.bool(true, "Highlight POC", inline = "poc", group = gv)
+pocCol  = input.color(#e2b93b, "", inline = "poc", group = gv,
+     tooltip = "Point of Control — the level with the highest traded volume in the candle.")
+showVA  = input.bool(true, "Dim Outside Value Area", inline = "va", group = gv)
+vaCol   = input.color(#50535e, "", inline = "va", group = gv,
+     tooltip = "Levels outside the value area are drawn in this neutral color so the value area stands out.")
+vaPct   = input.float(70, "Value Area %", minval = 50, maxval = 95, step = 5, group = gv)
+
+// ── Imbalance ──
+gi      = "Imbalance Detection"
+showImb = input.bool(true, "Mark Imbalanced Levels", group = gi,
+     tooltip = "Flags a level when one side controls at least the Dominance % of that level's volume.")
+imbRatio = input.float(75, "Dominance %", minval = 55, maxval = 95, step = 5, group = gi)
+imbBuy  = input.color(#00c853, "Buy / Sell Imbalance", inline = "im", group = gi)
+imbSel  = input.color(#ff1744, "", inline = "im", group = gi)
+
+// ── Numbers & Data ──
+gn      = "Numbers & Data"
+lblVal  = input.string("Delta", "Label Value", options = ["Delta", "Volume"], group = gn,
+     tooltip = "Which value the number labels print for each level.")
+showFoot = input.bool(true, "Values At End Of Each Bar", group = gn,
+     tooltip = "Footprint style — prints each level's value just past the tip of its bar.")
+showStats = input.bool(true, "Candle Delta Summary", group = gn,
+     tooltip = "Net delta and delta % under each candle.")
+minLblPct = input.float(10, "Hide Values Below % Of Max", minval = 0, maxval = 50, step = 5, group = gn,
+     tooltip = "Skips number labels on levels with little volume. Cuts clutter dramatically — set to 0 to label every level.")
+lblSizeOpt = input.string("Tiny", "Label Text Size", options = ["Tiny", "Small", "Normal"], group = gn)
+footByDlt = input.bool(true, "Color Numbers By Delta", group = gn)
+footCol   = input.color(#d1d4dc, "Neutral Text Color", group = gn)
+
+// ── Style ──
+gs      = "Style"
+buyHi   = input.color(#089981, "Buy strong → weak", inline = "b", group = gs)
+buyLo   = input.color(#b3d9d1, "", inline = "b", group = gs)
+selHi   = input.color(#f23645, "Sell strong → weak", inline = "s", group = gs)
+selLo   = input.color(#f5c6cb, "", inline = "s", group = gs)
+transp  = input.int(20, "Transparency", minval = 0, maxval = 90, group = gs)
+
+// ── POC Connector ──
+gc       = "POC Connector"
+showLine = input.bool(true, "Connect POC Across Candles", inline = "pl", group = gc)
+lineCol  = input.color(#787b86, "", inline = "pl", group = gc)
+lineSty  = input.string("Dotted", "Style", options = ["Solid", "Dashed", "Dotted"], inline = "pl2", group = gc)
+lineWid  = input.int(1, "Width", minval = 1, maxval = 4, inline = "pl2", group = gc)
+
+tf = switch gran
+    "5-Minute" => "5"
+    "1-Minute" => "1"
+    "1-Second" => "1S"
+    => "1T"
+
+lblSize = switch lblSizeOpt
+    "Tiny"  => size.tiny
+    "Small" => size.small
+    => size.normal
+
+lStyle = switch lineSty
+    "Solid"  => line.style_solid
+    "Dashed" => line.style_dashed
+    => line.style_dotted
+
+dir() => math.sign(close - close[1])
+
+// "+1.2K" / "-830" — signed compact number
+signedVol(float x) => (x > 0 ? "+" : "") + str.tostring(x, format.volume)
+
+// ── State ──
+var float        pPoc      = na
+var line         liveH     = na
+var line         liveV     = na
+var array<box>   liveBoxes = array.new<box>()
+var array<label> liveLbls  = array.new<label>()
+
+[h, l, v, dv] = request.security_lower_tf("", tf, [high, low, volume, volume * dir()])
+
+if v.size() > 0 and high > low and last_bar_index - bar_index <= maxBars
+    rH     = (high - low) / rows
+    volArr = array.new<float>(rows, 0.)
+    delArr = array.new<float>(rows, 0.)
+
+    // distribute each lower-timeframe bar's volume across the levels it spans
+    for i = 0 to v.size() - 1
+        bot = math.max(0, math.min(rows - 1, int((l.get(i) - low) / rH)))
+        top = math.max(0, math.min(rows - 1, int((h.get(i) - low) / rH)))
+        n   = top - bot + 1
+        for x = bot to top
+            volArr.set(x, volArr.get(x) + v.get(i) / n)
+            delArr.set(x, delArr.get(x) + dv.get(i) / n)
+
+    totVol = volArr.sum()
+
+    if totVol > 0
+        maxV = volArr.max()
+        minV = volArr.min()
+        rngV = maxV - minV
+        poc  = volArr.indexof(maxV)
+
+        // expand the value area outward from the POC until it covers vaPct% of volume
+        up  = poc
+        dn  = poc
+        acc = maxV
+        target = totVol * vaPct / 100
+        while acc < target and (up < rows - 1 or dn > 0)
+            vu = up < rows - 1 ? volArr.get(up + 1) : -1.
+            vd = dn > 0        ? volArr.get(dn - 1) : -1.
+            if vu >= vd
+                up  += 1
+                acc += vu
+            else
+                dn  -= 1
+                acc += vd
+
+        // max bar length in block characters, scaled by the width input
+        maxBlocks = math.max(3, math.round(11.0 * profW / 100))
+
+        // wipe the realtime candle's prior drawings so they don't accumulate
+        if barstate.islast
+            for b in liveBoxes
+                box.delete(b)
+            liveBoxes.clear()
+            for lb in liveLbls
+                label.delete(lb)
+            liveLbls.clear()
+
+        if maxV > 0
+            for i = 0 to rows - 1
+                vI    = volArr.get(i)
+                dI    = delArr.get(i)
+                share = vI > 0 ? dI / vI : 0.
+
+                // Length by min-max normalization: the candle's quietest
+                // level draws 1 block, the busiest (POC) draws maxBlocks.
+                normV  = rngV > 0 ? (vI - minV) / rngV : 1.0
+                blocks = 1 + math.round(normV * (maxBlocks - 1))
+
+                col = share >= 0 ?
+                     color.from_gradient(share,  0, 1, buyLo, buyHi) :
+                     color.from_gradient(share, -1, 0, selHi, selLo)
+                if showVA and (i < dn or i > up)
+                    col := vaCol
+                if showImb and vI > 0 and math.abs(share) >= imbRatio / 100
+                    col := share > 0 ? imbBuy : imbSel
+                if showPOC and i == poc
+                    col := pocCol
+
+                // TradingView snaps box time-coordinates to whole bars, so
+                // sub-bar lengths can't be drawn with box widths. Instead the
+                // bar is a run of block characters inside a fixed 1-bar box —
+                // character count is the bar length.
+                barTxt = ""
+                for b = 1 to blocks
+                    barTxt += "█"
+                bx = box.new(bar_index, low + rH * i + rH * 0.88, bar_index + 1, low + rH * i + rH * 0.12,
+                     text = barTxt, text_halign = text.align_left, text_valign = text.align_center,
+                     text_color = color.new(col, transp), border_color = color(na), bgcolor = #00000000)
+                if barstate.islast
+                    liveBoxes.push(bx)
+
+                // significance filter: skip labels on thin levels to keep the chart clean
+                lblOk = vI > 0 and vI >= maxV * minLblPct / 100
+                if lblOk and showFoot
+                    lblTxt = str.tostring(lblVal == "Volume" ? vI : dI, format.volume)
+                    lblTc  = footByDlt ? (dI >= 0 ? buyHi : selHi) : footCol
+                    lf = label.new(bar_index, low + rH * i + rH / 2, lblTxt,
+                         style = label.style_label_right,
+                         color = color(na), textcolor = lblTc, size = lblSize)
+                    if barstate.islast
+                        liveLbls.push(lf)
+
+        if showStats
+            totD = delArr.sum()
+            pctD = totD / totVol * 100
+            ls = label.new(bar_index, na,
+                 "Δ " + signedVol(totD) + "  ·  " + str.tostring(pctD, "#.#") + "%",
+                 yloc = yloc.belowbar, style = label.style_label_up,
+                 color = color(na), size = lblSize,
+                 textcolor = color.new(totD >= 0 ? imbBuy : imbSel, 15))
+            if barstate.islast
+                liveLbls.push(ls)
+
+        // stepped POC connector
+        if showLine
+            pocPrice = low + rH * (poc + 0.5)
+            if barstate.islast
+                if na(liveH)
+                    liveH := line.new(time, pocPrice, time_close, pocPrice,
+                         xloc = xloc.bar_time, color = lineCol, width = lineWid, style = lStyle)
+                else
+                    line.set_first_point(liveH, chart.point.from_time(time, pocPrice))
+                    line.set_second_point(liveH, chart.point.from_time(time_close, pocPrice))
+                if not na(pPoc)
+                    if na(liveV)
+                        liveV := line.new(time, pPoc, time, pocPrice,
+                             xloc = xloc.bar_time, color = lineCol, width = lineWid, style = lStyle)
+                    else
+                        line.set_first_point(liveV, chart.point.from_time(time, pPoc))
+                        line.set_second_point(liveV, chart.point.from_time(time, pocPrice))
+            else
+                line.new(time, pocPrice, time_close, pocPrice,
+                     xloc = xloc.bar_time, color = lineCol, width = lineWid, style = lStyle)
+                if not na(pPoc)
+                    line.new(time, pPoc, time, pocPrice,
+                         xloc = xloc.bar_time, color = lineCol, width = lineWid, style = lStyle)
+            if barstate.isconfirmed
+                pPoc := pocPrice
+
+
+// Apply it on chart for free
+
+

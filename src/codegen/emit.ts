@@ -151,7 +151,10 @@ class Emitter {
       case ':=':
         return v;
       case '+=':
-        return `$.add(${cur}, ${v})`;
+        // string += is concatenation (same rule as binary `+`)
+        return target.type?.kind === 'string' || value.type?.kind === 'string'
+          ? `$.concat(${cur}, ${v})`
+          : `$.add(${cur}, ${v})`;
       case '-=':
         return `$.sub(${cur}, ${v})`;
       case '*=':
