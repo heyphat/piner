@@ -208,6 +208,62 @@ plot(bar_index > 0 and s[1] == str.tostring(bar_index - 1) ? 1 : 0, "ok")`);
   });
 });
 
+describe('operator semantics vs the v6 reference (audit)', () => {
+  // Pinned from the official operator reference (reference manual + user-manual operators page):
+  //  - ==/!= round float operands to nine fractional digits,
+  //  - [] floors a float offset,
+  //  - % truncates the quotient (result keeps the dividend's sign): -1 % 9 = -1,
+  //  - int/int division is NOT truncated (5/2 = 2.5),
+  //  - switch subject matching uses == (so it inherits the 9-digit rounding).
+  it('float ==, float [], % sign, / on ints (both backends)', async () => {
+    const e = await bothBackends(`//@version=6
+indicator("ops")
+plot(0.1 + 0.2 == 0.3 ? 1 : 0, "eq9")
+plot(0.1 + 0.2 != 0.3 ? 1 : 0, "ne9")
+plot(close[2.9] == close[2] ? 1 : 0, "floorIdx")
+plot(-1 % 9, "modSign")
+plot(5 / 2, "intDiv")
+s = switch 0.1 + 0.2
+    0.3 => 1
+    => 0
+plot(s, "switchEq")`);
+    expect(plot(e, 'eq9').every((v) => v === 1)).toBe(true);
+    expect(plot(e, 'ne9').every((v) => v === 0)).toBe(true);
+    expect(
+      plot(e, 'floorIdx')
+        .slice(2)
+        .every((v) => v === 1),
+    ).toBe(true);
+    expect(plot(e, 'modSign').every((v) => v === -1)).toBe(true);
+    expect(plot(e, 'intDiv').every((v) => v === 2.5)).toBe(true);
+    expect(plot(e, 'switchEq').every((v) => v === 1)).toBe(true);
+  });
+});
+
+describe('string compound assignment (s += "x") concatenates', () => {
+  // Real-script gap (intrabar-xray-profile): `barTxt += "█"` in a loop built each profile
+  // bar's text. `+=` lowered unconditionally to numeric $.add, so a string target became
+  // NaN → drawing text serialized as null (which crashed the host renderer). String `+=`
+  // must follow the same rule as binary `+`: string operand → concat.
+  it('accumulates strings in a loop and from a seed (both backends)', async () => {
+    const e = await bothBackends(`//@version=6
+indicator("sc")
+t = ""
+for i = 1 to 3
+    t += "x"
+u = "a"
+u += str.tostring(bar_index)
+label.new(bar_index, close, t)
+plot(t == "xxx" ? 1 : 0, "loop")
+plot(u == "a" + str.tostring(bar_index) ? 1 : 0, "seed")`);
+    expect(plot(e, 'loop').every((v) => v === 1)).toBe(true);
+    expect(plot(e, 'seed').every((v) => v === 1)).toBe(true);
+    // the drawing IR must carry the real string, never NaN/null
+    const label = e.drawings.at(-1)!;
+    expect(label.props['text']).toBe('xxx');
+  });
+});
+
 describe('request.security_lower_tf (intrabar) — host-injected lower-TF bars', () => {
   // Real-script gap (LuxAlgo supply-demand-range): the script's whole visual is built from
   // intrabar volume via request.security_lower_tf. piner doesn't fetch — the host injects the

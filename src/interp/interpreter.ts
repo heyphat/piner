@@ -153,7 +153,10 @@ class Interp {
     const v = this.expr(value);
     switch (op) {
       case '+=':
-        return this.$.add(cur, v as number);
+        // string += is concatenation (same rule as binary `+`)
+        return target.type?.kind === 'string' || value.type?.kind === 'string'
+          ? this.$.concat(cur, v)
+          : this.$.add(cur, v as number);
       case '-=':
         return this.$.sub(cur, v as number);
       case '*=':

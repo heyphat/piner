@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1]
+
+### Fixed
+
+- **String `+=` is concatenation.** Compound assignment on a string target
+  (e.g. `barTxt += "█"`) lowered to numeric addition, producing `na` — and
+  drawing `text` built that way serialized as `null`, which could crash a host
+  renderer. `+=` now follows the same rule as binary `+` (string operand →
+  concatenation) in both backends, per the v6 reference for `+=`.
+- **`==` / `!=` round float operands to nine fractional digits** (v6 reference
+  for `==`/`!=`), so `0.1 + 0.2 == 0.3` is `true` as on TradingView. `switch`
+  subject matching inherits the rule (it compiles to `==`). Relational
+  `< <= > >=` are unchanged, per the docs.
+- **`[]` floors a float offset** (`close[2.9]` reads `close[2]`) instead of
+  indexing the history column with a non-integer, which returned `undefined`;
+  a non-finite (`na`) offset now reads `na`.
+- **`±Infinity` is falsy in conditions**, matching the `?:` reference ("0 and
+  also NaN, +Infinity, -Infinity" are false).
+
 ## [0.8.0]
 
 ### Added
@@ -424,6 +443,7 @@ Initial release: clean-room Pine Script v6 engine. `compile(src)` lexes → pars
 → analyzes → emits JS and an interpreter oracle, cross-checked for identical
 output. Real indicators (SMA/EMA cross, RSI, Bollinger, ATR, …) run end-to-end.
 
+[0.8.1]: https://github.com/heyphat/piner/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/heyphat/piner/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/heyphat/piner/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/heyphat/piner/compare/v0.5.1...v0.6.0

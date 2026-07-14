@@ -33,7 +33,13 @@ const bars = makeBars(200);
 /** Compile a real script, run both backends, and assert byte-for-byte plot + drawing parity. */
 function runReal(
   file: string,
-  opts: { bars?: Bar[]; inputs?: Record<string, unknown>; libraries?: LibraryRegistry } = {},
+  opts: {
+    bars?: Bar[];
+    inputs?: Record<string, unknown>;
+    libraries?: LibraryRegistry;
+    /** Host-injected request.security bars, keyed "<symbol>@<tf>" (lower-TF) or "<symbol>". */
+    securityBars?: Record<string, Bar[]>;
+  } = {},
 ) {
   const data = opts.bars ?? bars;
   const src = readFileSync(join(HERE, 'pinescripts', file), 'utf8');
@@ -42,6 +48,10 @@ function runReal(
   // passing them to run() silently dropped them.
   const js = new Engine(c, new ArrayFeed(data), { backend: 'js', inputs: opts.inputs });
   const ip = new Engine(c, new ArrayFeed(data), { backend: 'interp', inputs: opts.inputs });
+  for (const [key, sb] of Object.entries(opts.securityBars ?? {})) {
+    js.ctx.securityBars.set(key, sb);
+    ip.ctx.securityBars.set(key, sb);
+  }
   const run = { symbol: 'BTCUSD', timeframe: '60' };
   return Promise.all([js.run(run), ip.run(run)]).then(() => {
     for (const [id, jp] of js.outputs.plots) {
@@ -146,6 +156,39 @@ describe('real published TradingView scripts', () => {
     const byType = drawCounts(js);
     expect(byType.line).toBeGreaterThan(0); // median + tines
     expect(byType.linefill).toBeGreaterThan(0); // level bands
+  });
+
+  it('Intrabar X-Ray Profile (v6): security_lower_tf tuple + string `+=` bar text', async () => {
+    // Builds a per-candle volume profile from injected 1-minute intrabars. The profile
+    // bars are runs of "█" accumulated with a string `+=` in a loop — the regression
+    // that used to lower to numeric add and emit null box text (crashing the host).
+    const ltf: Bar[] = [];
+    for (const b of bars)
+      for (let m = 0; m < 60; m++) {
+        const f0 = m / 60,
+          f1 = (m + 1) / 60;
+        const p0 = b.low + (b.high - b.low) * Math.abs(Math.sin(f0 * 7));
+        const p1 = b.low + (b.high - b.low) * Math.abs(Math.sin(f1 * 7));
+        ltf.push({
+          time: b.time + m * 60_000,
+          open: p0,
+          high: Math.max(p0, p1),
+          low: Math.min(p0, p1),
+          close: p1,
+          volume: (b.volume ?? 0) / 60,
+        });
+      }
+    const { c, js } = await runReal('intrabar-xray-profile.pine', {
+      securityBars: { 'BTCUSD@1': ltf },
+    });
+    expect(c.metadata.title).toBe('Intrabar X-Ray Profile by [dk_codenut]');
+    const byType = drawCounts(js);
+    expect(byType.box).toBeGreaterThan(0); // profile rows
+    expect(byType.label).toBeGreaterThan(0); // footprint values + delta summaries
+    expect(byType.line).toBeGreaterThan(0); // POC connector
+    // every profile box carries its block-character bar text — never na/null
+    for (const d of js.drawings)
+      if (d.type === 'box') expect(String(d.props['text'])).toMatch(/^█+$/);
   });
 });
 

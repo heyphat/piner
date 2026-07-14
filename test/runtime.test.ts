@@ -43,6 +43,14 @@ describe('comparisons with na yield false (v6 §4.5)', () => {
     expect($.ne(2, 3)).toBe(true);
     expect($.not(false)).toBe(true);
   });
+  it('==/!= round float operands to nine fractional digits (v6 reference)', () => {
+    expect($.eq(0.1 + 0.2, 0.3)).toBe(true); // 0.30000000000000004 == 0.3 on TV
+    expect($.ne(0.1 + 0.2, 0.3)).toBe(false);
+    expect($.eq(1.0000000004, 1.0)).toBe(true); // rounds away below 5e-10
+    expect($.eq(1.000000001, 1.0)).toBe(false); // differs at the 9th digit
+    expect($.eq('a', 'a')).toBe(true); // non-numeric equality untouched
+    expect($.ne('a', 'b')).toBe(true);
+  });
 });
 
 describe('na helpers and casts', () => {
@@ -68,6 +76,9 @@ describe('na helpers and casts', () => {
     expect($.toBool(0)).toBe(false);
     expect($.toBool(1)).toBe(true);
     expect($.toBool(NaN_)).toBe(false);
+    // ?: reference: "Zero value (0 and also NaN, +Infinity, -Infinity) is considered to be false"
+    expect($.toBool(Infinity)).toBe(false);
+    expect($.toBool(-Infinity)).toBe(false);
   });
   it('concat coerces to string', () => {
     expect($.concat('a', 1)).toBe('a1');
@@ -145,6 +156,19 @@ describe('SeriesStore', () => {
     expect(Number.isNaN(s.getHist(slot, 9) as number)).toBe(true); // out of range → NaN
     // the numeric fast-path read (get) still returns NaN where an object lives
     expect(s.get(slot, 2)).toBeNaN();
+  });
+  it('getHist floors float offsets and reads na offsets as na (v6 reference, op [])', () => {
+    const s = new SeriesStore();
+    const slot = s.declareNumericSlot();
+    s.set(slot, 10);
+    s.commitBar();
+    s.set(slot, 20);
+    s.commitBar();
+    s.set(slot, 30); // current
+    expect(s.getHist(slot, 1.9)).toBe(20); // floor(1.9) = 1 — never `undefined`
+    expect(s.getHist(slot, 0.5)).toBe(30);
+    expect(Number.isNaN(s.getHist(slot, NaN) as number)).toBe(true);
+    expect(Number.isNaN(s.getHist(slot, Infinity) as number)).toBe(true);
   });
 });
 

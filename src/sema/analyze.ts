@@ -583,6 +583,8 @@ class Analyzer {
           if (sym.global) this.constEnv.delete(s.target.name);
           // widen the symbol's type if the reassignment introduces a float
           if (isFloat(value) && sym.type?.kind === 'int') sym.type = tFloat;
+          // annotate the target so both backends can pick concat vs add for `+=`
+          s.target.type = sym.type;
         } else {
           if (RESERVED_MEMBER_NAMES.has(s.target.property)) {
             this.error(s.target, `reserved property '${s.target.property}' cannot be assigned`);
