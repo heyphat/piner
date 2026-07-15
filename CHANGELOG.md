@@ -4,6 +4,46 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0]
+
+### Changed (breaking)
+
+Backtest **results change** for any margin-enabled or derived-quantity strategy
+(the API is additive — one new optional setting). All three changes move the
+broker onto TradingView's empirically verified behavior, validated against a
+42-event TV v6 margin-call ledger (BINANCE:XAUUSDT.P 15m; every event's bar,
+fill price, and liquidated quantity reproduced exactly, and the full 85-row
+trade list replayed within one 0.001 lot step).
+
+- **Margin-call simulation matches TradingView's broker emulator.**
+  - Evaluation and fill happen **once per bar at the bar's worst price** for
+    the position (low for longs, high for shorts) — previously the broker
+    walked the 4-point intrabar path and could liquidate several times per
+    bar at intermediate points.
+  - The liquidated quantity follows TV's 10-step algorithm: the cover
+    quantity is **truncated to the symbol's minimum contract size** (new
+    `StrategySettings.minQty`, default 0.001, host-configurable) _before_ the
+    ×4 multiplier; when truncation yields zero the emulator liquidates
+    **exactly one unit** (empirical TV behavior, undocumented by TV).
+  - `strategy.margin_liquidation_price` rounds **down to tick for longs, up
+    for shorts** (per the Help Center leverage article) instead of to the
+    nearest tick.
+- **Derived order quantities truncate to the lot step.** `strategy.cash` and
+  `strategy.percent_of_equity` sizing now truncate the computed quantity to
+  `minQty`, as TradingView does (equity 10067.60 @ 4740 → qty 2.123, not
+  2.12396). Explicit and fixed quantities pass through untouched. Set
+  `minQty: 0` to disable the truncation entirely.
+
+### Added
+
+- **`StrategySettings.minQty`** — the symbol's minimum contract size (lot
+  step), the truncation unit for margin-call liquidations and derived order
+  sizing. Exchange metadata, not a `strategy()` parameter: hosts configure it
+  per symbol via `broker.configure({ minQty })` or the `EngineOptions.strategy`
+  override. Default 0.001.
+- **`PortfolioSleeveSpec.minQty`** — per-sleeve lot step for
+  `PortfolioEngine`, merged into each sleeve's strategy override.
+
 ## [0.8.1]
 
 ### Fixed
@@ -443,6 +483,7 @@ Initial release: clean-room Pine Script v6 engine. `compile(src)` lexes → pars
 → analyzes → emits JS and an interpreter oracle, cross-checked for identical
 output. Real indicators (SMA/EMA cross, RSI, Bollinger, ATR, …) run end-to-end.
 
+[0.9.0]: https://github.com/heyphat/piner/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/heyphat/piner/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/heyphat/piner/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/heyphat/piner/compare/v0.6.0...v0.7.0

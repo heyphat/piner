@@ -66,6 +66,12 @@ export interface StrategySettings {
   /** Same for shorts (margin_short). Note that at 100 a short can still be margin
    *  called (its liquidation price is finite), unlike a fully-funded long. */
   marginShort: number;
+  /** Minimum contract size of the traded symbol — the truncation unit of TV's
+   *  margin-call step 9 ("we truncate the value to the same decimal point as the
+   *  minimum contract size for the current symbol"). Exchange metadata, not a
+   *  strategy() parameter: hosts configure it per symbol. Default 0.001 (the
+   *  common crypto lot step, verified on BINANCE:XAUUSDT.P). */
+  minQty: number;
 }
 
 interface Order {
@@ -262,6 +268,7 @@ export class StrategyBroker {
     // Pine v6 defaults (v5 was 0/0 — declare margin_long=0, margin_short=0 to opt out).
     marginLong: 100,
     marginShort: 100,
+    minQty: 0.001,
   };
   /** The funding account. Private per-broker by default (kept in sync with
    *  settings.initialCapital by configure()); a portfolio host swaps in a shared
@@ -463,7 +470,8 @@ export class StrategyBroker {
    *    P = ((initialCapital + netProfit)/|size| − D·avgPrice) / (m − D)
    *  na while flat, when the position's margin percent is 0 (no margin simulation),
    *  or for a fully-funded long (m = 1 = D → no finite liquidation price). Rounded
-   *  to the nearest tick (parity question P2, dev-docs/margin-plan.md §4). */
+   *  DOWN to tick for longs, UP for shorts (Help Center: "rounded down (long
+   *  positions) or up (short positions) to the nearest tick value" — P2 settled). */
   get marginLiquidationPrice(): number {
     if (this.size === 0) return NaN;
     const D = sign(this.size);
@@ -475,7 +483,9 @@ export class StrategyBroker {
         D * this.avgPrice) /
       (m - D);
     const mt = this.host.mintick;
-    return mt > 0 ? Math.round(raw / mt) * mt : raw;
+    if (!(mt > 0)) return raw;
+    // ε guards float noise (25/0.01 = 2500.0000000000005 must not ceil to 25.01)
+    return (D === DIR_LONG ? Math.floor(raw / mt + 1e-9) : Math.ceil(raw / mt - 1e-9)) * mt;
   }
   /** Profit factor: gross profit / |gross loss| (Infinity when there are no losing
    *  trades, 0 when flat). Not a Pine `strategy.*` builtin — a convenience metric
@@ -562,11 +572,17 @@ export class StrategyBroker {
     return this.defaultQty(price);
   }
 
-  /** The order quantity an entry would use at `price`, per the sizing settings. */
+  /** The order quantity an entry would use at `price`, per the sizing settings.
+   *  Price-derived quantities (cash / percent_of_equity) are TRUNCATED to the
+   *  symbol's minimum contract size (settings.minQty), as TradingView does —
+   *  verified against a TV trade ledger (equity 10067.60 @ 4740 → 2.123, not
+   *  2.12396; dev-docs/margin-parity-findings.md). Explicit and fixed
+   *  quantities pass through untouched (the script author's literal value). */
   defaultQty(price: number): number {
-    const { qtyType, qtyValue } = this.settings;
-    if (qtyType === 'cash') return qtyValue / price;
-    if (qtyType === 'percent_of_equity') return ((qtyValue / 100) * this.equity) / price;
+    const { qtyType, qtyValue, minQty } = this.settings;
+    const trunc = (q: number) => (minQty > 0 ? Math.floor(q / minQty + 1e-9) * minQty : q);
+    if (qtyType === 'cash') return trunc(qtyValue / price);
+    if (qtyType === 'percent_of_equity') return trunc(((qtyValue / 100) * this.equity) / price);
     return qtyValue; // fixed
   }
 
@@ -1011,42 +1027,48 @@ export class StrategyBroker {
   }
 
   /**
-   * Margin-call simulation (Help Center "How do I simulate trading with leverage?",
-   * PointValue = 1): walk the bar's assumed price path — the same open → nearer
-   * extreme → farther extreme → close heuristic markToMarket uses — and at the
-   * first point where marked equity ≤ required margin, force-close FOUR TIMES the
-   * quantity needed to cover the deficit ("the broker emulator liquidates four
-   * times the amount required … preventing constant Margin Call events"), capped
-   * at the whole position. Selling q at price p leaves equity unchanged but cuts
-   * the requirement by p·q·m, so qToCover = deficit / (p·m). The walk continues
-   * with the reduced position — a second violation liquidates again (the loop
-   * terminates because |size| shrinks). Unlike a risk-rule trip this is NOT a
-   * halt: pending orders and exit brackets survive, now covering a smaller
-   * position. Fill price is the violating path point (parity question P1).
+   * Margin-call simulation, matched to TradingView's broker emulator: the
+   * Help Center "How do I simulate trading with leverage?" 10-step algorithm,
+   * empirically verified against a 42-event TV margin-call ledger
+   * (dev-docs/margin-parity-findings.md — BINANCE:XAUUSDT.P 15m, every event's
+   * fill price AND quantity reproduced exactly). PointValue = 1.
+   *
+   * ONE evaluation per bar, at the bar's WORST price for the position (low for
+   * longs, high for shorts) — TV's observed fill point. At that price p:
+   *   deficit   = requiredMargin(p) − equity(p)        (> 0 ⇒ margin call)
+   *   moneyLost = deficit / m                          (TV step 8)
+   *   q9        = trunc(moneyLost / p → minQty)        (TV step 9: truncate to
+   *               the symbol's minimum contract size — settings.minQty)
+   *   qLiq      = min(q9 > 0 ? 4·q9 : 1, |size|)       (TV step 10: 4× "so a
+   *               Margin Call event isn't constantly triggered"; when the
+   *               truncation yields 0 the emulator liquidates ONE whole unit —
+   *               observed on 13 events, not documented)
+   * A bar still deficient after the call fires again on the NEXT bar (repeat
+   * same-bar liquidations were never observed). Unlike a risk-rule trip this
+   * is NOT a halt: pending orders and exit brackets survive, now covering a
+   * smaller position.
    */
-  private marginCheck(o: number, h: number, l: number): void {
+  private marginCheck(_o: number, h: number, l: number): void {
     if (this.size === 0) return;
     const pct = this.size > 0 ? this.settings.marginLong : this.settings.marginShort;
     const m = pct / 100;
     if (m <= 0) return;
-    const path = h - o < o - l ? [o, h, l, this.host.close] : [o, l, h, this.host.close];
-    let called = false;
-    for (const p of path) {
-      if (this.size === 0) break;
-      const equity = this.account.equityExcludingOpen(this) + this.size * (p - this.avgPrice);
-      const required = p * Math.abs(this.size) * m + this.account.requiredMarginExcluding(this);
-      const deficit = required - equity;
-      if (deficit <= 1e-9) continue; // no loss to cover (incl. the exact-boundary case)
-      const qLiquidate = Math.min((4 * deficit) / (p * m), Math.abs(this.size));
-      this.closePosition(p, qLiquidate);
-      this.marginCallCount++;
-      called = true;
-    }
-    // The bar's equity was curve-marked before the walk; a liquidation realizes the
-    // loss mid-bar, so re-mark the close with the post-call position. (Drawdown
-    // extremes keep the pre-call path marks — the dip through the violating point
-    // genuinely happened.)
-    if (called) this.equityCurve[this.host.idx] = this.equity;
+    const p = this.size > 0 ? l : h; // the bar's worst price for the position
+    const equity = this.account.equityExcludingOpen(this) + this.size * (p - this.avgPrice);
+    const required = p * Math.abs(this.size) * m + this.account.requiredMarginExcluding(this);
+    const deficit = required - equity;
+    if (deficit <= 1e-9) return; // no loss to cover (incl. the exact-boundary case)
+    const step = this.settings.minQty;
+    const qToCover = deficit / m / p; // steps 8+9 pre-truncation (money lost ÷ price)
+    const q9 = step > 0 ? Math.floor(qToCover / step + 1e-9) * step : qToCover;
+    const qLiquidate = Math.min(q9 > 0 ? 4 * q9 : 1, Math.abs(this.size));
+    this.closePosition(p, qLiquidate);
+    this.marginCallCount++;
+    // The bar's equity was curve-marked before the check; the liquidation realizes
+    // the loss mid-bar, so re-mark the close with the post-call position. (Drawdown
+    // extremes keep the pre-call marks — the dip through the extreme genuinely
+    // happened.)
+    this.equityCurve[this.host.idx] = this.equity;
   }
 
   private processExits(o: number, h: number, l: number): void {

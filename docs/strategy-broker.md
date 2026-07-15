@@ -496,10 +496,12 @@ Known approximations (documented deviations from TradingView's tick engine):
 
 Modeled per TradingView's public margin documentation (Help Center "How do I
 simulate trading with leverage?" / "Strategy properties", and the Pine v6
-migration guide); design record in `dev-docs/margin-plan.md`, empirically
-unverified choices in `dev-docs/margin-parity-findings.md`. `PointValue = 1`
-throughout (piner has no futures point-value model), and `m` below is the
-position side's margin percent ÷ 100.
+migration guide); design record in `dev-docs/margin-plan.md`. The margin-call
+mechanics are **empirically verified** against a 42-event TradingView v6
+margin-call ledger (BINANCE:XAUUSDT.P 15m — every event's bar, fill price, and
+liquidated quantity reproduced exactly; `dev-docs/margin-parity-findings.md`).
+`PointValue = 1` throughout (piner has no futures point-value model), and `m`
+below is the position side's margin percent ÷ 100.
 
 **Settings & defaults.** `margin_long`/`margin_short` are the percent of a
 position's value the strategy's own equity must cover. **Defaults are the Pine
@@ -518,24 +520,31 @@ Closes, `closeAll`, exit brackets, and the reducing leg of a netting
 (post-flatten equity). `m = 0` short-circuits the gate entirely.
 
 **Margin calls (forced liquidation).** After each mark-to-market, the broker
-walks the same assumed intrabar path (open → nearer extreme → farther extreme →
-close). At the first point `p` where marked equity ≤ required margin
-(`p·|size|·m`) with a real deficit, it force-closes **four times** the quantity
-needed to cover the deficit — TV: "the broker emulator liquidates four times
-the amount required … preventing constant Margin Call events" — capped at the
-whole position:
+evaluates the position **once per bar at the bar's worst price** `p` for the
+position (low for longs, high for shorts) — TV's observed evaluation AND fill
+point. A real deficit there (`equity(p) < p·|size|·m`, strictly — equality is
+not a call) liquidates per TV's 10-step algorithm: the cover quantity is
+**truncated to the symbol's minimum contract size** (`StrategySettings.minQty`,
+default 0.001 — exchange metadata, host-configured per symbol), then
+quadrupled — "the broker emulator liquidates four times the amount required …
+preventing constant Margin Call events". When the truncation yields zero, the
+emulator liquidates **exactly one unit** (empirical, undocumented). Capped at
+the whole position:
 
 ```
 deficit    = required(p) − equity(p)
-qLiquidate = min(4 · deficit / (p · m), |size|)
+qToCover   = deficit / m / p
+q9         = TRUNC(qToCover, minQty)
+qLiquidate = min(q9 > 0 ? 4·q9 : 1, |size|)
 ```
 
-The liquidation books through the normal `closePosition` path (FIFO lots,
-commission, ClosedTrade rows) at the violating point's price, increments the
-report's `marginCalls`, and — unlike a risk-rule trip — does **not** halt:
-pending orders and exit brackets survive, covering the reduced position. The
-bar's equity-curve mark is refreshed afterwards (the loss realized mid-bar);
-drawdown extremes keep the pre-call path marks.
+A position still deficient after the call fires again on the _next_ bar — never
+twice on one bar. The liquidation books through the normal `closePosition` path
+(FIFO lots, commission, ClosedTrade rows) at `p`, increments the report's
+`marginCalls`, and — unlike a risk-rule trip — does **not** halt: pending
+orders and exit brackets survive, covering the reduced position. The bar's
+equity-curve mark is refreshed afterwards (the loss realized mid-bar);
+drawdown extremes keep the pre-call marks.
 
 **`strategy.margin_liquidation_price`.** Live level where marked equity meets
 required margin, from the Help Center formula (PV = 1, `D` = ±1 direction):
@@ -546,7 +555,8 @@ P = ((initialCapital + netProfit)/|size| − D·avgPrice) / (m − D)
 
 na while flat, when `m = 0`, or for a fully-funded long (`m = 1 = D`, no finite
 solution — which is why, at the v6 defaults, longs are only size-limited while
-shorts can genuinely be liquidated). Rounded to the nearest tick.
+shorts can genuinely be liquidated). Rounded down to tick for longs, up for
+shorts (per the Help Center leverage article).
 
 `marginCallCount` is snapshot state (`SNAP_SCALARS`), so a margin call fired by
 a speculative realtime tick rolls back cleanly (§10).
@@ -601,16 +611,16 @@ Backend routing specifics (`emit.ts` / `interpreter.ts`, kept mirror-identical):
 
 ## 12. Known deviations & not-yet-modeled
 
-| Area                                         | Status                                                                                                                                                                |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OCA groups (`oca_name`/`oca_type`)           | constants accepted, grouping not enforced                                                                                                                             |
-| `calc_on_every_tick` / `calc_on_order_fills` | driver runs the Pine default (bar close); realtime ticks do run fill passes                                                                                           |
-| Margin (`margin_long/short`, liquidation)    | modeled (§9): v6 defaults 100/100, order gating, 4× margin-call liquidation; fill price = violating path point (parity pending, `dev-docs/margin-parity-findings.md`) |
-| Currency conversion                          | single-currency identity; `account_currency` = `'USD'`                                                                                                                |
-| `closedtrades.*` comments / `exit_id`        | na (order comments not plumbed; commissions, times, and per-trade run-up/drawdown ARE tracked)                                                                        |
-| Trailing stop                                | position-aggregate activation + group fill (TV: per entry)                                                                                                            |
-| Risk emergency close                         | fills next tick pass (TV: next tick of its 4-tick bar walk)                                                                                                           |
-| `alert_message` on risk rules & orders       | accepted, ignored (no alert routing in the engine core)                                                                                                               |
+| Area                                         | Status                                                                                                                                                                                                   |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OCA groups (`oca_name`/`oca_type`)           | constants accepted, grouping not enforced                                                                                                                                                                |
+| `calc_on_every_tick` / `calc_on_order_fills` | driver runs the Pine default (bar close); realtime ticks do run fill passes                                                                                                                              |
+| Margin (`margin_long/short`, liquidation)    | modeled (§9): v6 defaults 100/100, order gating, TV's truncate-then-4× margin-call liquidation at the bar's worst extreme — verified against a 42-event TV ledger (`dev-docs/margin-parity-findings.md`) |
+| Currency conversion                          | single-currency identity; `account_currency` = `'USD'`                                                                                                                                                   |
+| `closedtrades.*` comments / `exit_id`        | na (order comments not plumbed; commissions, times, and per-trade run-up/drawdown ARE tracked)                                                                                                           |
+| Trailing stop                                | position-aggregate activation + group fill (TV: per entry)                                                                                                                                               |
+| Risk emergency close                         | fills next tick pass (TV: next tick of its 4-tick bar walk)                                                                                                                                              |
+| `alert_message` on risk rules & orders       | accepted, ignored (no alert routing in the engine core)                                                                                                                                                  |
 
 ## 13. Where it's tested
 
