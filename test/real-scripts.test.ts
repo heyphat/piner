@@ -906,11 +906,12 @@ describe('realistic strategy corpus (test/pinescripts/strategies)', () => {
     const { js: a } = await runReal(`${TVD}/28-buy-low-sell-high.pine`);
     expect(a.ctx.strategy.position_size).toBe(-2);
     expect(a.strategy.closedTrades.length).toBe(0);
-    // 29: zero inputs pass qty = na → default_qty_type = strategy.cash (5000) sizing.
+    // 29: zero inputs pass qty = na → default_qty_type = strategy.cash (5000) sizing,
+    // truncated to the minQty lot step (0.001) as on TV.
     const { js: b } = await runReal(`${TVD}/29-buy-low-sell-high-guarded.pine`);
     const qty = b.ctx.strategy.tradeField('opentrades', 'size', 0) as number;
     const px = b.ctx.strategy.tradeField('opentrades', 'entry_price', 0) as number;
-    expect(Math.abs(qty * px)).toBeCloseTo(5000, 6);
+    expect(Math.abs(qty)).toBeCloseTo(Math.floor(5000 / px / 0.001 + 1e-9) * 0.001, 9);
   });
 
   it('30 vs 31 exit demos: a shared bracket exits both lots; split close+bracket manage them separately', async () => {

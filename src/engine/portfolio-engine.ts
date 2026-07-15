@@ -39,6 +39,9 @@ export interface PortfolioSleeveSpec {
   timeframe: string;
   /** Instrument tick size (defaults to 0.01), as RunOptions.mintick. */
   mintick?: number;
+  /** Instrument lot step (minimum quantity) — the broker's TV-parity quantity
+   *  truncation unit (StrategySettings.minQty). Unset → piner default (0.001). */
+  minQty?: number;
   /** The sleeve's full historical dataset (host-fetched and injected). */
   bars: Bar[];
   /** Host-fetched request.security bars, keyed `SYMBOL@TF` — injected into the
@@ -114,14 +117,17 @@ export class PortfolioEngine {
     // override. Shared: leave header funding in place, then swap in the pot.
     // The feed is inert: bars are injected via prepare(), and the stepper never
     // calls feed.history() — one shared empty feed serves every engine.
-    const engines = sleeves.map(
-      (_s, i) =>
-        new Engine(this.script, INERT_FEED, {
-          backend: this.opts.backend,
-          inputs: this.opts.inputs,
-          strategy: this.mode === 'isolated' ? { initialCapital: weights[i] * capital } : undefined,
-        }),
-    );
+    const engines = sleeves.map((s, i) => {
+      const strategy = {
+        ...(this.mode === 'isolated' ? { initialCapital: weights[i] * capital } : {}),
+        ...(s.minQty != null ? { minQty: s.minQty } : {}),
+      };
+      return new Engine(this.script, INERT_FEED, {
+        backend: this.opts.backend,
+        inputs: this.opts.inputs,
+        strategy: Object.keys(strategy).length > 0 ? strategy : undefined,
+      });
+    });
     const shared = this.mode === 'shared' ? new Account(capital) : null;
     if (shared) for (const e of engines) e.ctx.strategyBroker.setAccount(shared);
     for (let i = 0; i < n; i++) {

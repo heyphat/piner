@@ -87,12 +87,14 @@ describe('V4 — shared-mode semantics fixtures', () => {
     const sh = new PortfolioEngine(script, { mode: 'shared' }).run(mk());
     const iso = new PortfolioEngine(script, { mode: 'isolated' }).run(mk());
 
-    const qtyA = (0.5 * 20000) / 101;
+    // percent_of_equity quantities truncate to minQty (0.001), as on TV
+    const trunc = (q: number) => Math.floor(q / 0.001 + 1e-9) * 0.001;
+    const qtyA = trunc((0.5 * 20000) / 101);
     const profitA = qtyA * (105 - 101);
     const shB = sh.sleeves[1].report.closedTrades[0];
     const isoB = iso.sleeves[1].report.closedTrades[0];
     expect(sh.sleeves[0].report.closedTrades[0].qty).toBeCloseTo(qtyA, 9);
-    expect(shB.qty).toBeCloseTo((0.5 * (20000 + profitA)) / 100, 9);
+    expect(shB.qty).toBeCloseTo(trunc((0.5 * (20000 + profitA)) / 100), 9);
     expect(isoB.qty).toBeCloseTo(50, 9);
     expect(shB.qty).toBeGreaterThan(isoB.qty); // the coupling, in one line
   });

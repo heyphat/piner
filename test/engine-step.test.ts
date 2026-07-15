@@ -143,8 +143,10 @@ describe('G2 — EngineOptions.strategy header override (the funding primitive)'
   }
 
   it('re-funding a percent_of_equity strategy scales PnL exactly linearly', async () => {
-    const base = await runWith(pctSrc);
-    const doubled = await runWith(pctSrc, { initialCapital: 20000 });
+    // minQty: 0 disables the TV lot-step truncation of derived quantities —
+    // sub-lot remainders would otherwise break EXACT 2× linearity.
+    const base = await runWith(pctSrc, { minQty: 0 });
+    const doubled = await runWith(pctSrc, { initialCapital: 20000, minQty: 0 });
     expect(base.initialCapital).toBe(10000);
     expect(doubled.initialCapital).toBe(20000);
     expect(base.closedTrades.length).toBeGreaterThan(0);

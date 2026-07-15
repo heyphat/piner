@@ -147,9 +147,10 @@ describe('strategy margin — margin calls (forced liquidation)', () => {
     expect(eng.strategy.netProfit).toBeCloseTo(-800, 9);
   });
 
-  it('partial liquidation: exactly 4× the amount needed (plan §6, case 2)', async () => {
+  it('partial liquidation: 4× the truncated cover quantity (plan §6, case 2)', async () => {
     // IC 1000, margin 10%, long 300 @ 20 (liq price 18.52). Bar low 18.40:
-    // equity 520 < required 552, deficit 32 → liquidate 4·32/1.84 = 69.5652…
+    // equity 520 < required 552, deficit 32 → qToCover = 32/0.1/18.4 = 17.3913,
+    // TRUNC to minQty 0.001 → 17.391, ×4 = 69.564 (TV steps 8–10).
     const bars = [flat(20, 0), flat(20, 1), bar(2, 20, 20, 18.4, 18.4), flat(18.4, 3)];
     const eng = await bothBackends(
       '//@version=6\nstrategy("s", initial_capital = 1000, default_qty_value = 300, margin_long = 10)\nif bar_index == 0\n    strategy.entry("L", strategy.long)\nplot(strategy.position_size)\n',
@@ -157,18 +158,20 @@ describe('strategy margin — margin calls (forced liquidation)', () => {
     );
     const sz = eng.outputs.plots.get(0)!.data;
     expect(sz[1]).toBe(300);
-    expect(sz[2]).toBeCloseTo(230.4348, 3); // 300 − 69.5652
+    expect(sz[2]).toBeCloseTo(230.436, 9); // 300 − 69.564
     expect(eng.strategy.marginCalls).toBe(1);
     const t = eng.strategy.closedTrades[0]!;
-    expect(t.qty).toBeCloseTo(69.5652, 3);
+    expect(t.qty).toBeCloseTo(69.564, 9);
     expect(t.exitPrice).toBe(18.4);
-    expect(eng.strategy.netProfit).toBeCloseTo(-111.3043, 3);
-    // cushion restored: required 424 < equity 520 at the same price
+    expect(eng.strategy.netProfit).toBeCloseTo(-111.3024, 6);
+    // cushion restored: required ~424 < equity 520 at the same price
   });
 
   it('a short at the v6 default margin 100 gets margin called (migration-guide headline)', async () => {
     // Short 40 @ 25 (required 1000 = equity, boundary-opens; liq price 25).
-    // Bar high 26: equity 960 < required 1040, deficit 80 → liquidate 4·80/26 = 12.3077.
+    // Bar high 26 (the worst extreme = evaluation & fill point): equity 960 <
+    // required 1040, deficit 80 → qToCover = 80/26 = 3.0769, TRUNC → 3.076,
+    // ×4 = 12.304.
     const bars = [flat(25, 0), flat(25, 1), bar(2, 25, 26, 25, 25), flat(25, 3)];
     const eng = await bothBackends(
       '//@version=6\nstrategy("s", initial_capital = 1000, default_qty_value = 40)\nif bar_index == 0\n    strategy.entry("S", strategy.short)\nplot(strategy.position_size)\nplot(strategy.margin_liquidation_price)\n',
@@ -176,11 +179,28 @@ describe('strategy margin — margin calls (forced liquidation)', () => {
     );
     const sz = eng.outputs.plots.get(0)!.data;
     expect(sz[1]).toBe(-40);
-    expect(sz[2]).toBeCloseTo(-27.6923, 3);
+    expect(sz[2]).toBeCloseTo(-27.696, 9);
     expect(eng.strategy.marginCalls).toBe(1);
-    expect(eng.strategy.netProfit).toBeCloseTo(-12.3077, 3);
-    // liq price while short 40 @ 25: (1000/40 + 25)/(1+1) = 25
+    expect(eng.strategy.netProfit).toBeCloseTo(-12.304, 6);
+    // liq price while short 40 @ 25: (1000/40 + 25)/(1+1) = 25 (ceil-to-tick)
     expect(eng.outputs.plots.get(1)!.data[1]).toBeCloseTo(25, 9);
+  });
+
+  it('liquidates exactly ONE unit when the truncated cover quantity is zero', async () => {
+    // Short 40 @ 25, margin 100. Bar high 25.0002: deficit = 40·2·0.0002 = 0.016,
+    // qToCover = 0.016/25.0002 = 0.00064 → TRUNC(minQty 0.001) = 0 → the emulator
+    // liquidates 1 whole unit (empirical fallback, margin-parity-findings.md).
+    const bars = [flat(25, 0), flat(25, 1), bar(2, 25, 25.0002, 25, 25), flat(25, 3)];
+    const eng = await bothBackends(
+      '//@version=6\nstrategy("s", initial_capital = 1000, default_qty_value = 40)\nif bar_index == 0\n    strategy.entry("S", strategy.short)\nplot(strategy.position_size)\n',
+      bars,
+    );
+    const sz = eng.outputs.plots.get(0)!.data;
+    expect(sz[1]).toBe(-40);
+    expect(sz[2]).toBe(-39); // exactly 1.0 liquidated, at the bar's high
+    expect(eng.strategy.marginCalls).toBe(1);
+    expect(eng.strategy.closedTrades[0]!.qty).toBe(1);
+    expect(eng.strategy.closedTrades[0]!.exitPrice).toBe(25.0002);
   });
 
   it('exit brackets survive a margin call and keep covering the reduced position', async () => {
@@ -191,7 +211,7 @@ describe('strategy margin — margin calls (forced liquidation)', () => {
       bars,
     );
     const sz = eng.outputs.plots.get(0)!.data;
-    expect(sz[2]).toBeCloseTo(230.4348, 3); // margin call did NOT cancel the bracket…
+    expect(sz[2]).toBeCloseTo(230.436, 9); // margin call did NOT cancel the bracket…
     expect(sz[3]).toBe(0); // …which stops out the remainder at 16
     expect(eng.strategy.marginCalls).toBe(1); // position gone before bar 3's mark
     expect(eng.strategy.closedTrades.length).toBe(2);
