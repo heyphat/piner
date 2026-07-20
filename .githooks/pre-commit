@@ -1,0 +1,41 @@
+#!/usr/bin/env sh
+#
+# gitleaks pre-commit hook — blocks commits that introduce secrets
+# (AWS keys, tokens, private keys, etc.) into the staged changes.
+#
+# Installed via `core.hooksPath = .githooks` (set by the `prepare` script
+# in package.json, which runs on `bun install`).
+#
+# Skip once with:  git commit --no-verify
+# Skip the leak check on purpose with:  GITLEAKS_DISABLE=1 git commit
+
+set -eu
+
+if [ "${GITLEAKS_DISABLE:-0}" = "1" ]; then
+  echo "gitleaks: check disabled via GITLEAKS_DISABLE=1" >&2
+  exit 0
+fi
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  cat >&2 <<'EOF'
+⚠  gitleaks not found — skipping secret scan for this commit.
+   The pre-commit secret scan is INACTIVE until you install it:
+     macOS:  brew install gitleaks
+     other:  https://github.com/gitleaks/gitleaks#installing
+EOF
+  exit 0
+fi
+
+# Scan only what's staged. `protect --staged` is gitleaks' pre-commit mode.
+if ! gitleaks protect --staged --redact --verbose; then
+  cat >&2 <<'EOF'
+
+✖ gitleaks found potential secrets in your staged changes (see above).
+  Remove the secret, then re-stage and commit.
+  If this is a false positive, add it to .gitleaks.toml (allowlist)
+  or bypass once with:  git commit --no-verify
+EOF
+  exit 1
+fi
+
+exit 0

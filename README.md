@@ -47,6 +47,12 @@ bun run typecheck # tsc --noEmit
 bun run build     # ESM + CJS (bun) + d.ts (tsc) into dist/
 ```
 
+`bun install` also points git at the versioned hooks in `.githooks/`, which
+run [gitleaks](https://github.com/gitleaks/gitleaks) on every commit to block
+accidentally staged secrets (AWS keys, tokens, private keys). Install gitleaks
+(`brew install gitleaks`) to activate it; without it the hook warns and skips.
+Bypass a single commit with `git commit --no-verify`.
+
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for the clean-room policy and the
 two-backend invariant before opening a PR.
 

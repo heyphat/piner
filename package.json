@@ -43,6 +43,7 @@
     "access": "public"
   },
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks || true",
     "test": "bun test",
     "test:watch": "bun test --watch",
     "typecheck": "tsc --noEmit",
