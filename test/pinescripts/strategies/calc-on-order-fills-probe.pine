@@ -1,0 +1,104 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════
+// calc_on_order_fills GROUND-TRUTH PROBE (dev-docs/calc-behavior-plan.md, Phase 0)
+//
+// Purpose: run this on TradingView and export the evidence that pins the
+// engine's four-tick intrabar model. It deliberately EXAGGERATES the flag —
+// every fill triggers a re-execution that places the next order, so fills
+// cascade through all four emulated ticks of each probed bar.
+//
+// What it resolves (plan §7.2 / §8):
+//   O1 — the OHLC view each intrabar execution sees (developing bar vs full bar)
+//   O2 — orders placed intrabar fill on the NEXT tick (visible in fill prices)
+//   O3 — barstate.isnew / isconfirmed / ishistory per execution
+//   O4 — execution count when fills stop before the close (the close_all bars)
+//   O5 — strategy.equity per execution (intrabar equity marking)
+//   plus the emulator's tick ORDER (open → nearer extreme → farther extreme →
+//   close) via the bracket-exit fill prices in window B.
+//
+// HOW TO RUN (standard chart type — NO Heikin Ashi/Renko):
+//   1. Open a liquid symbol on 1h (e.g. BINANCE:BTCUSDT). Only the last ~36
+//      bars are probed.
+//   2. Add the script. In Settings → Properties VERIFY: "After order is
+//      filled" is ON (comes from the code), "On every tick" OFF, and
+//      "Use bar magnifier" OFF — the probe needs the pure 4-tick model.
+//   3. Export IMMEDIATELY (a new realtime bar shifts last_bar_index and the
+//      probe windows with it):
+//        a. Strategy Tester → List of Trades → export CSV
+//        b. Pine Logs pane → ⋯ → export/copy ALL log lines
+//        c. Note the symbol + timeframe used
+//
+// Log line key:  b=bar_index  e=global execution #  k=execution # within bar
+//   t=bar time (UTC)  o/h/l/c/v=built-ins AS SEEN BY THIS EXECUTION
+//   new/conf/hist=barstate.isnew/isconfirmed/ishistory  pos=position_size
+//   avg=position_avg_price  eq=equity  op=openprofit
+//
+// Windows (n = bars from the last bar):
+//   n in (25, 35]  A: flip direction on EVERY execution → 4 fills/bar cascade
+//   n == 25           flush: close_all → fills stop mid-bar (O4 evidence)
+//   n in (10, 20]  B: enter when flat + ±2-tick bracket → same-bar exits at
+//                     exact tick-path prices
+//   n == 10           flush: cancel_all + close_all
+//   everything else in n ≤ 36: quiet baseline bars (1 execution expected)
+// ═══════════════════════════════════════════════════════════════════════════
+strategy("COOF ground-truth probe", overlay = false, calc_on_order_fills = true,
+     pyramiding = 1, initial_capital = 1000000, default_qty_type = strategy.fixed,
+     default_qty_value = 1)
+
+int n = last_bar_index - bar_index
+
+// Per-execution counters — varip survives the intrabar rollback (the execution-
+// model docs' own executionNum technique), so these count every execution.
+varip int execNum = -1
+varip int lastBar = -1
+varip int execInBar = -1
+execNum += 1
+if bar_index != lastBar
+    lastBar := bar_index
+    execInBar := 0
+else
+    execInBar += 1
+
+// ── Window A: flip on every execution → maximal fill cascade ──────────────
+if n <= 35 and n > 25
+    if strategy.position_size <= 0
+        strategy.entry("L", strategy.long)
+    else
+        strategy.entry("S", strategy.short)
+if n == 25 and strategy.position_size != 0
+    strategy.close_all()
+
+// ── Window B: entry when flat + tight bracket → same-bar exit prices ──────
+if n <= 20 and n > 10
+    if strategy.position_size == 0
+        strategy.entry("B", strategy.long)
+    if strategy.position_size > 0
+        strategy.exit("BX", "B", profit = 2, loss = 2)
+if n == 10
+    strategy.cancel_all()
+    if strategy.position_size != 0
+        strategy.close_all()
+
+// ── Telemetry: one log line per EXECUTION across the probed stretch ───────
+if n <= 36
+    string idPart = str.format("b={0} e={1} k={2} t={3}",
+         str.tostring(bar_index), str.tostring(execNum), str.tostring(execInBar),
+         str.format_time(time, "yyyy-MM-dd HH:mm", "UTC"))
+    string pxPart = str.format(" o={0} h={1} l={2} c={3} v={4}",
+         str.tostring(open, "#.########"), str.tostring(high, "#.########"),
+         str.tostring(low, "#.########"), str.tostring(close, "#.########"),
+         str.tostring(volume, "#.########"))
+    string stPart = str.format(" new={0} conf={1} hist={2} pos={3} avg={4} eq={5} op={6}",
+         barstate.isnew ? "1" : "0", barstate.isconfirmed ? "1" : "0",
+         barstate.ishistory ? "1" : "0",
+         str.tostring(strategy.position_size, "#.####"),
+         str.tostring(strategy.position_avg_price, "#.########"),
+         str.tostring(strategy.equity, "#.####"),
+         str.tostring(strategy.openprofit, "#.####"))
+    log.info(idPart + pxPart + stPart)
+
+// The docs-demo visual check: with the cascade active, execNum grows ~4× as
+// fast as bar_index.
+plot(execNum, "Execution number", color.purple, 5)
+plot(bar_index, "Bar index", color.aqua, 2)
+bgcolor(barstate.ishistory ? color.new(color.orange, 85) : na, title = "History")

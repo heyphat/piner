@@ -18,6 +18,16 @@ every item maps to a mechanism in [`architecture.md`](./architecture.md) §13.
   runs **repeatedly, once per tick**. Indicators/libraries run on every update;
   strategies without `calc_on_every_tick` run only on bar close.
   → [bar-states](https://www.tradingview.com/pine-script-docs/concepts/bar-states/)
+- **Strategy recalculation after fills.** `[verified]` With
+  `calc_on_order_fills=true` a strategy executes on **each tick where the broker
+  emulator fills an order**, or once per bar when nothing fills (the counts are
+  exclusive — the docs demo reads exactly 4 × bar_index). Empirically (55-trade
+  TV ledger, dev-docs/calc-parity-findings.md) a historical bar's fill points
+  are the open TWICE (arrival + walk start), then the extremes nearer-first;
+  the close is not a fill point. An order born mid-bar fills discretely at the
+  next point's price, then continuously at its own levels. Rollback applies on
+  historical bars too; `varip` survives it.
+  → [execution-model](https://www.tradingview.com/pine-script-docs/language/execution-model/)
 
 ## 2. Series & history
 

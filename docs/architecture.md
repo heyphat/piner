@@ -482,15 +482,25 @@ security(site: number, symbol: string, tf: unknown, lookahead: unknown,
 > stop/limit/**trailing**, OCA), PnL + closed-trade list + equity curve +
 > drawdown/run-up, live read-backs, per-trade introspection, performance stats, and
 > the `strategy.risk.*` rules (direction/size caps + drawdown/intraday-loss/
-> cons-loss-days/filled-orders halts). Tail: OCA-group nuances,
-> `calc_on_every_tick`, margin. **Full design doc:
+> cons-loss-days/filled-orders halts), and `calc_on_order_fills` (historical
+> four-tick intrabar re-execution). Tail: OCA-group nuances,
+> `calc_on_every_tick` (deliberate no-op — realtime-only on TV; see
+> dev-docs/calc-behavior-plan.md), margin. **Full design doc:
 > [strategy-broker.md](./strategy-broker.md).**
 
 A deterministic broker simulator driven by the same bar loop.
 
 - **Execution frequency:** indicators/libraries run on every realtime tick;
   strategies run only on **bar close** unless `calc_on_every_tick=true`. The
-  driver branches on script type + this flag.
+  driver branches on script type + this flag. With `calc_on_order_fills=true`
+  the driver runs each historical bar through four FILL POINTS — A and W at the
+  open (why the open can fill twice), then the extremes nearer-first; the close
+  is not a fill point — re-executing the script after every pass that filled an
+  order. Orders fill discretely (at the point price) at the point after their
+  birth, then continuously (at their levels) on later segments. series/`var`/ta
+  state rolls back between executions (realtime-style) while `varip` and the
+  broker persist. Pinned 55/55 against a real TV trade export
+  (`Driver.historicalBarOnFills`; dev-docs/calc-parity-findings.md).
 - **Order model:** `strategy.entry/order/exit/close/cancel`, market/limit/stop,
   pyramiding, position sizing, commission/slippage. Maintain an order book and a
   position; fill against next-bar OHLC per Pine's fill rules.

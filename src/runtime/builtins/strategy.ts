@@ -19,6 +19,21 @@ const DIR_SHORT = -1;
 const sign = (x: number) => (x > 0 ? 1 : x < 0 ? -1 : 0);
 
 /**
+ * The broker emulator's assumed intrabar price path (TradingView, Strategies —
+ * "Broker emulator"): the extreme NEARER the open is hit first, so the four
+ * emulated ticks of a bar are open → nearer extreme → farther extreme → close.
+ * Also the driver's tick sequence for calc_on_order_fills.
+ */
+export function emulatorTickPath(
+  o: number,
+  h: number,
+  l: number,
+  c: number,
+): [number, number, number, number] {
+  return h - o < o - l ? [o, h, l, c] : [o, l, h, c];
+}
+
+/**
  * Derive an order's trigger fields from its limit/stop args.
  * Both stop AND limit → a STOP-LIMIT (stop arms a resting limit); stop only → stop;
  * limit only → limit; neither → market. `price` is the stop trigger for stop/stoplimit,
@@ -59,6 +74,16 @@ export interface StrategySettings {
    *  process_orders_on_close) so market orders fill at the same bar's close instead
    *  of the next bar's open. Default false. */
   processOrdersOnClose: boolean;
+  /** Pine's calc_on_order_fills: the driver runs each historical bar as the
+   *  emulator's four-tick sequence and re-executes the script after every tick
+   *  that filled an order (dev-docs/calc-behavior-plan.md). Realtime semantics
+   *  are out of scope — the stack is historical-only. Default false. */
+  calcOnOrderFills: boolean;
+  /** Pine's calc_on_every_tick — parsed for completeness but a deliberate no-op:
+   *  on TV it only changes REALTIME behavior (historical bars calculate at close
+   *  either way, so backtests are unaffected), and piner's hosts are
+   *  historical-only. Default false. */
+  calcOnEveryTick: boolean;
   /** Percent of a long position's value that must be covered by the strategy's own
    *  equity (margin_long). 0 disables the funds check and margin calls for longs —
    *  the Pine v5 default; v6 defaults to 100 (no leverage). */
@@ -86,6 +111,10 @@ interface Order {
   /** Submission sequence — lots inherit it so exit brackets can scope to the
    *  entries that existed when the bracket was called (Pine's rule). */
   seq?: number;
+  /** calc_on_order_fills: the path position (§coof, -1 = before this bar) the
+   *  order was born at — decides its discrete point and continuity window.
+   *  Unused (always -1) outside the calc_on_order_fills bar loop. */
+  born?: number;
 }
 
 interface ExitBracket {
@@ -105,6 +134,10 @@ interface ExitBracket {
    *  are eligible — per Pine, an exit call covers entries created before or on
    *  its bar and "does not affect subsequent entries" (exit-persist demo). */
   maxSeq: number;
+  /** calc_on_order_fills birth position (see Order.born). A same-id re-call with
+   *  identical user params keeps the original birth (the idiomatic
+   *  exit-on-every-execution pattern must not reset the continuity window). */
+  born?: number;
 }
 
 /** One open entry: `strategy.entry`/`order` fills append these; closes consume them FIFO. */
@@ -265,6 +298,8 @@ export class StrategyBroker {
     pyramiding: 1,
     slippage: 0,
     processOrdersOnClose: false,
+    calcOnOrderFills: false,
+    calcOnEveryTick: false,
     // Pine v6 defaults (v5 was 0/0 — declare margin_long=0, margin_short=0 to opt out).
     marginLong: 100,
     marginShort: 100,
@@ -339,6 +374,15 @@ export class StrategyBroker {
   private exits: ExitBracket[] = [];
   /** Monotonic order-submission counter (drives exit-bracket call-time scoping). */
   private orderSeq = 0;
+  /** Monotonic order-EXECUTION counter — bumped wherever riskDayFills is (entry/
+   *  order/close fills and per-lot exit-bracket fills). The coof passes diff it so
+   *  the calc_on_order_fills driver knows whether a pass filled anything. Emergency
+   *  closes (risk trip, margin liquidation) intentionally do NOT count — they are
+   *  broker-forced, not order fills (unverified against TV; plan §8). */
+  private fillSeq = 0;
+  /** calc_on_order_fills: current path position (§coof driver hooks) — the birth
+   *  stamp for orders/brackets placed now. -1 outside the coof bar loop. */
+  private pathPos = -1;
 
   // ── strategy.risk.* rule settings (declared with simple args, so the setters run
   //    idempotently every bar; repeated calls keep the most restrictive value) ─
@@ -412,6 +456,7 @@ export class StrategyBroker {
     'riskDayFills',
     'riskConsLossDays',
     'riskBarCloseEquity',
+    'fillSeq',
   ] as const;
   snapshot(): unknown {
     const s: Record<string, unknown> = {};
@@ -589,6 +634,7 @@ export class StrategyBroker {
   // ── order entry points (called from the script) ──────────
   /** Pine keys orders by id — re-submitting replaces the unfilled pending order in place. */
   private submit(o: Order): void {
+    o.born = this.pathPos;
     const i = this.pending.findIndex(
       (p) => p.id === o.id && (p.kind === 'entry' || p.kind === 'order'),
     );
@@ -623,7 +669,7 @@ export class StrategyBroker {
     // call time — a same-bar queued entry does not count, so `entry(id)` + `close(id)`
     // on one bar must not open-and-instantly-close on the next bar's fill pass.
     if (!this.entryLots.some((lt) => lt.id === id)) return;
-    this.pending.push({ id, dir: 0, qty, kind: 'close', otype: 'market' });
+    this.pending.push({ id, dir: 0, qty, kind: 'close', otype: 'market', born: this.pathPos });
   }
   close_all(): void {
     if (!this.active || this.riskHaltActive) return;
@@ -631,7 +677,7 @@ export class StrategyBroker {
     // gated at CALL time, so it cannot pair with a same-bar entry into an instant
     // round trip on the next bar (TV's "Order execution demo" behavior).
     if (this.size === 0) return;
-    this.pending.push({ id: '', dir: 0, kind: 'closeAll', otype: 'market' });
+    this.pending.push({ id: '', dir: 0, kind: 'closeAll', otype: 'market', born: this.pathPos });
   }
   exit(
     id: string,
@@ -661,12 +707,27 @@ export class StrategyBroker {
       trailOffset,
       trailStop: NaN,
       maxSeq: this.orderSeq, // covers entries submitted up to THIS call (incl. same-bar earlier ones)
+      born: this.pathPos,
     };
     const i = this.exits.findIndex((e) => e.id === id);
     if (i >= 0) {
-      bracket.trailStop = this.exits[i].trailStop;
+      const prev = this.exits[i];
+      bracket.trailStop = prev.trailStop; // keep the trailing ratchet
+      // coof: an unchanged re-call (the exit-on-every-execution idiom) keeps the
+      // original birth — resetting it would strip the bracket's continuity window.
+      const same =
+        prev.fromEntry === bracket.fromEntry &&
+        prev.qty === bracket.qty &&
+        prev.profit === bracket.profit &&
+        prev.loss === bracket.loss &&
+        prev.stop === bracket.stop &&
+        prev.limit === bracket.limit &&
+        prev.trailPrice === bracket.trailPrice &&
+        prev.trailPoints === bracket.trailPoints &&
+        prev.trailOffset === bracket.trailOffset;
+      if (same) bracket.born = prev.born;
       this.exits[i] = bracket;
-    } else this.exits.push(bracket); // keep the trailing ratchet
+    } else this.exits.push(bracket);
   }
 
   // ── strategy.risk.* (risk-management rules) ───────────────
@@ -718,7 +779,10 @@ export class StrategyBroker {
   private riskTrip(untilDayEnd: boolean): void {
     if (untilDayEnd) this.riskHaltedDay = this.riskDay;
     else this.riskHalted = true;
-    this.pending = this.size !== 0 ? [{ id: '', dir: 0, kind: 'closeAll', otype: 'market' }] : [];
+    this.pending =
+      this.size !== 0
+        ? [{ id: '', dir: 0, kind: 'closeAll', otype: 'market', born: this.pathPos }]
+        : [];
     this.exits = [];
   }
 
@@ -892,14 +956,112 @@ export class StrategyBroker {
     this.processTick(close, close, close, close);
   }
 
+  // ── calc_on_order_fills driver hooks — the path-point model ─────────────
+  //
+  // Empirically pinned against a 55-trade TV ledger (dev-docs/
+  // calc-parity-findings.md): a historical bar has four FILL POINTS —
+  //   0 A  (arrival at the open: carried orders gap-fill)
+  //   1 W  (walk start, also the open price — why the open can fill twice)
+  //   2 E1 (nearer extreme)   3 E2 (farther extreme)
+  // The close is NOT a fill point: orders still pending after E2 carry to the
+  // next bar's A. An order born at position p is evaluated DISCRETELY at point
+  // p+1 (fills at that point's PRICE — better-price for limits, adverse for
+  // stops), and CONTINUOUSLY (at its own level) on every later segment.
+  // Placements during the exec after a pass inherit `pathPos` as their birth.
+
+  /** Bar start: day-roll and demote everything pending to pre-bar class. */
+  coofBegin(): void {
+    if (!this.active) return;
+    this.riskRollDay();
+    for (const o of this.pending) o.born = -1;
+    for (const e of this.exits) e.born = -1;
+  }
+
+  /** Discrete pass at path point k (price px): orders born at k-1 (at A: any
+   *  pre-bar order) evaluated against the point price alone. Returns fills. */
+  coofPointPass(k: number, px: number): number {
+    if (!this.active) return 0;
+    this.pathPos = k;
+    const elig = (b: number | undefined) => (k === 0 ? (b ?? -1) < 0 : b === k - 1);
+    const before = this.fillSeq;
+    this.matchPending(px, px, px, px, (o) => elig(o.born));
+    if (this.size !== 0 && this.exits.length)
+      this.processExits(px, px, px, (e) => elig(e.born), px);
+    return this.fillSeq - before;
+  }
+
+  /** Continuous sweep of the segment ending at point k (from → to): orders past
+   *  their discrete point (born ≤ k-2, incl. pre-bar) fill at their LEVELS. */
+  coofSegmentPass(k: number, from: number, to: number): number {
+    if (!this.active) return 0;
+    this.pathPos = k - 1; // mid-segment births take their discrete fill at point k
+    const elig = (b: number | undefined) => (b ?? -1) <= k - 2;
+    const hi = Math.max(from, to);
+    const lo = Math.min(from, to);
+    const before = this.fillSeq;
+    this.matchPending(from, hi, lo, to, (o) => elig(o.born));
+    if (this.size !== 0 && this.exits.length)
+      this.processExits(from, hi, lo, (e) => elig(e.born), to);
+    return this.fillSeq - before;
+  }
+
+  /** Bar end: the flag-off once-per-bar tail — full-range equity mark (incl.
+   *  margin at the worst price), risk order-cap check, exposure counters. */
+  coofEnd(o: number, h: number, l: number): void {
+    if (!this.active) return;
+    if (
+      this.riskMaxIntradayOrders != null &&
+      !this.riskHaltActive &&
+      this.riskDayFills >= this.riskMaxIntradayOrders
+    )
+      this.riskTrip(true);
+    this.markToMarket(o, h, l);
+    this.riskBarCloseEquity = this.equity;
+    this.barsProcessed++;
+    if (this.size !== 0) this.barsInMarket++;
+  }
+
   /** One fill pass over the tick's assumed range [l, h] starting at `o`;
    *  market orders fill at `marketPx`. Re-marks this bar's equity. */
   private processTick(o: number, h: number, l: number, marketPx: number): void {
+    this.matchPending(o, h, l, marketPx);
+
+    // 2. exit brackets against the tick's range
+    if (this.size !== 0 && this.exits.length) this.processExits(o, h, l);
+
+    // 2b. strategy.risk.max_intraday_filled_orders — reaching the cap cancels
+    // everything, closes the position, and halts until the day ends.
+    if (
+      this.riskMaxIntradayOrders != null &&
+      !this.riskHaltActive &&
+      this.riskDayFills >= this.riskMaxIntradayOrders
+    )
+      this.riskTrip(true);
+
+    // 3. mark-to-market (also runs the equity-based risk rules)
+    this.markToMarket(o, h, l);
+    this.riskBarCloseEquity = this.equity;
+  }
+
+  /** Match the pending orders against one tick's assumed range (step 1 of a
+   *  fill pass; shared by processTick and the coof point/segment passes —
+   *  `elig` narrows a coof pass to the orders its path position covers). */
+  private matchPending(
+    o: number,
+    h: number,
+    l: number,
+    marketPx: number,
+    elig?: (or: Order) => boolean,
+  ): void {
     const slip = this.settings.slippage * this.host.mintick;
 
     // 1. pending orders
     const stillPending: Order[] = [];
     for (const or of this.pending) {
+      if (elig && !elig(or)) {
+        stillPending.push(or);
+        continue;
+      }
       if (or.otype === 'market') {
         this.fill(or, marketPx + sign(or.dir || -sign(this.size)) * slip);
       } else if (or.otype === 'limit') {
@@ -933,22 +1095,6 @@ export class StrategyBroker {
       }
     }
     this.pending = stillPending;
-
-    // 2. exit brackets against the tick's range
-    if (this.size !== 0 && this.exits.length) this.processExits(o, h, l);
-
-    // 2b. strategy.risk.max_intraday_filled_orders — reaching the cap cancels
-    // everything, closes the position, and halts until the day ends.
-    if (
-      this.riskMaxIntradayOrders != null &&
-      !this.riskHaltActive &&
-      this.riskDayFills >= this.riskMaxIntradayOrders
-    )
-      this.riskTrip(true);
-
-    // 3. mark-to-market (also runs the equity-based risk rules)
-    this.markToMarket(o, h, l);
-    this.riskBarCloseEquity = this.equity;
   }
 
   /** Update the equity curve and drawdown/run-up extremes. TradingView computes the
@@ -964,7 +1110,7 @@ export class StrategyBroker {
       pts = [eq];
     } else {
       const base = this.account.equityExcludingOpen(this);
-      const path = h - o < o - l ? [o, h, l, this.host.close] : [o, l, h, this.host.close];
+      const path = emulatorTickPath(o, h, l, this.host.close);
       pts = path.map((px) => base + this.size * (px - this.avgPrice));
     }
     for (const v of pts) {
@@ -1071,7 +1217,13 @@ export class StrategyBroker {
     this.equityCurve[this.host.idx] = this.equity;
   }
 
-  private processExits(o: number, h: number, l: number): void {
+  private processExits(
+    o: number,
+    h: number,
+    l: number,
+    elig?: (ex: ExitBracket) => boolean,
+    pathClose = this.host.close,
+  ): void {
     const mt = this.host.mintick;
     const slip = this.settings.slippage * mt;
     // intrabar path heuristic: the extreme nearer the open is assumed hit first
@@ -1117,6 +1269,12 @@ export class StrategyBroker {
     const keep: ExitBracket[] = [];
     for (const ex of this.exits) {
       if (this.size === 0) break;
+      if (elig && !elig(ex)) {
+        // Not covered by this coof pass — stays armed (it still took part in the
+        // reservation pre-pass above, shielding its lots like the flag-off order).
+        keep.push(ex);
+        continue;
+      }
       const dir = sign(this.size);
       const isElig = eligible(ex);
       let remaining = allot.get(ex) ?? 0;
@@ -1125,6 +1283,7 @@ export class StrategyBroker {
         ex.filled = (ex.filled ?? 0) + take;
         remaining -= take;
         this.riskDayFills++; // each lot's exit is its own order (risk fill counting)
+        this.fillSeq++;
       };
       // Each eligible entry lot gets its OWN exit order: profit/loss tick levels are
       // measured from that lot's fill price (absolute stop/limit prices are shared).
@@ -1169,7 +1328,7 @@ export class StrategyBroker {
         ex.trailOffset != null &&
         (ex.trailPoints != null || ex.trailPrice != null)
       ) {
-        const fillPx = this.trailFill(ex, sign(this.size), o, h, l);
+        const fillPx = this.trailFill(ex, sign(this.size), o, h, l, pathClose);
         if (fillPx != null) {
           const px = fillPx - sign(this.size) * slip; // a stop order → adverse slippage
           const lots = this.entryLots.filter(isElig);
@@ -1211,12 +1370,13 @@ export class StrategyBroker {
     o: number,
     h: number,
     l: number,
+    pathClose = this.host.close,
   ): number | undefined {
     const mt = this.host.mintick;
     const off = ex.trailOffset! * mt;
     const act =
       ex.trailPrice != null ? ex.trailPrice : this.avgPrice + dir * (ex.trailPoints ?? 0) * mt;
-    const path = h - o < o - l ? [o, h, l, this.host.close] : [o, l, h, this.host.close];
+    const path = emulatorTickPath(o, h, l, pathClose);
     let stop = ex.trailStop!; // NaN until armed
     for (let i = 0; i < path.length; i++) {
       const p = path[i];
@@ -1242,8 +1402,10 @@ export class StrategyBroker {
       lots = this.entryLots.length,
       closed = this.closedTrades.length;
     this.execute(o, price);
-    if (this.size !== size || this.entryLots.length !== lots || this.closedTrades.length !== closed)
+    if (this.size !== size || this.entryLots.length !== lots || this.closedTrades.length !== closed) {
       this.riskDayFills++;
+      this.fillSeq++;
+    }
   }
 
   private execute(o: Order, price: number): void {

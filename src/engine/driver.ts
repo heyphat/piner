@@ -13,6 +13,7 @@
 import type { ExecutionContext, RollbackSnapshot } from '../runtime/context.js';
 import { BuiltinSlot } from '../runtime/context.js';
 import { historicalBarState, realtimeBarState } from '../runtime/barstate.js';
+import { emulatorTickPath } from '../runtime/builtins/strategy.js';
 import type { Bar } from './feed.js';
 
 /** A compiled script body: runs once for the current bar against `$`. */
@@ -70,13 +71,75 @@ export class Driver {
   private historicalBar(bars: Bar[], i: number): void {
     const $ = this.$;
     const isLast = i === bars.length - 1;
-    this.beginBar(bars[i], i);
-    $.bar = historicalBarState(isLast, i === 0);
-    $.onStrategyBar(); // fill pending strategy orders against this bar's open/range
-    this.main($);
+    const broker = $.strategyBroker;
+    if (broker.active && broker.settings.calcOnOrderFills) {
+      this.historicalBarOnFills(bars, i, isLast);
+    } else {
+      this.beginBar(bars[i], i);
+      $.bar = historicalBarState(isLast, i === 0);
+      $.onStrategyBar(); // fill pending strategy orders against this bar's open/range
+      this.main($);
+    }
     $.onStrategyBarClose(); // process_orders_on_close: fill this bar's market orders at close
     $.series.commitBar();
     this.committed = $.series.committedBars;
+  }
+
+  /**
+   * calc_on_order_fills historical bar — the PATH-POINT model, pinned against a
+   * 55-trade TV ledger (dev-docs/calc-parity-findings.md). The bar has four
+   * fill points: A (arrival at the open — carried orders gap-fill), W (walk
+   * start, also the open — why the open can fill twice), E1 and E2 (extremes,
+   * nearer-first). The close is NOT a fill point — leftovers carry to the next
+   * bar's A. Points E1/E2 are preceded by a continuous sweep of their segment
+   * (orders past their discrete point fill at their own levels). Every pass
+   * that filled at least one order triggers a script execution; the standard
+   * once-per-bar execution runs only when the whole bar filled NOTHING (the
+   * docs' "or once per bar when there is no order to fill" — the counts are
+   * exclusive, which is what makes the doc demo read 4 × bar_index exactly).
+   *
+   * Executions see the FULL bar OHLC (historical bars have no tick data);
+   * between executions series/`var`/ta/drawing state rolls back exactly like a
+   * realtime tick while `varip` and the broker persist. Pending-logs
+   * assumptions (barstate flags, full-view executions) are flagged in the
+   * findings ledger.
+   */
+  private historicalBarOnFills(bars: Bar[], i: number, isLast: boolean): void {
+    const $ = this.$;
+    const bar = bars[i];
+    const broker = $.strategyBroker;
+    const path = emulatorTickPath(bar.open, bar.high, bar.low, bar.close);
+    const P = [bar.open, bar.open, path[1], path[2]]; // A, W, E1, E2
+    this.beginBar(bar, i);
+    broker.coofBegin();
+    let snap: RollbackSnapshot | null = null;
+    let executed = false;
+    const runExec = () => {
+      snap ??= $.snapshotMutable(); // bar-start baseline (before any main() ran)
+      if (executed) {
+        // the historical analog of the realtime rollback: varip + broker persist
+        $.series.truncateTo(this.committed);
+        $.restoreMutableExceptStrategy(snap!);
+        $.series.beginBar();
+        this.setBuiltins(bar);
+        $.execTick++;
+        $.resetLoopBudget();
+      }
+      const state = historicalBarState(isLast, i === 0);
+      if (executed) state.isnew = false; // only the bar's first execution is new
+      $.bar = state;
+      this.main($);
+      executed = true;
+    };
+    for (let k = 0; k < 4; k++) {
+      if (k >= 2 && broker.coofSegmentPass(k, P[k - 1], P[k]) > 0) runExec();
+      if (broker.coofPointPass(k, P[k]) > 0) runExec();
+    }
+    broker.coofEnd(bar.open, bar.high, bar.low);
+    if (!executed) {
+      $.bar = historicalBarState(isLast, i === 0);
+      this.main($);
+    }
   }
 
   /**
@@ -125,6 +188,12 @@ export class Driver {
     $.execTick++;
     $.resetLoopBudget();
     $.series.beginBar();
+    this.setBuiltins(bar);
+  }
+
+  /** Write the bar's OHLCV/time into the current (uncommitted) series bar. */
+  private setBuiltins(bar: Bar): void {
+    const $ = this.$;
     $.set(BuiltinSlot.Open, bar.open);
     $.set(BuiltinSlot.High, bar.high);
     $.set(BuiltinSlot.Low, bar.low);

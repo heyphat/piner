@@ -284,6 +284,12 @@ function extractStrategySettings(call: Call): Partial<StrategySettings> {
   if (marginShort !== undefined) s.marginShort = marginShort;
   const poc = call.args.find((a) => a.name === 'process_orders_on_close')?.value;
   if (poc?.kind === 'Bool') s.processOrdersOnClose = poc.value;
+  const coof = call.args.find((a) => a.name === 'calc_on_order_fills')?.value;
+  if (coof?.kind === 'Bool') s.calcOnOrderFills = coof.value;
+  // Parsed for completeness; a deliberate no-op (realtime-only on TV — see the
+  // StrategySettings field doc).
+  const coet = call.args.find((a) => a.name === 'calc_on_every_tick')?.value;
+  if (coet?.kind === 'Bool') s.calcOnEveryTick = coet.value;
   return s;
 }
 

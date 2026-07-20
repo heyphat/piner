@@ -1245,6 +1245,17 @@ export class ExecutionContext {
     // only varips intentionally escape rollback within the same realtime bar
   }
 
+  /** calc_on_order_fills intrabar rollback: like restoreMutable but the BROKER
+   *  keeps its state — intrabar fills are real and must survive the re-execution
+   *  (varip is exempt as always). dev-docs/calc-behavior-plan.md §3.3. */
+  restoreMutableExceptStrategy(snap: RollbackSnapshot): void {
+    this.ta.restore(snap.ta);
+    this.vars = structuredClone(snap.vars);
+    this.misc = structuredClone(snap.misc);
+    this.drawPool.restore(snap.draw);
+    this.out.alerts.length = snap.alertCount;
+  }
+
   /** Drop request.security caches — the driver calls this on each realtime tick so
    *  cached per-bar columns (computed over `allBars`) pick up the developing bar. */
   invalidateSecurityCaches(): void {
