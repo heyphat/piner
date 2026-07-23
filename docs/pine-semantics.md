@@ -16,7 +16,11 @@ every item maps to a mechanism in [`architecture.md`](./architecture.md) §13.
   → [execution-model](https://www.tradingview.com/pine-script-docs/language/execution-model/)
 - **Realtime re-execution.** `[verified]` On the realtime (open) bar the script
   runs **repeatedly, once per tick**. Indicators/libraries run on every update;
-  strategies without `calc_on_every_tick` run only on bar close.
+  TradingView strategies without `calc_on_every_tick` run only on bar close.
+  Piner retains the flag in metadata but `Driver.onTick()` currently executes a
+  strategy on every supplied realtime update regardless of its value, so the
+  flag-off cadence is a known compatibility deviation (historical cadence is
+  unaffected).
   → [bar-states](https://www.tradingview.com/pine-script-docs/concepts/bar-states/)
 - **Strategy recalculation after fills.** `[verified]` With
   `calc_on_order_fills=true` a strategy executes on **each tick where the broker
@@ -26,8 +30,20 @@ every item maps to a mechanism in [`architecture.md`](./architecture.md) §13.
   are the open TWICE (arrival + walk start), then the extremes nearer-first;
   the close is not a fill point. An order born mid-bar fills discretely at the
   next point's price, then continuously at its own levels. Rollback applies on
-  historical bars too; `varip` survives it.
+  historical bars too; `varip` survives it. The TV export also pins all 110
+  per-trade MFE/MAE values from chronological path, fill-price, and close marks;
+  a mid-bar-born lot never sees the earlier bar range.
   → [execution-model](https://www.tradingview.com/pine-script-docs/language/execution-model/)
+- **COOF account, margin, and forced-event policy.** `[unverified engineering defaults]`
+  Account extrema follow the same chronology. Accepted fills margin-finalize
+  the old exposure at the execution price before mutation and record the
+  post-P&L/post-commission account before recalculation; rejected candidates
+  emit no fill/slippage marks. Margin is checked at exposure boundaries with at
+  most one forced liquidation per bar. A forced liquidation schedules a COOF
+  recalculation without contributing to filled-order risk. Equity risk and the
+  filled-order cap remain pass-granular. On realtime bars, the POC pass runs
+  only on the closing update; if it mutates the broker under COOF, piner rolls
+  ordinary script state back and executes once more before committing the bar.
 
 ## 2. Series & history
 

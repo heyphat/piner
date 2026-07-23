@@ -74,15 +74,16 @@ export interface StrategySettings {
    *  process_orders_on_close) so market orders fill at the same bar's close instead
    *  of the next bar's open. Default false. */
   processOrdersOnClose: boolean;
-  /** Pine's calc_on_order_fills: the driver runs each historical bar as the
-   *  emulator's four-tick sequence and re-executes the script after every tick
-   *  that filled an order (dev-docs/calc-behavior-plan.md). Realtime semantics
-   *  are out of scope — the stack is historical-only. Default false. */
+  /** Pine's calc_on_order_fills: enables the historical A/W/E1/E2 scheduler
+   *  and fill-triggered script re-execution, plus a realtime replay after a
+   *  process_orders_on_close mutation (dev-docs/calc-behavior-plan.md).
+   *  Default false. */
   calcOnOrderFills: boolean;
-  /** Pine's calc_on_every_tick — parsed for completeness but a deliberate no-op:
-   *  on TV it only changes REALTIME behavior (historical bars calculate at close
-   *  either way, so backtests are unaffected), and piner's hosts are
-   *  historical-only. Default false. */
+  /** Pine's calc_on_every_tick. Parsed and retained in strategy metadata, with
+   *  no effect on historical execution. The current realtime Driver.onTick path
+   *  executes strategies on every supplied update regardless of this value, so
+   *  false does not yet reproduce TradingView's close-only realtime cadence.
+   *  Default false. */
   calcOnEveryTick: boolean;
   /** Percent of a long position's value that must be covered by the strategy's own
    *  equity (margin_long). 0 disables the funds check and margin calls for longs —
@@ -369,6 +370,10 @@ export class StrategyBroker {
   totalCommission = 0;
   /** Forced liquidations booked by the margin simulation (report `marginCalls`). */
   private marginCallCount = 0;
+  /** Bar index of the latest real forced liquidation. All broker paths may inspect
+   *  margin more than once on a bar (for example onBar + process_orders_on_close,
+   *  or multiple COOF exposure intervals), but may mutate the account only once. */
+  private lastMarginCallBar = -1;
 
   private pending: Order[] = [];
   private exits: ExitBracket[] = [];
@@ -439,6 +444,7 @@ export class StrategyBroker {
     'barsInMarket',
     'totalCommission',
     'marginCallCount',
+    'lastMarginCallBar',
     'orderSeq',
     'riskDirection',
     'riskMaxPositionSize',
@@ -949,11 +955,15 @@ export class StrategyBroker {
    * bar's CLOSE treated as a one-price tick (o=h=l=close). Market orders created this
    * bar fill here at the close; limit/stop orders and exit brackets are checked against
    * the close price ONLY — never the bar's earlier range, which predates the orders.
+   * Returns the number of user fills plus forced margin mutations so a COOF driver can
+   * schedule exactly one post-pass recalculation.
    */
-  onBarClose(): void {
-    if (!this.active || !this.settings.processOrdersOnClose) return;
+  onBarClose(): number {
+    if (!this.active || !this.settings.processOrdersOnClose) return 0;
+    const before = this.fillSeq + this.marginCallCount;
     const { close } = this.host;
     this.processTick(close, close, close, close);
+    return this.fillSeq + this.marginCallCount - before;
   }
 
   // ── calc_on_order_fills driver hooks — the path-point model ─────────────
@@ -969,25 +979,134 @@ export class StrategyBroker {
   // stops), and CONTINUOUSLY (at its own level) on every later segment.
   // Placements during the exec after a pass inherit `pathPos` as their birth.
 
+  /** True while the engine drives this broker through a coof bar — gates the
+   *  per-fill/per-point chronological marks. Set by coofBegin(), cleared by
+   *  coofFinish() (driver `finally`) so it can never leak into realtime
+   *  processing (follow-up audit 2026-07-21 §3). */
+  private coofActive = false;
+  /** This bar's chronological equity marks (every coofMark), in traversal
+   *  order. coofRiskAndMargin consumes them incrementally (coofRiskIdx) so the
+   *  equity-risk rules act after each pass, not only at bar end (second
+   *  re-audit 2026-07-22). */
+  private coofMarks: number[] = [];
+  private coofRiskIdx = 0;
+  /** Broker-forced mutations that must trigger a COOF script recalculation but
+   *  must not contribute to strategy.risk.max_intraday_filled_orders. Reset at
+   *  each historical COOF bar; user fills continue to use fillSeq. */
+  private coofForcedSeq = 0;
+  /** Price window of the CURRENT EXPOSURE INTERVAL: the prices traversed since
+   *  the last fill that changed the position (any add/reduce/reverse/birth —
+   *  every executed fill restarts it at its own price). Accepted fills first
+   *  finalize the OLD interval at their execution price, then restart this
+   *  window after mutation, so reductions/closures cannot erase a deficiency. */
+  private coofPosLo = Infinity;
+  private coofPosHi = -Infinity;
+
   /** Bar start: day-roll and demote everything pending to pre-bar class. */
   coofBegin(): void {
     if (!this.active) return;
+    this.coofActive = true;
+    this.coofMarks = [];
+    this.coofRiskIdx = 0;
+    this.coofForcedSeq = 0;
+    this.coofPosLo = Infinity;
+    this.coofPosHi = -Infinity;
     this.riskRollDay();
     for (const o of this.pending) o.born = -1;
     for (const e of this.exits) e.born = -1;
   }
 
+  /** Bar end (driver `finally`): leave coof mode unconditionally. */
+  coofFinish(): void {
+    this.coofActive = false;
+  }
+
+  /** Mark open lots + account extremes at one traversal/fill price. Pinned by
+   *  the TV export's per-trade excursion columns (calc-parity-findings.md):
+   *  a lot sees every path point traversed while open and every fill price —
+   *  e.g. trade #46's favorable 0.01 comes from the E1 point with NO fill
+   *  there. Risk-rule trip tests stay per-bar (coofEnd) — assumption A7.
+   *  Every mark is recorded chronologically (coofMarks) and extends the
+   *  current position's traversal window — coofEnd finalizes risk and margin
+   *  from those, never from a full-range replay (follow-up audit §2). */
+  private coofMark(px: number): void {
+    if (!this.active) return;
+    const base = this.account.equityExcludingOpen(this);
+    const eq = this.size === 0 ? base : base + this.size * (px - this.avgPrice);
+    this.coofMarks.push(eq);
+    this.ratchetExtremes(eq);
+    this.account.broadcastMarks([eq], this);
+    if (this.size !== 0) {
+      if (px < this.coofPosLo) this.coofPosLo = px;
+      if (px > this.coofPosHi) this.coofPosHi = px;
+      const dir = sign(this.size);
+      for (const lot of this.entryLots) {
+        const fav = dir === DIR_LONG ? px - lot.price : lot.price - px;
+        if (fav > lot.maxFavMove) lot.maxFavMove = fav;
+        if (-fav > lot.maxAdvMove) lot.maxAdvMove = -fav;
+      }
+    }
+  }
+
+  /** The filled-order risk cap, enforced after every coof pass (audit 2026-07
+   *  §2) so a fill-triggered execution cannot cascade past the configured
+   *  limit — the per-pass analog of processTick's step 2b. PINNED per-pass,
+   *  not per-fill: several orders eligible at ONE pass can all fill before the
+   *  trip, matching the flag-off engine's after-the-pass check (TV's exact
+   *  timing unverified — findings A8). */
+  private coofRiskCap(): void {
+    if (
+      this.riskMaxIntradayOrders != null &&
+      !this.riskHaltActive &&
+      this.riskDayFills >= this.riskMaxIntradayOrders
+    )
+      this.riskTrip(true);
+  }
+
+  /** Consume every unprocessed account mark through the equity-risk rules. */
+  private coofConsumeRisk(): void {
+    const pts = this.coofMarks.slice(this.coofRiskIdx);
+    this.coofRiskIdx = this.coofMarks.length;
+    if (pts.length) this.riskCheckEquity(pts);
+  }
+
+  /** Evaluate the current exposure interval without consuming account-risk
+   *  marks. Accepted fills call this BEFORE mutation, so a close, reduction, or
+   *  reversal cannot erase an old-exposure deficiency at the same coordinate. */
+  private coofMarginOnly(): void {
+    if (this.size === 0 || this.coofPosLo > this.coofPosHi) return;
+    this.marginCheck(this.coofPosLo, this.coofPosHi, this.coofPosLo);
+  }
+
+  /** Chronological risk + margin, run at the end of every point/segment pass
+   *  and for the tail at coofEnd. Marks include both the pre-mutation exposure
+   *  and the post-P&L/post-commission account state of each accepted fill, so a
+   *  risk breach is visible before the driver performs fill-triggered script
+   *  execution. Margin itself is also finalized immediately around each fill. */
+  private coofRiskAndMargin(): void {
+    this.coofConsumeRisk();
+    const forced = this.coofForcedSeq;
+    this.coofMarginOnly();
+    // marginCheck emits a post-liquidation mark. Consume it now so liquidation
+    // commission/P&L can trip account risk before the pass returns to the driver.
+    if (this.coofForcedSeq !== forced) this.coofConsumeRisk();
+  }
+
   /** Discrete pass at path point k (price px): orders born at k-1 (at A: any
-   *  pre-bar order) evaluated against the point price alone. Returns fills. */
+   *  pre-bar order) evaluated against the point price alone. Returns broker
+   *  mutations that require script recalculation (user fills + forced calls). */
   coofPointPass(k: number, px: number): number {
     if (!this.active) return 0;
     this.pathPos = k;
     const elig = (b: number | undefined) => (k === 0 ? (b ?? -1) < 0 : b === k - 1);
-    const before = this.fillSeq;
+    const before = this.fillSeq + this.coofForcedSeq;
     this.matchPending(px, px, px, px, (o) => elig(o.born));
     if (this.size !== 0 && this.exits.length)
       this.processExits(px, px, px, (e) => elig(e.born), px);
-    return this.fillSeq - before;
+    this.coofRiskCap();
+    this.coofMark(px); // the point's traversal mark (open lots + equity + interval)
+    this.coofRiskAndMargin();
+    return this.fillSeq + this.coofForcedSeq - before;
   }
 
   /** Continuous sweep of the segment ending at point k (from → to): orders past
@@ -998,27 +1117,43 @@ export class StrategyBroker {
     const elig = (b: number | undefined) => (b ?? -1) <= k - 2;
     const hi = Math.max(from, to);
     const lo = Math.min(from, to);
-    const before = this.fillSeq;
-    this.matchPending(from, hi, lo, to, (o) => elig(o.born));
+    const before = this.fillSeq + this.coofForcedSeq;
+    this.matchPending(from, hi, lo, to, (o) => elig(o.born), true);
     if (this.size !== 0 && this.exits.length)
       this.processExits(from, hi, lo, (e) => elig(e.born), to);
-    return this.fillSeq - before;
+    this.coofRiskCap();
+    this.coofRiskAndMargin(); // endpoints mark at their point passes
+    return this.fillSeq + this.coofForcedSeq - before;
   }
 
-  /** Bar end: the flag-off once-per-bar tail — full-range equity mark (incl.
-   *  margin at the worst price), risk order-cap check, exposure counters. */
-  coofEnd(o: number, h: number, l: number): void {
-    if (!this.active) return;
-    if (
-      this.riskMaxIntradayOrders != null &&
-      !this.riskHaltActive &&
-      this.riskDayFills >= this.riskMaxIntradayOrders
-    )
-      this.riskTrip(true);
-    this.markToMarket(o, h, l);
+  /** Bar end — CHRONOLOGICAL finalization (follow-up audit 2026-07-21 §2).
+   *  The path was already marked in traversal order; append the close (not a
+   *  fill point), then finalize risk and the last exposure interval. Returns
+   *  forced mutations so a close-coordinate liquidation recalculates the script. */
+  coofEnd(): number {
+    if (!this.active) return 0;
+    const before = this.fillSeq + this.coofForcedSeq;
+    this.coofRiskCap();
+    this.lastMark = this.host.close;
+    this.coofMark(this.host.close);
+    this.equityCurve[this.host.idx] = this.equity;
+    this.recordExposure();
+    this.coofRiskAndMargin();
     this.riskBarCloseEquity = this.equity;
     this.barsProcessed++;
     if (this.size !== 0) this.barsInMarket++;
+    return this.fillSeq + this.coofForcedSeq - before;
+  }
+
+  /** POC × coof (findings A6, engineering default): run the
+   *  process_orders_on_close pass and report user or forced mutations so the
+   *  driver can trigger the post-event execution. Orders placed by that
+   *  execution are born at the close (pathPos 3) and carry to the next bar. */
+  coofClosePass(): number {
+    if (!this.active || !this.settings.processOrdersOnClose) return 0;
+    const before = this.fillSeq + this.coofForcedSeq;
+    this.onBarClose();
+    return this.fillSeq + this.coofForcedSeq - before;
   }
 
   /** One fill pass over the tick's assumed range [l, h] starting at `o`;
@@ -1052,6 +1187,7 @@ export class StrategyBroker {
     l: number,
     marketPx: number,
     elig?: (or: Order) => boolean,
+    directional = false, // coof segment pass: monotone travel o → marketPx
   ): void {
     const slip = this.settings.slippage * this.host.mintick;
 
@@ -1087,7 +1223,15 @@ export class StrategyBroker {
           const p = or.limit!;
           // a limit resting since a PRIOR tick is open-bounded like any limit order
           if (wasTriggered && (or.dir === DIR_LONG ? o <= p : o >= p)) this.fill(or, o);
-          else if (or.dir === DIR_LONG ? l <= p : h >= p) this.fill(or, p);
+          else if (!wasTriggered && directional) {
+            // Just triggered on a MONOTONE segment (audit 2026-07 §5): the limit
+            // may only fill at prices on the REMAINING travel — never at a price
+            // the segment visited before the stop activated.
+            const act = or.dir === DIR_LONG ? Math.max(o, or.price!) : Math.min(o, or.price!);
+            if (or.dir === DIR_LONG ? act <= p : act >= p) this.fill(or, act);
+            else if (or.dir === DIR_LONG ? marketPx <= p : marketPx >= p) this.fill(or, p);
+            else stillPending.push(or); // stays an armed limit for later segments/bars
+          } else if (or.dir === DIR_LONG ? l <= p : h >= p) this.fill(or, p);
           else stillPending.push(or); // keep `triggered`
         } else {
           stillPending.push(or);
@@ -1113,18 +1257,7 @@ export class StrategyBroker {
       const path = emulatorTickPath(o, h, l, this.host.close);
       pts = path.map((px) => base + this.size * (px - this.avgPrice));
     }
-    for (const v of pts) {
-      if (v > this.peakEquity) this.peakEquity = v;
-      if (v < this.valleyEquity) this.valleyEquity = v;
-      const dd = this.peakEquity - v;
-      if (dd > this.maxDrawdown) this.maxDrawdown = dd;
-      if (this.peakEquity > 0)
-        this.maxDrawdownPercent = Math.max(this.maxDrawdownPercent, (dd / this.peakEquity) * 100);
-      const ru = v - this.valleyEquity;
-      if (ru > this.maxRunup) this.maxRunup = ru;
-      if (this.valleyEquity > 0)
-        this.maxRunupPercent = Math.max(this.maxRunupPercent, (ru / this.valleyEquity) * 100);
-    }
+    for (const v of pts) this.ratchetExtremes(v);
     // Spec S7: every pot mark is observed by every OTHER attached broker too, so
     // a sleeve's trackers see marks that land between its own bars (disjoint
     // clocks). Trip TESTS still run only at each sleeve's own marks, below.
@@ -1133,6 +1266,8 @@ export class StrategyBroker {
     // Per-lot trade excursions: the bar's favorable/adverse per-contract price
     // moves relative to each open entry (a lot removed by this pass's fills no
     // longer marks — its life ended at its exit fill, TradingView-style).
+    // Never reached mid-coof-bar: coof lots are marked chronologically by
+    // coofMark (points + fills + close), pinned by the TV excursion columns.
     if (this.size !== 0) {
       const dir = sign(this.size);
       for (const lot of this.entryLots) {
@@ -1145,6 +1280,21 @@ export class StrategyBroker {
     this.recordExposure();
     this.riskCheckEquity(pts);
     this.marginCheck(o, h, l);
+  }
+
+  /** One equity mark → drawdown/run-up extreme ratchets (the body of
+   *  markToMarket's points loop, shared with coofMark). */
+  private ratchetExtremes(v: number): void {
+    if (v > this.peakEquity) this.peakEquity = v;
+    if (v < this.valleyEquity) this.valleyEquity = v;
+    const dd = this.peakEquity - v;
+    if (dd > this.maxDrawdown) this.maxDrawdown = dd;
+    if (this.peakEquity > 0)
+      this.maxDrawdownPercent = Math.max(this.maxDrawdownPercent, (dd / this.peakEquity) * 100);
+    const ru = v - this.valleyEquity;
+    if (ru > this.maxRunup) this.maxRunup = ru;
+    if (this.valleyEquity > 0)
+      this.maxRunupPercent = Math.max(this.maxRunupPercent, (ru / this.valleyEquity) * 100);
   }
 
   /**
@@ -1173,33 +1323,17 @@ export class StrategyBroker {
   }
 
   /**
-   * Margin-call simulation, matched to TradingView's broker emulator: the
-   * Help Center "How do I simulate trading with leverage?" 10-step algorithm,
-   * empirically verified against a 42-event TV margin-call ledger
-   * (dev-docs/margin-parity-findings.md — BINANCE:XAUUSDT.P 15m, every event's
-   * fill price AND quantity reproduced exactly). PointValue = 1.
-   *
-   * ONE evaluation per bar, at the bar's WORST price for the position (low for
-   * longs, high for shorts) — TV's observed fill point. At that price p:
-   *   deficit   = requiredMargin(p) − equity(p)        (> 0 ⇒ margin call)
-   *   moneyLost = deficit / m                          (TV step 8)
-   *   q9        = trunc(moneyLost / p → minQty)        (TV step 9: truncate to
-   *               the symbol's minimum contract size — settings.minQty)
-   *   qLiq      = min(q9 > 0 ? 4·q9 : 1, |size|)       (TV step 10: 4× "so a
-   *               Margin Call event isn't constantly triggered"; when the
-   *               truncation yields 0 the emulator liquidates ONE whole unit —
-   *               observed on 13 events, not documented)
-   * A bar still deficient after the call fires again on the NEXT bar (repeat
-   * same-bar liquidations were never observed). Unlike a risk-rule trip this
-   * is NOT a halt: pending orders and exit brackets survive, now covering a
-   * smaller position.
+   * Margin-call simulation, matched to TradingView's broker emulator. Every
+   * broker path may evaluate chronological exposure intervals, but a broker can
+   * perform at most one real forced liquidation on a bar. The universal guard
+   * also covers multiple ordinary passes such as onBar + process_orders_on_close.
    */
   private marginCheck(_o: number, h: number, l: number): void {
-    if (this.size === 0) return;
+    if (this.lastMarginCallBar === this.host.idx || this.size === 0) return;
     const pct = this.size > 0 ? this.settings.marginLong : this.settings.marginShort;
     const m = pct / 100;
     if (m <= 0) return;
-    const p = this.size > 0 ? l : h; // the bar's worst price for the position
+    const p = this.size > 0 ? l : h; // the interval/bar's worst price for the position
     const equity = this.account.equityExcludingOpen(this) + this.size * (p - this.avgPrice);
     const required = p * Math.abs(this.size) * m + this.account.requiredMarginExcluding(this);
     const deficit = required - equity;
@@ -1210,6 +1344,16 @@ export class StrategyBroker {
     const qLiquidate = Math.min(q9 > 0 ? 4 * q9 : 1, Math.abs(this.size));
     this.closePosition(p, qLiquidate);
     this.marginCallCount++;
+    this.lastMarginCallBar = this.host.idx;
+    if (this.coofActive) {
+      this.coofForcedSeq++;
+      // The surviving exposure begins at the forced fill coordinate. Record a
+      // post-liquidation account mark so realized P&L/commission reaches risk
+      // before the driver performs the liquidation-triggered execution.
+      this.coofPosLo = p;
+      this.coofPosHi = p;
+      this.coofMark(p);
+    }
     // The bar's equity was curve-marked before the check; the liquidation realizes
     // the loss mid-bar, so re-mark the close with the post-call position. (Drawdown
     // extremes keep the pre-call marks — the dip through the extreme genuinely
@@ -1279,11 +1423,32 @@ export class StrategyBroker {
       const isElig = eligible(ex);
       let remaining = allot.get(ex) ?? 0;
       const book = (lot: Lot, take: number, px: number, fee?: number) => {
-        this.closeLot(lot, take, px, fee);
-        ex.filled = (ex.filled ?? 0) + take;
-        remaining -= take;
+        if (this.coofActive) {
+          // This trigger is executable, so finalize the old lot/exposure at its
+          // actual fill price before any close can erase a deficiency.
+          this.coofMark(px);
+          this.coofMarginOnly();
+        }
+        // A margin liquidation may have reduced or removed this FIFO lot.
+        if (!this.entryLots.includes(lot) || lot.qty <= 0 || this.size === 0) return 0;
+        const actual = Math.min(take, lot.qty, remaining);
+        if (actual <= 0) return 0;
+        const actualFee = fee == null ? undefined : fee * (actual / take);
+        this.closeLot(lot, actual, px, actualFee);
+        ex.filled = (ex.filled ?? 0) + actual;
+        remaining -= actual;
         this.riskDayFills++; // each lot's exit is its own order (risk fill counting)
         this.fillSeq++;
+        if (this.coofActive) {
+          // Survivors/new financial state start at the fill coordinate. The
+          // post-close mark includes realized P&L and exit commission so account
+          // risk sees them before fill-triggered script execution.
+          this.coofPosLo = px;
+          this.coofPosHi = px;
+          this.coofMark(px);
+          this.coofMarginOnly();
+        }
+        return actual;
       };
       // Each eligible entry lot gets its OWN exit order: profit/loss tick levels are
       // measured from that lot's fill price (absolute stop/limit prices are shared).
@@ -1395,16 +1560,83 @@ export class StrategyBroker {
     return undefined;
   }
 
-  /** Execute an order, counting it toward the intraday filled-orders risk rule when
-   *  it actually trades (a blocked or no-op order is not a fill). */
+  /** Side-effect-free affordability gate shared by preflight and openOrAdd. */
+  private canOpenOrAdd(dir: number, qty: number, price: number): boolean {
+    if (!(qty > 0) || !Number.isFinite(qty)) return false;
+    const m = (dir === DIR_LONG ? this.settings.marginLong : this.settings.marginShort) / 100;
+    if (m <= 0) return true;
+    const fee = this.commission(qty, price);
+    const base = this.account.equityExcludingOpen(this);
+    const equityAtFill = this.size === 0 ? base : base + this.size * (price - this.avgPrice);
+    const required =
+      price * (Math.abs(this.size) + qty) * m + this.account.requiredMarginExcluding(this);
+    return equityAtFill - fee >= required - 1e-9;
+  }
+
+  /** Whether a triggered order will mutate broker state in the CURRENT state.
+   *  This preflight prevents rejected pyramiding/funds/no-op candidates from
+   *  emitting COOF fill-price marks. It is repeated after pre-fill margin,
+   *  because forced liquidation may change the executable state. */
+  private wouldExecute(o: Order, price: number): boolean {
+    if (o.kind === 'closeAll') {
+      const eligible = Math.abs(this.size);
+      const qty = o.qty != null && !Number.isNaN(o.qty) ? Math.min(o.qty, eligible) : eligible;
+      return qty > 0;
+    }
+    if (o.kind === 'close') {
+      const eligible = this.entryLots
+        .filter((lt) => lt.id === o.id)
+        .reduce((sum, lt) => sum + lt.qty, 0);
+      const qty = o.qty != null && !Number.isNaN(o.qty) ? Math.min(o.qty, eligible) : eligible;
+      return qty > 0;
+    }
+    const dir = o.dir;
+    if (o.kind === 'entry' && this.riskDirection !== 'all') {
+      const allowed = this.riskDirection === 'long' ? DIR_LONG : DIR_SHORT;
+      if (dir !== allowed) return this.size !== 0 && sign(this.size) !== dir;
+    }
+    if (this.size !== 0 && sign(this.size) !== dir) {
+      if (o.kind === 'entry') return true; // reversal always closes the old side first
+      return this.qtyFor(o, price) > 0; // netting order reduces at least the old side
+    }
+    if (this.size !== 0 && o.kind === 'entry' && this.openEntryCmdCount >= this.settings.pyramiding)
+      return false;
+    let qty = this.qtyFor(o, price);
+    if (o.kind === 'entry' && this.riskMaxPositionSize != null)
+      qty = Math.min(qty, this.riskMaxPositionSize - Math.abs(this.size));
+    return this.canOpenOrAdd(dir, qty, price);
+  }
+
+  /** Execute an order, counting it toward the intraday filled-orders risk rule
+   *  only when it actually trades. COOF marks accepted fills on BOTH sides of
+   *  mutation: old exposure before margin, then post-P&L/commission state. */
   private fill(o: Order, price: number): void {
+    if (!this.wouldExecute(o, price)) return;
+    if (this.coofActive) {
+      this.coofMark(price);
+      this.coofMarginOnly();
+      // A forced call may have changed/removed the target exposure or changed
+      // affordability. Re-preflight; the pre-call mark remains legitimate.
+      if (!this.wouldExecute(o, price)) return;
+    }
     const size = this.size,
       lots = this.entryLots.length,
       closed = this.closedTrades.length;
     this.execute(o, price);
-    if (this.size !== size || this.entryLots.length !== lots || this.closedTrades.length !== closed) {
-      this.riskDayFills++;
-      this.fillSeq++;
+    const changed =
+      this.size !== size || this.entryLots.length !== lots || this.closedTrades.length !== closed;
+    if (!changed) return;
+    // A risk-generated closeAll is broker-forced and must not recursively count
+    // toward max_intraday_filled_orders. It still advances fillSeq so COOF
+    // recalculates after the broker mutation.
+    const riskForced = this.riskHaltActive && o.kind === 'closeAll' && o.id === '';
+    if (!riskForced) this.riskDayFills++;
+    this.fillSeq++;
+    if (this.coofActive) {
+      this.coofPosLo = price;
+      this.coofPosHi = price;
+      this.coofMark(price);
+      this.coofMarginOnly();
     }
   }
 
@@ -1460,24 +1692,11 @@ export class StrategyBroker {
 
   /** Open a new position (or add a lot to the same-direction one) and book the entry commission. */
   private openOrAdd(o: Order, dir: number, qty: number, price: number): void {
+    // Pine v6 funds/margin gate: reject the entire exposure-increasing leg. The
+    // same side-effect-free predicate is used by wouldExecute(), so a rejected
+    // candidate cannot create a COOF fill/slippage mark.
+    if (!this.canOpenOrAdd(dir, qty, price)) return;
     const fee = this.commission(qty, price);
-    // Margin gate (Pine v6): an exposure-increasing fill whose resulting position
-    // would require more equity than is available at the fill price is REJECTED
-    // outright — not reduced ("the strategy does not open entries that require more
-    // money than is available", v6 migration guide). Only this opening path is
-    // gated; closes and the reducing leg of a netting order always execute. The
-    // entry fee debits equity at fill, so it counts against affordability (parity
-    // question P4). m = 0 restores the v5 no-funds-check behavior.
-    const m = (dir === DIR_LONG ? this.settings.marginLong : this.settings.marginShort) / 100;
-    if (m > 0) {
-      const base = this.account.equityExcludingOpen(this);
-      const equityAtFill = this.size === 0 ? base : base + this.size * (price - this.avgPrice);
-      // Under a shared account the rest of the basket's margin is spoken for
-      // (spec S4 — first-come-first-served); 0 for a private account.
-      const required =
-        price * (Math.abs(this.size) + qty) * m + this.account.requiredMarginExcluding(this);
-      if (equityAtFill - fee < required - 1e-9) return;
-    }
     const lot: Lot = {
       id: o.id,
       qty,

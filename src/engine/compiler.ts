@@ -187,6 +187,91 @@ function throwIfErrors(diagnostics: Diagnostic[]): void {
   throw new CompileError(`Pine compile failed:\n${summary}`, diagnostics);
 }
 
+type ConstResolve = (name: string) => Expr | undefined;
+type ConstValue = number | boolean | string;
+
+/**
+ * Compile-time scalar evaluator for declaration metadata. Pine permits const
+ * identifiers and scalar expressions in boolean strategy settings; silently
+ * treating those as `false` selects the wrong driver schedule.
+ */
+function constValue(e: Expr | undefined, resolve: ConstResolve, depth = 0): ConstValue | undefined {
+  if (!e || depth > 64) return undefined;
+  switch (e.kind) {
+    case 'Number':
+    case 'String':
+    case 'Bool':
+      return e.value;
+    case 'Ident':
+      return constValue(resolve(e.name), resolve, depth + 1);
+    case 'Unary': {
+      const value = constValue(e.operand, resolve, depth + 1);
+      if (e.op === 'not') return typeof value === 'boolean' ? !value : undefined;
+      if (typeof value !== 'number') return undefined;
+      return e.op === '-' ? -value : value;
+    }
+    case 'Binary': {
+      const left = constValue(e.left, resolve, depth + 1);
+      const right = constValue(e.right, resolve, depth + 1);
+      switch (e.op) {
+        case 'and':
+          return typeof left === 'boolean' && typeof right === 'boolean'
+            ? left && right
+            : undefined;
+        case 'or':
+          return typeof left === 'boolean' && typeof right === 'boolean'
+            ? left || right
+            : undefined;
+        case '==':
+          return left !== undefined && right !== undefined ? left === right : undefined;
+        case '!=':
+          return left !== undefined && right !== undefined ? left !== right : undefined;
+        case '+':
+          if (typeof left === 'number' && typeof right === 'number') return left + right;
+          if (typeof left === 'string' && typeof right === 'string') return left + right;
+          return undefined;
+        case '-':
+        case '*':
+        case '/':
+        case '%':
+          if (typeof left !== 'number' || typeof right !== 'number') return undefined;
+          if ((e.op === '/' || e.op === '%') && right === 0) return undefined;
+          if (e.op === '-') return left - right;
+          if (e.op === '*') return left * right;
+          if (e.op === '/') return left / right;
+          return left % right;
+        case '<':
+        case '<=':
+        case '>':
+        case '>=':
+          if (typeof left !== 'number' || typeof right !== 'number') return undefined;
+          if (e.op === '<') return left < right;
+          if (e.op === '<=') return left <= right;
+          if (e.op === '>') return left > right;
+          return left >= right;
+      }
+      return undefined;
+    }
+    case 'Ternary': {
+      const cond = constValue(e.cond, resolve, depth + 1);
+      const thenValue = constValue(e.then, resolve, depth + 1);
+      const elseValue = constValue(e.else, resolve, depth + 1);
+      // Qualifiers join across both branches: an inactive runtime branch still
+      // makes the whole setting non-const.
+      if (typeof cond !== 'boolean' || thenValue === undefined || elseValue === undefined)
+        return undefined;
+      return cond ? thenValue : elseValue;
+    }
+    default:
+      return undefined;
+  }
+}
+
+function boolConst(v: Expr | undefined, resolve: ConstResolve): boolean | undefined {
+  const value = constValue(v, resolve);
+  return typeof value === 'boolean' ? value : undefined;
+}
+
 function extractMetadata(
   program: Program,
 ): Pick<
@@ -204,12 +289,24 @@ function extractMetadata(
   let overlay = false;
   let isStrategy = false;
   let strategy: Partial<StrategySettings> | undefined;
+  const consts = new Map<string, Expr>();
+  const resolveConst: ConstResolve = (name) => consts.get(name);
   // Pine defaults for the drawing-object caps.
   let maxLinesCount = 50,
     maxLabelsCount = 50,
     maxBoxesCount = 50,
     maxPolylinesCount = 100;
   for (const s of program.body) {
+    // Mirror the analyzer's global const environment: ordinary declarations are
+    // candidates while `var`/`varip` and reassigned names are runtime values.
+    if (s.kind === 'VarDecl') {
+      if (s.mode === 'none') consts.set(s.name, s.init);
+      continue;
+    }
+    if (s.kind === 'Reassign' && s.target.kind === 'Ident') {
+      consts.delete(s.target.name);
+      continue;
+    }
     if (s.kind !== 'ExprStmt' || s.expr.kind !== 'Call') continue;
     const call = s.expr as Call;
     const callee = call.callee;
@@ -218,8 +315,11 @@ function extractMetadata(
     isStrategy = name === 'strategy';
     const titleArg = call.args.find((a) => a.name === 'title') ?? call.args.find((a) => !a.name);
     if (titleArg?.value.kind === 'String') title = titleArg.value.value;
-    const overlayArg = call.args.find((a) => a.name === 'overlay');
-    if (overlayArg?.value.kind === 'Bool') overlay = overlayArg.value.value;
+    const overlayValue = boolConst(
+      call.args.find((a) => a.name === 'overlay')?.value,
+      resolveConst,
+    );
+    if (overlayValue !== undefined) overlay = overlayValue;
     const cap = (n: string, def: number): number => {
       const v = numLit(call.args.find((a) => a.name === n)?.value);
       return v !== undefined && v > 0 ? Math.trunc(v) : def;
@@ -228,7 +328,7 @@ function extractMetadata(
     maxLabelsCount = cap('max_labels_count', 50);
     maxBoxesCount = cap('max_boxes_count', 50);
     maxPolylinesCount = cap('max_polylines_count', 100);
-    if (isStrategy) strategy = extractStrategySettings(call);
+    if (isStrategy) strategy = extractStrategySettings(call, resolveConst);
     break;
   }
   return {
@@ -244,7 +344,10 @@ function extractMetadata(
 }
 
 /** Parse the broker-relevant named args of a `strategy(...)` declaration. */
-function extractStrategySettings(call: Call): Partial<StrategySettings> {
+function extractStrategySettings(
+  call: Call,
+  resolveConst: ConstResolve,
+): Partial<StrategySettings> {
   const s: Partial<StrategySettings> = {};
   const num = (n: string): number | undefined => {
     const v = call.args.find((a) => a.name === n)?.value;
@@ -282,14 +385,23 @@ function extractStrategySettings(call: Call): Partial<StrategySettings> {
   if (marginLong !== undefined) s.marginLong = marginLong;
   const marginShort = num('margin_short');
   if (marginShort !== undefined) s.marginShort = marginShort;
-  const poc = call.args.find((a) => a.name === 'process_orders_on_close')?.value;
-  if (poc?.kind === 'Bool') s.processOrdersOnClose = poc.value;
-  const coof = call.args.find((a) => a.name === 'calc_on_order_fills')?.value;
-  if (coof?.kind === 'Bool') s.calcOnOrderFills = coof.value;
-  // Parsed for completeness; a deliberate no-op (realtime-only on TV — see the
-  // StrategySettings field doc).
-  const coet = call.args.find((a) => a.name === 'calc_on_every_tick')?.value;
-  if (coet?.kind === 'Bool') s.calcOnEveryTick = coet.value;
+  const poc = boolConst(
+    call.args.find((a) => a.name === 'process_orders_on_close')?.value,
+    resolveConst,
+  );
+  if (poc !== undefined) s.processOrdersOnClose = poc;
+  const coof = boolConst(
+    call.args.find((a) => a.name === 'calc_on_order_fills')?.value,
+    resolveConst,
+  );
+  if (coof !== undefined) s.calcOnOrderFills = coof;
+  // Parsed and retained in strategy metadata. It has no historical effect; the
+  // current realtime Driver.onTick path does not consult it (see StrategySettings).
+  const coet = boolConst(
+    call.args.find((a) => a.name === 'calc_on_every_tick')?.value,
+    resolveConst,
+  );
+  if (coet !== undefined) s.calcOnEveryTick = coet;
   return s;
 }
 

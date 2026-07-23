@@ -483,23 +483,41 @@ security(site: number, symbol: string, tf: unknown, lookahead: unknown,
 > drawdown/run-up, live read-backs, per-trade introspection, performance stats, and
 > the `strategy.risk.*` rules (direction/size caps + drawdown/intraday-loss/
 > cons-loss-days/filled-orders halts), and `calc_on_order_fills` (historical
-> four-tick intrabar re-execution). Tail: OCA-group nuances,
-> `calc_on_every_tick` (deliberate no-op — realtime-only on TV; see
-> dev-docs/calc-behavior-plan.md), margin. **Full design doc:
-> [strategy-broker.md](./strategy-broker.md).**
+> four-tick intrabar re-execution). Tail: OCA-group nuances and correct
+> flag-off realtime cadence for `calc_on_every_tick` (the flag is parsed, but
+> `Driver.onTick()` currently runs every supplied update regardless of it).
+> **Full design doc: [strategy-broker.md](./strategy-broker.md).**
 
 A deterministic broker simulator driven by the same bar loop.
 
-- **Execution frequency:** indicators/libraries run on every realtime tick;
-  strategies run only on **bar close** unless `calc_on_every_tick=true`. The
-  driver branches on script type + this flag. With `calc_on_order_fills=true`
-  the driver runs each historical bar through four FILL POINTS — A and W at the
-  open (why the open can fill twice), then the extremes nearer-first; the close
-  is not a fill point — re-executing the script after every pass that filled an
-  order. Orders fill discretely (at the point price) at the point after their
-  birth, then continuously (at their levels) on later segments. series/`var`/ta
+- **Execution frequency:** historical indicators, libraries, and flag-off
+  strategies run once per bar; `calc_on_order_fills=true` selects the strategy's
+  historical fill-driven scheduler described below. On realtime input,
+  `Driver.onTick()` currently executes every script on every supplied update and
+  does not consult `calc_on_every_tick`. This matches the enabled cadence when a
+  host supplies each update, but flag-off strategies deviate from TradingView's
+  close-only realtime cadence. With `calc_on_order_fills=true` the driver runs
+  each historical bar through four FILL POINTS — A and W at the open (why the
+  open can fill twice), then the extremes nearer-first; the close is not a fill
+  point — re-executing the script after every pass that filled an order. On a
+  realtime bar, the `process_orders_on_close` pass runs only on the closing
+  update; when it fills under COOF, ordinary script state rolls back while the
+  broker and `varip` persist, and one post-fill execution runs before commit.
+  Orders fill discretely (at the point price) at the point after their birth,
+  then continuously (at their levels) on later segments. series/`var`/ta
   state rolls back between executions (realtime-style) while `varip` and the
-  broker persist. Pinned 55/55 against a real TV trade export
+  broker persist. Account state is chronological: every candidate is
+  preflighted before any fill-price mark; rejected/no-op orders are side-effect
+  free. For an accepted close, reduction, or reversal, the old exposure is
+  marked and margin-checked at the execution price before mutation; the
+  resulting exposure then starts a new interval at that price and receives a
+  post-P&L/post-commission account mark. Equity-risk rules consume those marks
+  before fill-triggered script execution. Margin is inspected at every interval
+  boundary but forced liquidation is capped at once per bar; a forced call has
+  its own recalculation event and does not increment filled-order risk. The
+  filled-order cap remains deliberately per pass. Fills + per-trade excursions
+  are pinned 55/55 + 110 against a real TV export; account/margin/risk timing is
+  a documented engineering default
   (`Driver.historicalBarOnFills`; dev-docs/calc-parity-findings.md).
 - **Order model:** `strategy.entry/order/exit/close/cancel`, market/limit/stop,
   pyramiding, position sizing, commission/slippage. Maintain an order book and a

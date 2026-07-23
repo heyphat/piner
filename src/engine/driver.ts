@@ -73,14 +73,14 @@ export class Driver {
     const isLast = i === bars.length - 1;
     const broker = $.strategyBroker;
     if (broker.active && broker.settings.calcOnOrderFills) {
-      this.historicalBarOnFills(bars, i, isLast);
+      this.historicalBarOnFills(bars, i, isLast); // runs the close pass itself (POC × coof)
     } else {
       this.beginBar(bars[i], i);
       $.bar = historicalBarState(isLast, i === 0);
       $.onStrategyBar(); // fill pending strategy orders against this bar's open/range
       this.main($);
+      $.onStrategyBarClose(); // process_orders_on_close: fill this bar's market orders at close
     }
-    $.onStrategyBarClose(); // process_orders_on_close: fill this bar's market orders at close
     $.series.commitBar();
     this.committed = $.series.committedBars;
   }
@@ -111,34 +111,45 @@ export class Driver {
     const path = emulatorTickPath(bar.open, bar.high, bar.low, bar.close);
     const P = [bar.open, bar.open, path[1], path[2]]; // A, W, E1, E2
     this.beginBar(bar, i);
-    broker.coofBegin();
-    let snap: RollbackSnapshot | null = null;
-    let executed = false;
-    const runExec = () => {
-      snap ??= $.snapshotMutable(); // bar-start baseline (before any main() ran)
-      if (executed) {
-        // the historical analog of the realtime rollback: varip + broker persist
-        $.series.truncateTo(this.committed);
-        $.restoreMutableExceptStrategy(snap!);
-        $.series.beginBar();
-        this.setBuiltins(bar);
-        $.execTick++;
-        $.resetLoopBudget();
+    try {
+      broker.coofBegin(); // inside the try: a day-roll throw must not leak coof mode
+      let snap: RollbackSnapshot | null = null;
+      let executed = false;
+      // `finalUnlessPoc`: this exec can only be followed by another via a
+      // process_orders_on_close fill — skip the rollback snapshot when POC is off
+      // (no-fill bars then stay snapshot-free, the common case).
+      const runExec = (finalUnlessPoc = false) => {
+        if (!finalUnlessPoc || broker.settings.processOrdersOnClose) snap ??= $.snapshotMutable(); // bar-start baseline (before any main() ran)
+        if (executed) {
+          // the historical analog of the realtime rollback: varip + broker persist
+          $.series.truncateTo(this.committed);
+          $.restoreMutableExceptStrategy(snap!);
+          $.series.beginBar();
+          this.setBuiltins(bar);
+          $.execTick++;
+          $.resetLoopBudget();
+        }
+        const state = historicalBarState(isLast, i === 0);
+        if (executed) state.isnew = false; // only the bar's first execution is new
+        $.bar = state;
+        this.main($);
+        executed = true;
+      };
+      for (let k = 0; k < 4; k++) {
+        if (k >= 2 && broker.coofSegmentPass(k, P[k - 1], P[k]) > 0) runExec();
+        // the point pass marks its own price and runs chronological risk+margin
+        if (broker.coofPointPass(k, P[k]) > 0) runExec();
       }
-      const state = historicalBarState(isLast, i === 0);
-      if (executed) state.isnew = false; // only the bar's first execution is new
-      $.bar = state;
-      this.main($);
-      executed = true;
-    };
-    for (let k = 0; k < 4; k++) {
-      if (k >= 2 && broker.coofSegmentPass(k, P[k - 1], P[k]) > 0) runExec();
-      if (broker.coofPointPass(k, P[k]) > 0) runExec();
-    }
-    broker.coofEnd(bar.open, bar.high, bar.low);
-    if (!executed) {
-      $.bar = historicalBarState(isLast, i === 0);
-      this.main($);
+      const tailEvents = broker.coofEnd(); // close mark + risk/margin finalization
+      if (tailEvents > 0) runExec(); // forced liquidation is a broker recalculation event
+      if (!executed) runExec(true); // the standard once-per-bar close execution
+      // POC × coof (findings A6): the close pass is a broker event like any other —
+      // it triggers one more execution whose orders carry to the next bar's A.
+      if (broker.coofClosePass() > 0) runExec();
+    } finally {
+      // coof mode must never leak into realtime processing (follow-up audit §3),
+      // even if a script execution throws mid-bar.
+      broker.coofFinish();
     }
   }
 
@@ -148,6 +159,7 @@ export class Driver {
    */
   onTick(tick: Bar, isClose: boolean): void {
     const $ = this.$;
+    const broker = $.strategyBroker;
     const firstTick = !this.realtimeBarOpen; // opening tick of a fresh bar
 
     this.rollback();
@@ -160,8 +172,30 @@ export class Driver {
     $.invalidateSecurityCaches();
     $.bar = realtimeBarState(firstTick, isClose, this.committed === 0);
     $.onStrategyBar(); // same fill pass as historical bars — orders fill on ticks too
+
+    // A closing POC fill happens after main(), so COOF needs a second execution
+    // before commit. Snapshot ordinary script state before the first execution;
+    // broker mutations and varip deliberately survive the replay.
+    const replayAfterClose =
+      isClose &&
+      broker.active &&
+      broker.settings.processOrdersOnClose &&
+      broker.settings.calcOnOrderFills;
+    const replaySnapshot = replayAfterClose ? $.snapshotMutable() : null;
     this.main($);
-    $.onStrategyBarClose(); // process_orders_on_close (no-op unless configured)
+    // process_orders_on_close is a BAR-CLOSE pass, not a speculative-update pass.
+    const closeEvents = isClose ? $.onStrategyBarClose() : 0;
+    if (replayAfterClose && closeEvents > 0) {
+      $.series.truncateTo(this.committed);
+      $.restoreMutableExceptStrategy(replaySnapshot!);
+      $.series.beginBar();
+      this.setBuiltins(tick);
+      $.invalidateSecurityCaches();
+      $.execTick++;
+      $.resetLoopBudget();
+      $.bar = realtimeBarState(false, true, this.committed === 0);
+      this.main($);
+    }
 
     if (isClose) {
       $.series.commitBar();

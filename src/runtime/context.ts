@@ -385,8 +385,8 @@ export class ExecutionContext {
     this.strategyBroker.onBar();
   }
   /** Driver hook (after the script body): same-bar-close fills for process_orders_on_close. */
-  onStrategyBarClose(): void {
-    this.strategyBroker.onBarClose();
+  onStrategyBarClose(): number {
+    return this.strategyBroker.onBarClose();
   }
   configureStrategy(s: Partial<StrategySettings>): void {
     this.strategyBroker.configure(s);

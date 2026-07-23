@@ -108,8 +108,9 @@ series/date leaves + the `na`/`nz`/`fixnan`/`timestamp` functions, deduped):
   (steady state exact); `ta.supertrend` warmup region (steady state and the
   TradingView direction sign — −1=up / +1=down — match).
 - **Language:** history on an inline expression `(a+b)[n]` (assign to a var first).
-- **Strategy:** OCA groups, `calc_on_every_tick` (deliberate no-op — realtime-only
-  on TV, so backtests are unaffected), trailing per-trade comments.
+- **Strategy:** OCA groups; `calc_on_every_tick` flag-off realtime cadence
+  (`Driver.onTick()` currently executes every supplied update regardless of the
+  parsed flag; historical execution is unaffected); trailing per-trade comments.
 - **No live data/infra:** session/timezone _filtering_ in `time()`/`time_close()`;
   live `syminfo` exchange metadata; cross-symbol/realtime `request.security`;
   `request.*` fundamental data feeds.

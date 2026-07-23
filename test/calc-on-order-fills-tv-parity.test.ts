@@ -23,6 +23,10 @@ interface TvTrade {
   entryPrice: number;
   exitTime: string;
   exitPrice: number;
+  /** "Favorable/Adverse excursion USDT" columns — TV's per-trade MFE/MAE
+   *  (adverse is exported ≤ 0). Ground truth for the coof marking model. */
+  favorable: number;
+  adverse: number;
 }
 
 /** Parse TV's "List of Trades" export (one Entry + one Exit row per trade). */
@@ -41,6 +45,8 @@ function parseTvCsv(file: string): TvTrade[] {
     } else {
       t.exitTime = c[2];
       t.exitPrice = Number(c[4]);
+      t.favorable = Number(c[10]);
+      t.adverse = Number(c[12]);
     }
     acc.set(Number(c[0]), t);
   }
@@ -78,6 +84,10 @@ describe('calc_on_order_fills — TV ground-truth parity (XAUUSDT.P 1h)', () => 
       expect(t.exitPrice).toBeCloseTo(want.exitPrice, 6);
       expect(`${label} in ${fmtUtc(t.entryTime)}`).toBe(`${label} in ${want.entryTime}`);
       expect(`${label} out ${fmtUtc(t.exitTime)}`).toBe(`${label} out ${want.exitTime}`);
+      // Per-trade MFE/MAE (qty is 1 throughout, so money == price units). TV
+      // exports 2-decimal values derived from 2-decimal prices — exact match.
+      expect(t.maxRunup).toBeCloseTo(want.favorable, 6);
+      expect(t.maxDrawdown).toBeCloseTo(-want.adverse, 6);
     }
   });
 });

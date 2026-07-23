@@ -73,9 +73,12 @@ for each bar i:
   orders created this bar fill at the same bar's close. Limit/stop orders and
   brackets are checked against the close price ONLY — the bar's earlier range
   predates those orders and must not fill them.
-- **Realtime ticks** run the same sequence (`Driver.onTick`), so orders can fill
-  intrabar on live ticks; correctness across speculative ticks comes from
-  rollback (§10).
+- **Realtime ticks** run the ordinary pre-body fill pass on every supplied
+  update, so orders can fill intrabar; correctness across speculative ticks
+  comes from rollback (§10). The `process_orders_on_close` pass runs only when
+  `isClose=true`. If that close pass mutates the broker while COOF is enabled,
+  the driver rolls ordinary script state back (preserving broker state and
+  `varip`) and runs one post-fill execution before committing the bar.
 
 Within one `processTick(o, h, l, marketPx)` pass, the steps are ordered:
 
@@ -477,19 +480,22 @@ Per rule:
 | `max_intraday_filled_orders(count)` | `riskDayFills ≥ count`, checked after each pass's fills. Fill counting: one per executed order (`fill` wraps `execute` and counts only when state actually changed — a blocked/no-op order is not a fill), plus one per exit-bracket lot close (each lot's exit is its own order). | day       |
 | `max_cons_loss_days(count)`         | At day rollover: a day whose closing equity (`riskBarCloseEquity`) finished below its opening equity extends the streak; otherwise the streak resets. Streak reaching `count` trips.                                                                                               | permanent |
 
-**Check ordering inside a pass** (§2): fills happen first, then the
-filled-orders cap, then mark-to-market runs the equity rules while updating the
-day-max equity point-by-point along the path (so a percent-loss breach earlier
-in the bar can't see a day-max the path hasn't reached yet).
+**Check ordering inside a pass** (§2): candidate triggers are first
+preflighted against no-op, pyramiding, size-cap, and funds gates. Rejected
+candidates are removed without fill-price marks or risk/account side effects.
+For an accepted COOF mutation, the old exposure is marked and margin-checked at
+the actual execution price before it changes; the resulting broker state is
+then marked again after realized P&L and commission. The filled-order cap and
+equity-risk rules are consumed at pass end, before the driver can run the
+fill-triggered script. This preserves deliberate same-pass batching while
+ensuring fee-only breaches block orders from the next execution.
 
 Known approximations (documented deviations from TradingView's tick engine):
 
-- Breaches detected at bar _N_'s mark-to-market close the position at bar
-  _N+1_'s open (piner's standing next-tick fill rule); TV's 4-tick OHLC walk can
-  close at a later tick of the same bar.
-- Orders already in the same pass's queue can still fill after the
-  filled-orders cap is crossed mid-pass (TV has the same property for same-tick
-  price-triggered orders).
+- Equity-risk and filled-order-cap decisions are pass-granular; several orders
+  already eligible in one pass can fill before the pass-end halt.
+- A breach queues its emergency close for the next path point/pass. Risk-forced
+  closes trigger recalculation but do not increment `riskDayFills`.
 - Trailing-group exits count one fill per lot closed.
 
 ## 9. Margin (`margin_long` / `margin_short`)
@@ -519,17 +525,20 @@ Closes, `closeAll`, exit brackets, and the reducing leg of a netting
 `strategy.order` are never gated; a reversal is gated only on its opening leg
 (post-flatten equity). `m = 0` short-circuits the gate entirely.
 
-**Margin calls (forced liquidation).** After each mark-to-market, the broker
-evaluates the position **once per bar at the bar's worst price** `p` for the
-position (low for longs, high for shorts) — TV's observed evaluation AND fill
-point. A real deficit there (`equity(p) < p·|size|·m`, strictly — equality is
-not a call) liquidates per TV's 10-step algorithm: the cover quantity is
-**truncated to the symbol's minimum contract size** (`StrategySettings.minQty`,
-default 0.001 — exchange metadata, host-configured per symbol), then
-quadrupled — "the broker emulator liquidates four times the amount required …
-preventing constant Margin Call events". When the truncation yields zero, the
-emulator liquidates **exactly one unit** (empirical, undocumented). Capped at
-the whole position:
+**Margin calls (forced liquidation).** The flag-off broker evaluates once
+per bar at the position's worst price `p` (low for longs, high for shorts),
+which is the TV-verified evaluation and fill point. COOF inspects every
+chronological exposure interval. Immediately before an accepted close,
+reduction, or reversal mutates the old exposure, that interval is extended to
+the execution price and margin-finalized; afterwards, the surviving/new
+exposure starts a fresh interval at the same price. This prevents both
+pre-entry price inheritance and same-coordinate deficiency erasure.
+
+A real deficit (`equity(p) < p·|size|·m`, strictly—equality is not a call)
+liquidates per TV's 10-step algorithm: the cover quantity is truncated to the
+symbol's minimum contract size (`StrategySettings.minQty`, default 0.001), then
+quadrupled. When truncation yields zero, the emulator liquidates exactly one
+unit (empirical, undocumented), capped at the whole position:
 
 ```
 deficit    = required(p) − equity(p)
@@ -538,13 +547,16 @@ q9         = TRUNC(qToCover, minQty)
 qLiquidate = min(q9 > 0 ? 4·q9 : 1, |size|)
 ```
 
-A position still deficient after the call fires again on the _next_ bar — never
-twice on one bar. The liquidation books through the normal `closePosition` path
-(FIFO lots, commission, ClosedTrade rows) at `p`, increments the report's
-`marginCalls`, and — unlike a risk-rule trip — does **not** halt: pending
-orders and exit brackets survive, covering the reduced position. The bar's
-equity-curve mark is refreshed afterwards (the loss realized mid-bar);
-drawdown extremes keep the pre-call marks.
+A broker performs at most one forced liquidation per bar. Under COOF this is a
+deliberate engineering default consistent with the verified flag-off ledger;
+direct TV evidence for the COOF cadence is still absent. The liquidation uses
+the normal FIFO/commission accounting path, increments `marginCalls`, and does
+not halt or increment `riskDayFills`. It does advance a separate COOF forced
+event sequence, so the script recalculates on the same bar and sees the reduced
+position; orders born from that execution use the current path coordinate.
+Pending orders and brackets otherwise survive and cover the reduced exposure.
+The equity curve and a post-liquidation account mark include realized loss and
+commission, while drawdown extremes retain the genuine pre-call deficient mark.
 
 **`strategy.margin_liquidation_price`.** Live level where marked equity meets
 required margin, from the Help Center formula (PV = 1, `D` = ±1 direction):
@@ -558,8 +570,9 @@ solution — which is why, at the v6 defaults, longs are only size-limited while
 shorts can genuinely be liquidated). Rounded down to tick for longs, up for
 shorts (per the Help Center leverage article).
 
-`marginCallCount` is snapshot state (`SNAP_SCALARS`), so a margin call fired by
-a speculative realtime tick rolls back cleanly (§10).
+`marginCallCount` and `lastMarginCallBar` are snapshot state
+(`SNAP_SCALARS`), so both a margin call and its universal once-per-bar guard
+roll back cleanly after a speculative realtime tick (§10).
 
 ## 10. Realtime rollback
 
@@ -611,29 +624,30 @@ Backend routing specifics (`emit.ts` / `interpreter.ts`, kept mirror-identical):
 
 ## 12. Known deviations & not-yet-modeled
 
-| Area                                         | Status                                                                                                                                                                                                   |
-| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OCA groups (`oca_name`/`oca_type`)           | constants accepted, grouping not enforced                                                                                                                                                                |
-| `calc_on_order_fills`                        | **modeled — 55/55 TV trade parity**: the path-point model (A/W at the open, E1/E2 extremes; the close is NOT a fill point; orders fill discretely at the point after their birth, then continuously at their levels), re-executing the script after every pass that fills; series/`var` roll back between executions, `varip` + broker persist (`Driver.historicalBarOnFills`, `StrategyBroker.coof*`; ground truth: dev-docs/calc-parity-findings.md, `test/calc-on-order-fills-tv-parity.test.ts`)              |
-| `calc_on_every_tick`                         | parsed, deliberate no-op — on TV it changes REALTIME behavior only (historical bars calculate at close either way), and the stack is historical-only                                                     |
-| Margin (`margin_long/short`, liquidation)    | modeled (§9): v6 defaults 100/100, order gating, TV's truncate-then-4× margin-call liquidation at the bar's worst extreme — verified against a 42-event TV ledger (`dev-docs/margin-parity-findings.md`) |
-| Currency conversion                          | single-currency identity; `account_currency` = `'USD'`                                                                                                                                                   |
-| `closedtrades.*` comments / `exit_id`        | na (order comments not plumbed; commissions, times, and per-trade run-up/drawdown ARE tracked)                                                                                                           |
-| Trailing stop                                | position-aggregate activation + group fill (TV: per entry)                                                                                                                                               |
-| Risk emergency close                         | fills next tick pass (TV: next tick of its 4-tick bar walk)                                                                                                                                              |
-| `alert_message` on risk rules & orders       | accepted, ignored (no alert routing in the engine core)                                                                                                                                                  |
+| Area                                      | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OCA groups (`oca_name`/`oca_type`)        | constants accepted, grouping not enforced                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `calc_on_order_fills`                     | **modeled — 55/55 TV trade parity + 110 pinned excursions**: A/W/E1/E2 path points, discrete-next-point and later continuous-level fills, rollback between executions with persistent `varip`/broker state. Accepted fills are preflighted before marks; old exposure is margin-finalized before mutation; post-P&L/commission state is risk-marked before recalculation; forced liquidation recalculates without incrementing filled-order risk and is capped at once per bar. Equity risk and the filled-order cap are pass-granular. Account/margin/risk timing remains an explicitly unverified engineering default (`Driver.historicalBarOnFills`, `StrategyBroker.coof*`; TV ground truth: `dev-docs/calc-parity-findings.md`). |
+| `calc_on_every_tick`                      | parsed and metadata-retained; no historical effect. Realtime `Driver.onTick()` currently executes strategies on every supplied update without consulting the flag, so `false` does not reproduce TV's close-only realtime cadence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Margin (`margin_long/short`, liquidation) | modeled (§9): v6 defaults 100/100, order gating, TV's truncate-then-4× margin-call liquidation at the bar's worst extreme — verified against a 42-event TV ledger (`dev-docs/margin-parity-findings.md`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Currency conversion                       | single-currency identity; `account_currency` = `'USD'`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `closedtrades.*` comments / `exit_id`     | na (order comments not plumbed; commissions, times, and per-trade run-up/drawdown ARE tracked)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Trailing stop                             | position-aggregate activation + group fill (TV: per entry)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Risk emergency close                      | fills next tick pass (TV: next tick of its 4-tick bar walk)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `alert_message` on risk rules & orders    | accepted, ignored (no alert routing in the engine core)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 ## 13. Where it's tested
 
-| File                                          | Covers                                                                                                                                                                                                             |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `test/strategy.test.ts`                       | fills & timing, reverse/netting, pyramiding, close-by-id, exits (brackets, trailing, qty caps), sizing/commission/slippage, `process_orders_on_close`, stats, introspection                                        |
-| `test/strategy-risk.test.ts`                  | all six risk rules (behavioral, multi-day feeds), most-restrictive merging, speculative-tick halt rollback, indicator inertness                                                                                    |
-| `test/strategy-margin.test.ts`                | margin header parsing, order gating (reject-not-reduce, pyramiding, percent_of_equity), full/partial 4× margin calls, short-at-default liquidation, liquidation price, bracket survival, speculative-tick rollback |
-| `test/strategy-metrics.test.ts`               | derived metrics: hand-computed Sharpe/Sortino/volatility/CAGR/Calmar, annualization resolution, exposure counters, streaks, report backward-compat, two-backend metric equality                                    |
-| `test/calc-on-order-fills.test.ts`            | the four-tick model: 4-executions-per-bar doc demo, same-bar bracket exits, `var` rollback vs `varip` persistence across intrabar executions, barstate matrix, final-execution plots, pyramiding fill cascade      |
-| `test/cross-check.test.ts` / `parity.test.ts` | two-backend identical outputs incl. strategy scripts                                                                                                                                                               |
-| `test/ontick-equivalence.test.ts`             | incremental tick processing vs full recompute (broker rollback contract)                                                                                                                                           |
+| File                                          | Covers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test/strategy.test.ts`                       | fills & timing, reverse/netting, pyramiding, close-by-id, exits (brackets, trailing, qty caps), sizing/commission/slippage, `process_orders_on_close`, stats, introspection                                                                                                                                                                                                                                                                                                                                           |
+| `test/strategy-risk.test.ts`                  | all six risk rules (behavioral, multi-day feeds), most-restrictive merging, speculative-tick halt rollback, indicator inertness                                                                                                                                                                                                                                                                                                                                                                                       |
+| `test/strategy-margin.test.ts`                | margin header parsing, order gating (reject-not-reduce, pyramiding, percent_of_equity), full/partial 4× margin calls, short-at-default liquidation, liquidation price, bracket survival, speculative-tick rollback                                                                                                                                                                                                                                                                                                    |
+| `test/strategy-metrics.test.ts`               | derived metrics: hand-computed Sharpe/Sortino/volatility/CAGR/Calmar, annualization resolution, exposure counters, streaks, report backward-compat, two-backend metric equality                                                                                                                                                                                                                                                                                                                                       |
+| `test/calc-on-order-fills.test.ts`            | the path-point model: 4-executions-per-bar doc demo, same-bar bracket exits, `var` rollback vs `varip` persistence, barstate matrix, final-execution plots, pyramiding fill cascade, per-pass risk cap (+ pinned multi-fill-per-pass timing), directional stop-limits, POC re-execution, chronological account marks (late entry/reversal extremes, shared-account folding both backends, history→realtime), exposure-interval margin (late add, deficiency-before-exit, reversal isolation), in-bar equity-risk halt |
+| `test/calc-on-order-fills-tv-parity.test.ts`  | TV ground truth, network-free: replays the time-anchored probe over a bar snapshot and asserts all 55 trades fill-for-fill AND all 110 per-trade favorable/adverse excursion values against the exported List of Trades, on both backends                                                                                                                                                                                                                                                                             |
+| `test/cross-check.test.ts` / `parity.test.ts` | two-backend identical outputs incl. strategy scripts                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `test/ontick-equivalence.test.ts`             | incremental tick processing vs full recompute (broker rollback contract)                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 Every fill/PnL expectation in those tests is hand-computed from the rules in
 this document — if you change a rule here, a test should break.
