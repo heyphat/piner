@@ -53,10 +53,12 @@ per-sleeve arithmetic oracle, bit-for-bit) and `test/portfolio-shared.test.ts`
   (TV's open → nearer extreme → farther extreme → close), sequentially in
   basket order; cross-symbol intrabar interleaving is **not modeled**.
 - **S6 — Margin is per-sleeve against the shared pot.** Each sleeve's
-  `margin_long/short` gates its own orders and drives its own 4× liquidation
-  walk, with the account as funds base: other sleeves' open PnL cushions a
-  call, other sleeves' margin requirements shrink the base. Liquidation only
-  ever closes the violating sleeve's own position — there is **no cross-symbol
+  `margin_long/short` gates its own orders and drives its own truncate-then-4×
+  liquidation, with the account as funds base: other sleeves' open PnL cushions
+  a call, other sleeves' margin requirements shrink the base. Liquidation only
+  ever closes the violating sleeve's own position, at most once per sleeve/bar;
+  under COOF the forced event recalculates that sleeve without increasing its
+  filled-order risk count. There is **no cross-symbol
   netting** and no choosing which sleeve to cut.
 - **S7 — Risk rules read portfolio equity and halt every sleeve.**
   `strategy.risk.max_drawdown` / `max_intraday_loss` evaluate on account

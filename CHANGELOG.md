@@ -4,6 +4,56 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0]
+
+### Added
+
+- **`calc_on_order_fills` — historical intrabar recalculation** (TradingView's
+  "After order is filled" Properties checkbox). Declaring
+  `strategy(calc_on_order_fills = true)` — or forcing it via
+  `EngineOptions.strategy.calcOnOrderFills`, which overrides the header either
+  way — re-executes a strategy after every broker fill on historical bars,
+  so orders placed by a post-fill execution (brackets, pyramids, reversals)
+  can fill on the **same bar**.
+  - Implements the empirically pinned **path-point model**: four fill points
+    per bar — the open twice (arrival + walk start), then the extremes
+    nearer-first; the **close is not a fill point** (leftovers carry to the
+    next bar's open); an order born mid-bar fills **discretely at the next
+    point's price**, then **continuously at its own level**. Derived from and
+    verified against a real TradingView List-of-Trades export
+    (BINANCE:XAUUSDT.P 1h): **all 55 trades fill-for-fill and all 110
+    per-trade favorable/adverse excursion values**, replayed network-free on
+    both backends (`test/calc-on-order-fills-tv-parity.test.ts`).
+  - Account state is marked **chronologically** (every traversed path point,
+    fill price, and the close — never an end-of-bar full-range replay):
+    per-trade MFE/MAE is TV-pinned; margin evaluates per pass over the
+    current **exposure interval** (restarted by every fill, so a late entry
+    or add can never be liquidated at a price it never traversed, and a
+    deficiency is margin-called before a same-bar exit erases it);
+    equity-risk rules halt at the pass where they breach, force-closing at
+    the very next path point; a forced liquidation triggers its own
+    recalculation. Rollback between same-bar executions matches the
+    realtime model: series/`var`/ta/drawings restore, `varip` and the broker
+    persist. Account-level margin/risk **timing** is an engineering default
+    (chronologically sound, not yet TV-evidenced) — see
+    `docs/strategy-broker.md` §12 and `docs/pine-semantics.md` §1.
+  - `process_orders_on_close` composes: a close-pass fill triggers one more
+    execution whose orders carry to the next bar.
+- **`calc_on_every_tick` parsed** into `StrategySettings.calcOnEveryTick` as a
+  deliberate no-op: on TradingView it changes realtime behavior only —
+  historical backtests are identical either way, so this is TV-correct for
+  every backtesting host.
+
+### Changed
+
+- Realtime: the `process_orders_on_close` pass now runs only on a bar's
+  **closing** update instead of speculatively on every tick. Committed
+  results are unchanged (speculative fills were always rolled back); mid-bar
+  realtime read-backs no longer show transient close fills.
+
+Flag-off behavior is byte-for-byte unchanged: strategies that do not declare
+`calc_on_order_fills` produce identical results to 0.9.0.
+
 ## [0.9.0]
 
 ### Changed (breaking)
@@ -483,6 +533,7 @@ Initial release: clean-room Pine Script v6 engine. `compile(src)` lexes → pars
 → analyzes → emits JS and an interpreter oracle, cross-checked for identical
 output. Real indicators (SMA/EMA cross, RSI, Bollinger, ATR, …) run end-to-end.
 
+[0.10.0]: https://github.com/heyphat/piner/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/heyphat/piner/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/heyphat/piner/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/heyphat/piner/compare/v0.7.0...v0.8.0

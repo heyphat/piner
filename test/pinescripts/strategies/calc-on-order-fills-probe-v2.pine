@@ -1,0 +1,90 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════
+// calc_on_order_fills GROUND-TRUTH PROBE v2 — time-anchored
+// (dev-docs/calc-parity-findings.md; supersedes the last_bar_index-anchored v1)
+//
+// Identical logic to v1, but the windows are pinned to ABSOLUTE UTC times so
+// the run reproduces the exact trade list analyzed in the findings ledger
+// (BINANCE:XAUUSDT.P 1h, exported 2026-07-20) no matter when the chart is
+// opened. Purpose of this run: export the PINE LOGS — the per-execution
+// telemetry that resolves the C1 fill-price contradiction, the intrabar OHLC
+// view (O1), barstate (O3), and per-bar execution counts (O4).
+//
+// HOW TO RUN:
+//   1. BINANCE:XAUUSDT.P, 1h, standard candles. Make sure the chart loads
+//      back past 2026-07-19 00:00 UTC.
+//   2. Properties: "After order is filled" ON, "On every tick" OFF,
+//      "Use bar magnifier" OFF.
+//   3. Export the Pine Logs pane (⋯ → export/copy all) and — to confirm the
+//      run matches the analyzed export — the List of Trades CSV again.
+//
+// Log line key: b=bar_index e=exec# k=exec#-within-bar t=bar time (UTC)
+//   o/h/l/c/v = built-ins AS SEEN BY THIS EXECUTION
+//   new/conf/hist = barstate.isnew/isconfirmed/ishistory
+//   pos/avg/eq/op = position_size / position_avg_price / equity / openprofit
+// ═══════════════════════════════════════════════════════════════════════════
+strategy("COOF ground-truth probe v2", overlay = false, calc_on_order_fills = true,
+     pyramiding = 1, initial_capital = 1000000, default_qty_type = strategy.fixed,
+     default_qty_value = 1)
+
+// Absolute UTC anchors (bar OPEN times) — the analyzed windows.
+int A_FIRST = timestamp("UTC", 2026, 7, 19, 1, 0)  // cascade orders: 01:00..10:00
+int A_LAST  = timestamp("UTC", 2026, 7, 19, 10, 0)
+int A_FLUSH = timestamp("UTC", 2026, 7, 19, 11, 0)
+int B_FIRST = timestamp("UTC", 2026, 7, 19, 16, 0) // bracket window: 16:00..01:00
+int B_LAST  = timestamp("UTC", 2026, 7, 20, 1, 0)
+int B_FLUSH = timestamp("UTC", 2026, 7, 20, 2, 0)
+int LOG_LO  = timestamp("UTC", 2026, 7, 19, 0, 0)
+int LOG_HI  = timestamp("UTC", 2026, 7, 20, 3, 0)
+
+varip int execNum = -1
+varip int lastBar = -1
+varip int execInBar = -1
+execNum += 1
+if bar_index != lastBar
+    lastBar := bar_index
+    execInBar := 0
+else
+    execInBar += 1
+
+// ── Window A: flip on every execution → maximal fill cascade ──────────────
+if time >= A_FIRST and time <= A_LAST
+    if strategy.position_size <= 0
+        strategy.entry("L", strategy.long)
+    else
+        strategy.entry("S", strategy.short)
+if time == A_FLUSH and strategy.position_size != 0
+    strategy.close_all()
+
+// ── Window B: entry when flat + ±2-tick bracket → same-bar exit prices ────
+if time >= B_FIRST and time <= B_LAST
+    if strategy.position_size == 0
+        strategy.entry("B", strategy.long)
+    if strategy.position_size > 0
+        strategy.exit("BX", "B", profit = 2, loss = 2)
+if time == B_FLUSH
+    strategy.cancel_all()
+    if strategy.position_size != 0
+        strategy.close_all()
+
+// ── Telemetry: one log line per EXECUTION across the probed stretch ───────
+if time >= LOG_LO and time <= LOG_HI
+    string idPart = str.format("b={0} e={1} k={2} t={3}",
+         str.tostring(bar_index), str.tostring(execNum), str.tostring(execInBar),
+         str.format_time(time, "yyyy-MM-dd HH:mm", "UTC"))
+    string pxPart = str.format(" o={0} h={1} l={2} c={3} v={4}",
+         str.tostring(open, "#.########"), str.tostring(high, "#.########"),
+         str.tostring(low, "#.########"), str.tostring(close, "#.########"),
+         str.tostring(volume, "#.########"))
+    string stPart = str.format(" new={0} conf={1} hist={2} pos={3} avg={4} eq={5} op={6}",
+         barstate.isnew ? "1" : "0", barstate.isconfirmed ? "1" : "0",
+         barstate.ishistory ? "1" : "0",
+         str.tostring(strategy.position_size, "#.####"),
+         str.tostring(strategy.position_avg_price, "#.########"),
+         str.tostring(strategy.equity, "#.####"),
+         str.tostring(strategy.openprofit, "#.####"))
+    log.info(idPart + pxPart + stPart)
+
+plot(execNum, "Execution number", color.purple, 5)
+plot(bar_index, "Bar index", color.aqua, 2)
+bgcolor(barstate.ishistory ? color.new(color.orange, 85) : na, title = "History")

@@ -28,18 +28,20 @@ This is the authoritative internal reference for piner's Pine v6 strategy simula
 
 The simulation lives in one shared runtime class, `StrategyBroker` (`src/runtime/builtins/strategy.ts`). Because piner is a two-backend engine, the broker is exercised **identically** by both the generated-JS backend (`codegen/emit.ts`) and the AST interpreter (`interp/interpreter.ts`) over the same runtime `$` = `ExecutionContext`; the test suite asserts byte-for-byte identical output, so any change to fill/PnL/accounting semantics is a change to this one class and needs matching tests, not a per-backend edit.
 
-**Hooks.** The broker is reached through two `ExecutionContext` methods that just delegate (`context.ts:384-390`):
+**Hooks.** The broker is reached through two `ExecutionContext` methods that just delegate (`context.ts`):
 
 ```ts
-onStrategyBar(): void { this.strategyBroker.onBar(); }          // before the script body
-onStrategyBarClose(): void { this.strategyBroker.onBarClose(); } // after it
+onStrategyBar(): void { this.strategyBroker.onBar(); }            // before the script body
+onStrategyBarClose(): number { return this.strategyBroker.onBarClose(); } // after it
 ```
 
-**Historical bar** (`driver.ts:70-80`): `beginBar` sets O/H/L/C/Time slots → `$.onStrategyBar()` fills pending orders against this bar's open/range → `main($)` runs the script and queues new orders → `$.onStrategyBarClose()` runs the `process_orders_on_close` pass → `$.series.commitBar()`.
+The close hook reports user fills plus forced margin mutations so the driver can schedule one COOF post-pass execution.
 
-**Next-bar-open default.** Because `onStrategyBar()` for bar N runs _before_ bar N's `main($)`, an order queued during bar N is not filled that bar — it sits in `this.pending`/`this.exits` and is first tested on bar **N+1**'s `onBar()` pass, filling market orders at **bar N+1's open** (`strategy.ts:2-8`).
+**Historical bar** (`driver.ts`): `beginBar` sets O/H/L/C/Time slots → `$.onStrategyBar()` fills pending orders against this bar's open/range → `main($)` runs the script and queues new orders → `$.onStrategyBarClose()` runs the `process_orders_on_close` pass → `$.series.commitBar()`.
 
-**Realtime / rollback** (`driver.ts:86-111`): each tick does `rollback()` → `beginBar(tick, committed)` → `onStrategyBar()` → `main($)` → `onStrategyBarClose()`, committing only when `isClose`. This is the _same_ fill pass run against the developing (mutable) O/H/L of the open bar, so orders fill intrabar and repaint until the bar closes. `rollback()` (`driver.ts:113-120`) truncates `SeriesStore` to committed length and calls `$.restoreMutable(this.snapshot)`, which restores `ta`, `draw`, and `strategyBroker.restore(snap.strategy)` — so pending orders and fills produced by a superseded tick are discarded before replay. Snapshot/restore taxonomy is in §15.2.
+**Next-bar-open default.** Because `onStrategyBar()` for bar N runs _before_ bar N's `main($)`, an order queued during bar N is not filled that bar — it sits in `this.pending`/`this.exits` and is first tested on bar **N+1**'s `onBar()` pass, filling market orders at **bar N+1's open** (`strategy.ts`).
+
+**Realtime / rollback** (`driver.ts`): each supplied update does `rollback()` → `beginBar(tick, committed)` → `onStrategyBar()` → `main($)`. Only a closing update then runs `onStrategyBarClose()`, and only `isClose` commits. If that POC pass mutates the broker with COOF enabled, ordinary script state rolls back while broker state and `varip` persist, then `main($)` runs once more before commit. The ordinary fill pass uses the developing (mutable) O/H/L, so orders can fill intrabar and repaint until close. `rollback()` truncates `SeriesStore` to committed length and restores `ta`, `draw`, and `strategyBroker` state, discarding pending orders and fills from a superseded update. Snapshot/restore taxonomy is in §15.2.
 
 Derived analytics (Sharpe, CAGR, buy-&-hold, close-to-close phases) are **not** in the broker — they live in the pure reduction `computeStrategyMetrics` (`src/engine/strategy-metrics.ts`), which consumes the report. Multi-symbol backtests are orchestrated by `PortfolioEngine` (`src/engine/portfolio-engine.ts`), covered in §15.
 
@@ -49,18 +51,20 @@ Derived analytics (Sharpe, CAGR, buy-&-hold, close-to-close phases) are **not** 
 
 All broker configuration lives in one mutable `StrategyBroker.settings: StrategySettings` object (interface `strategy.ts:50-69`), initialized to Pine-v6 defaults (`strategy.ts:253-265`) and overwritten by `configure()` (`strategy.ts:424-430`) with a `Partial<StrategySettings>` parsed from the `strategy(...)` header by `extractStrategySettings()` (`compiler.ts:247-288`).
 
-| Setting (field)        | Pine `strategy()` arg     | Type                                               | Default     | Effect                                                                          |
-| ---------------------- | ------------------------- | -------------------------------------------------- | ----------- | ------------------------------------------------------------------------------- |
-| `initialCapital`       | `initial_capital`         | number                                             | `1_000_000` | Seeds the funding `Account`; sets drawdown/run-up baselines.                    |
-| `qtyType`              | `default_qty_type`        | `'fixed'\|'cash'\|'percent_of_equity'`             | `'fixed'`   | Selects the `defaultQty()` sizing formula (§3).                                 |
-| `qtyValue`             | `default_qty_value`       | number                                             | `1`         | Numeric operand of the sizing formula.                                          |
-| `commissionType`       | `commission_type`         | `'percent'\|'cash_per_contract'\|'cash_per_order'` | `'percent'` | Selects the `commission()` fee formula (§6).                                    |
-| `commissionValue`      | `commission_value`        | number                                             | `0`         | Fee operand; `<= 0` short-circuits to no fee.                                   |
-| `pyramiding`           | `pyramiding`              | number                                             | `1`         | Max simultaneously-open `strategy.entry` lots per direction (§4).               |
-| `slippage`             | `slippage`                | number (ticks)                                     | `0`         | Adverse fill offset `= slippage * mintick` (§7).                                |
-| `processOrdersOnClose` | `process_orders_on_close` | boolean                                            | `false`     | Adds an extra same-bar-close fill pass (§5).                                    |
-| `marginLong`           | `margin_long`             | number (percent)                                   | `100`       | Equity share required to hold a long; `0` disables the funds/margin check (§8). |
-| `marginShort`          | `margin_short`            | number (percent)                                   | `100`       | Same for shorts (can still be liquidated at 100) (§8).                          |
+| Setting (field)        | Pine `strategy()` arg     | Type                                               | Default     | Effect                                                                              |
+| ---------------------- | ------------------------- | -------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------- |
+| `initialCapital`       | `initial_capital`         | number                                             | `1_000_000` | Seeds the funding `Account`; sets drawdown/run-up baselines.                        |
+| `qtyType`              | `default_qty_type`        | `'fixed'\|'cash'\|'percent_of_equity'`             | `'fixed'`   | Selects the `defaultQty()` sizing formula (§3).                                     |
+| `qtyValue`             | `default_qty_value`       | number                                             | `1`         | Numeric operand of the sizing formula.                                              |
+| `commissionType`       | `commission_type`         | `'percent'\|'cash_per_contract'\|'cash_per_order'` | `'percent'` | Selects the `commission()` fee formula (§6).                                        |
+| `commissionValue`      | `commission_value`        | number                                             | `0`         | Fee operand; `<= 0` short-circuits to no fee.                                       |
+| `pyramiding`           | `pyramiding`              | number                                             | `1`         | Max simultaneously-open `strategy.entry` lots per direction (§4).                   |
+| `slippage`             | `slippage`                | number (ticks)                                     | `0`         | Adverse fill offset `= slippage * mintick` (§7).                                    |
+| `processOrdersOnClose` | `process_orders_on_close` | boolean                                            | `false`     | Adds an extra same-bar-close fill pass (§5).                                        |
+| `calcOnOrderFills`     | `calc_on_order_fills`     | boolean                                            | `false`     | Historical A/W/E1/E2 re-execution plus realtime post-POC-fill replay (§5).          |
+| `calcOnEveryTick`      | `calc_on_every_tick`      | boolean                                            | `false`     | Metadata-retained; no historical effect; realtime flag-off cadence is not enforced. |
+| `marginLong`           | `margin_long`             | number (percent)                                   | `100`       | Equity share required to hold a long; `0` disables the funds/margin check (§8).     |
+| `marginShort`          | `margin_short`            | number (percent)                                   | `100`       | Same for shorts (can still be liquidated at 100) (§8).                              |
 
 **v6/v5 divergence** (`strategy.ts:262`, `compiler.ts:279-280`): `margin_long`/`margin_short` default to **100** (v6, no leverage). An explicit `0` restores the v5 no-funds-check behavior. Omitting the arg keeps 100/100. Note the `initialCapital` default is `1_000_000`, not TV's older 100000.
 
@@ -78,17 +82,26 @@ configure(s: Partial<StrategySettings>): void {
 
 Merges the parsed partial over defaults (unspecified args keep defaults), marks the broker `active` (order-entry points are no-ops while `!active`, e.g. `entry()` at `strategy.ts:583`), syncs `account.initial = initialCapital` **only if the broker owns its account** (`ownAccount`; under a shared portfolio account the sync is skipped, `strategy.ts:270-272`), and re-seeds `peakEquity`/`valleyEquity` to the account initial. Called via `ExecutionContext.configureStrategy()` (`context.ts:391-393`).
 
-**Arg parsing** (`extractStrategySettings`, `compiler.ts:247-288`):
+**Arg parsing** (`extractStrategySettings`, `compiler.ts`):
 
-- Numeric args (`initial_capital`, `default_qty_value`, `commission_value`, `pyramiding`, `slippage`, `margin_long`, `margin_short`) are read via `num()`→`numLit()`, which accepts only a numeric literal or unary-minus numeric literal (`compiler.ts:291-295`). Non-literal expressions → `undefined` → default kept.
-- Enum args (`default_qty_type`, `commission_type`) are read via `enumLeaf()` (`compiler.ts:254-257`) taking the `.property` leaf of a `strategy.foo` Member expression, then validated against the allowed set (`compiler.ts:262-274`); an unrecognized leaf keeps the default.
-- `process_orders_on_close` must be a `Bool` literal (`compiler.ts:285-286`).
+- Numeric args (`initial_capital`, `default_qty_value`, `commission_value`, `pyramiding`, `slippage`, `margin_long`, `margin_short`) are read via `num()`→`numLit()`, which accepts only a numeric literal or unary-minus numeric literal. Non-literal expressions → `undefined` → default kept.
+- Enum args (`default_qty_type`, `commission_type`) are read via `enumLeaf()`, taking the `.property` leaf of a `strategy.foo` Member expression, then validated against the allowed set; an unrecognized leaf keeps the default.
+- `process_orders_on_close`, `calc_on_order_fills`, and
+  `calc_on_every_tick` accept boolean literals and compile-time scalar
+  expressions, including references to preceding global constant declarations.
+  COOF selects the historical A/W/E1/E2 scheduler and the realtime post-POC-fill
+  replay. `calc_on_every_tick` is retained in metadata and has no historical
+  effect; the current realtime driver does not branch on it.
 
-**Options NOT implemented (silently ignored):**
+**Options not implemented or intentionally limited:**
 
-- `calc_on_every_tick` — no setting; realtime recomputation is governed structurally by the driver's rollback/replay, not a toggle.
-- `calc_on_order_fills` — not parsed, no effect.
-- `close_entries_rule` — not parsed. Closes are **always FIFO** by lot (`closePosition`, `strategy.ts:1355-1364`); there is no `ANY` mode.
+- `calc_on_every_tick` — realtime flag-off cadence is not implemented:
+  `Driver.onTick()` follows every supplied update for strategies regardless of
+  the parsed value. Thus `true` can follow TV's every-update cadence when the
+  host supplies those updates, while `false` currently does not defer execution
+  to the closing update.
+- `close_entries_rule` — not parsed. Closes are **always FIFO** by lot; there is
+  no `ANY` mode.
 - `currency` — not parsed. `account_currency` is hardcoded `'USD'` (`strategy.ts:1563-1565`); currency conversions are identity passthroughs (`emit.ts:759`, `interpreter.ts:791`).
 - `oca_name` / `oca_type`, `comment`, `alert` / `alert_message` — accepted-and-ignored order/risk parameters; see §4 (exposed constants) and §16 (parity notes).
 
@@ -460,27 +473,43 @@ if (m > 0) {
 
 The entry `fee` counts against affordability (parity question P4 — parity questions are catalogued in §16; `strategy.ts:1285`). `m = 0` skips the block (v5). Under a shared account, the rest of the basket's margin is first-come-first-served (spec S4 — the portfolio clauses S1–S9 live in `docs/portfolio-semantics.md` and are summarized in §15; potential divergence from TV per-symbol accounting).
 
-### Forced liquidation / margin call (`marginCheck`, `strategy.ts:1027-1050`)
+### Forced liquidation / margin call (`marginCheck`)
 
-Runs from `markToMarket` on every processed tick. Walks the same assumed intrabar path `h-o<o-l ? [o,h,l,close] : [o,l,h,close]` and at the **first point where marked equity falls below required margin** (strictly — the exact boundary does _not_ trip, guarded by the `1e-9` tolerance at `strategy.ts:1039`), force-closes **four times** the quantity needed to cover the deficit, capped at the whole position.
+The ordinary broker may inspect margin in both its bar-range pass and a
+`process_orders_on_close` pass; COOF carries a price window for each exposure
+interval and invokes the same formula at each interval boundary. All paths use
+`lastMarginCallBar` to permit at most one real forced liquidation for a broker
+on a bar. An accepted close, reduction, or reversal first extends/finalizes the
+old interval at its execution price; only then does execution mutate lots and
+restart the surviving/new interval. This ordering prevents a fill at the
+deficient coordinate from deleting the very exposure margin must evaluate.
+
+At the selected price `p`, the exact boundary does not trip. A real deficit is
+converted with TV's truncate-then-4× model:
 
 ```ts
-const path = h-o < o-l ? [o,h,l,close] : [o,l,h,close];
-for (const p of path) {
-  if (size === 0) break;
-  const equity = account.equityExcludingOpen(this) + size * (p - avgPrice);
-  const required = p * |size| * m + account.requiredMarginExcluding(this);
-  const deficit = required - equity;
-  if (deficit <= 1e-9) continue;                     // :996 — exact boundary does NOT trip
-  const qLiquidate = Math.min((4 * deficit) / (p * m), |size|);
-  this.closePosition(p, qLiquidate);
-  this.marginCallCount++;
+const deficit = requiredMargin(p) - equity(p);
+if (deficit > 1e-9) {
+  const qToCover = deficit / m / p;
+  const q9 = truncToMinQty(qToCover);
+  const qLiquidate = Math.min(q9 > 0 ? 4 * q9 : 1, Math.abs(size));
+  closePosition(p, qLiquidate);
 }
 ```
 
-Rationale (`strategy.ts:1020-1021`): selling `q` at `p` cuts the requirement by `p·q·m`, so `qToCover = deficit/(p·m)`; the emulator liquidates 4× that (TV's "liquidate four times the amount required" rule to avoid constant margin-call events). The walk **continues with the reduced position** — a second violation liquidates again; the loop terminates because `|size|` shrinks. **Not a halt** (unlike a risk trip): pending orders and exits survive on the smaller position. Fill price is the violating path point `p` (parity question P1, `strategy.ts:1025`). Each liquidation increments `marginCallCount`, reported as `marginCalls` (`strategy.ts:1344`; always 0 with margins off). The bar's equity-curve point is re-marked with the post-call position (`strategy.ts:1049`), but drawdown/run-up extremes keep the pre-call path marks (the dip genuinely happened).
+A broker liquidates at most once per bar. `lastMarginCallBar` enforces that
+cadence for ordinary, POC, and COOF passes and is included in realtime snapshot
+state. The cadence is verified for the flag-off 42-event TV ledger and is an
+explicit engineering default under COOF pending direct evidence. Liquidation is
+not a risk halt: orders/brackets survive and `riskDayFills` does not increase. Under COOF it advances a separate
+forced-event sequence, causing same-bar script recalculation with the reduced
+position. A post-liquidation account mark includes realized loss and commission
+for equity risk, while the pre-call deficient mark remains in drawdown/run-up.
 
-**Edge cases.** `m <= 0` short-circuits all three mechanisms (gate skipped, no walk, required-margin 0, liquidation price NaN). Fully-funded long → no finite liquidation price. Private account: `requiredMarginExcluding = 0`, `equityExcludingOpen = initial + realized` bit-for-bit. `valuationPrice` falls back to `lastMark` when `host.close` is NaN (stale-close cross-sleeve semantics, spec S5).
+**Edge cases.** `m <= 0` disables the gate, calls, and liquidation price. A
+fully-funded long has no finite liquidation price. Shared accounts evaluate the
+violating sleeve against the common pot and other sleeves' reserved margin but
+only liquidate that sleeve (portfolio spec S6).
 
 ---
 
@@ -870,7 +899,9 @@ Invariant (`strategy-broker.md:568-570`): any new mutable broker field MUST join
 - **Point value = 1.** PnL is price delta × contracts; `syminfo.pointvalue` is decorative (hardcoded 1). Instruments with point value ≠ 1 (futures/FX) are not modeled — both slippage-cost-in-currency and PnL would need a multiplier for parity.
 - **`close_entries_rule` not implemented** — closes are always FIFO by lot (`strategy.ts:1355-1364`); TV also supports `'ANY'`.
 - **Single-currency build** — `account_currency` hardcoded `'USD'` (`strategy.ts:1563-1565`); currency conversions are identity passthroughs.
-- **`calc_on_every_tick` / `calc_on_order_fills`** are parsed away (no setting field); realtime recomputation is governed structurally by the driver's rollback/replay, not these toggles.
+- **`calc_on_every_tick`** is parsed and adds no historical executions, but
+  realtime flag-off cadence is a known deviation: `Driver.onTick()` executes
+  strategies on every supplied update without consulting the flag. **`calc_on_order_fills` is implemented** for historical A/W/E1/E2 path-point re-execution with rollback, chronological accepted-fill/account marking, pre-mutation exposure margin, and forced-liquidation recalculation. Margin/risk cadence beyond the pinned fill/excursion ledger remains an engineering default.
 - **OCA not implemented.** The `strategy.oca.{none,cancel,reduce}` constants exist (`strategy.ts:1446`) but `entry`/`order`/`exit` accept no `oca_name`/`oca_type` argument (`strategy.ts:1464-1509`); exit brackets self-reserve within a single bracket per §4, but there is **no cross-order OCA-group cancellation**.
 - **`comment` / `alert` / `alert_message` not modeled.** These order and `strategy.risk.*` parameters are accepted and silently ignored — there is no alert feed in piner (`risk.*` `alert_message` args are explicitly discarded, `strategy.ts:1450`, `1408-1415`).
 - **Sharpe / Sortino basis.** Both use **per-bar simple equity returns (including flat bars)** with a default `riskFreeRate = 0` and a configurable annualization basis (`periodsPerYear` → empirical → 24/7 → 252, §14), versus TV's **monthly** returns with a **2%/year** default RFR and a fixed monthly convention. Pass `opts.riskFreeRate` to narrow the gap. See `tradingview-strategy-report-metrics.md §2`.
@@ -882,7 +913,7 @@ Invariant (`strategy-broker.md:568-570`): any new mutable broker field MUST join
 - Exit reservation validated against TV's reversed-exit demo (qty-19 limit + qty-20 stop on 20 shares → stop covers exactly 1, `strategy.ts:1072-1075`); exit-persist scoping (`maxSeq`, an exit does not affect subsequent same-id entries) follows Pine's exit-persist demo.
 - Pyramiding cap applies only to `strategy.entry`, not `strategy.order` (`strategy.ts:1262-1266`); cap-frees-on-close matches TV.
 - Limit fills get no slippage (slippage can only improve a limit); only market and stop/trailing fills are adjusted adversely.
-- Margin math cites the Help-Center leverage article (PointValue = 1); forced liquidation uses TV's "4× the amount required" rule; `marginLiquidationPrice` tick-rounding per `dev-docs/margin-plan.md §4`. **Doc-reconciliation note:** this margin coverage (forced 4× liquidation, finite `strategy.margin_liquidation_price`, `report().marginCalls` = `marginCallCount`) is the current, correct behavior per `docs/strategy-broker.md §9`, and **supersedes** the now-stale `docs/tradingview-strategy-report-metrics.md §5/§9` (which still claims margin calls are "Not implemented" and that `margin_liquidation_price` "always reads na"). Do not treat that section as authoritative.
+- Margin math cites the Help-Center leverage article (PointValue = 1); forced liquidation uses TV's truncate-then-4× quantity rule; `marginLiquidationPrice` tick-rounding follows `dev-docs/margin-plan.md §4`; `report().marginCalls` exposes the call count. `docs/strategy-broker.md §9` and `docs/tradingview-strategy-report-metrics.md §5` are reconciled with this implementation.
 - One `ClosedTrade` row per entry lot touched (FIFO) mirrors TV's ledger shape; `totalCommission` = TV "Commission Paid"; `marginCalls` = TV "Margin Calls"; `max_contracts_held_*` = TV "Max contracts held".
 - Buy-&-hold benchmark enters at the first closed trade's entry fill (TV's stated basis). Caveat: the entry-fill base **includes configured slippage**; TV's asset-price basis may not — a documented parity caveat (`tradingview-strategy-report-metrics.md §1`).
 - Close-to-close phase definitions follow `docs/tradingview-strategy-report-metrics.md` (drawdown = peak → recovery to previous peak, incomplete trailing phases excluded from averages; run-up = local minimum → last new peak).

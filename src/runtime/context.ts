@@ -385,8 +385,8 @@ export class ExecutionContext {
     this.strategyBroker.onBar();
   }
   /** Driver hook (after the script body): same-bar-close fills for process_orders_on_close. */
-  onStrategyBarClose(): void {
-    this.strategyBroker.onBarClose();
+  onStrategyBarClose(): number {
+    return this.strategyBroker.onBarClose();
   }
   configureStrategy(s: Partial<StrategySettings>): void {
     this.strategyBroker.configure(s);
@@ -1243,6 +1243,17 @@ export class ExecutionContext {
     this.strategyBroker.restore(snap.strategy); // pending orders/fills from a superseded tick are discarded
     this.out.alerts.length = snap.alertCount; // ditto duplicate alert/log events
     // only varips intentionally escape rollback within the same realtime bar
+  }
+
+  /** calc_on_order_fills intrabar rollback: like restoreMutable but the BROKER
+   *  keeps its state — intrabar fills are real and must survive the re-execution
+   *  (varip is exempt as always). dev-docs/calc-behavior-plan.md §3.3. */
+  restoreMutableExceptStrategy(snap: RollbackSnapshot): void {
+    this.ta.restore(snap.ta);
+    this.vars = structuredClone(snap.vars);
+    this.misc = structuredClone(snap.misc);
+    this.drawPool.restore(snap.draw);
+    this.out.alerts.length = snap.alertCount;
   }
 
   /** Drop request.security caches — the driver calls this on each realtime tick so

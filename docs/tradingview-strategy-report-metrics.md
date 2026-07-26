@@ -256,19 +256,24 @@ below means "no field currently surfaces this," not a commitment to add it.
 
 ## 5. Margin
 
-**None of this section is modeled in piner.** Per `docs/strategy-broker.md` §11: margin (`margin_long`/`margin_short`, liquidation) is not modeled; `margin_liquidation_price` always reads `na`, matching Pine's behavior when a strategy declares no `margin_long`/`margin_short`.
+Piner models the broker mechanics: `margin_long`/`margin_short` funds gating,
+`strategy.margin_liquidation_price`, TV's truncate-then-4× forced liquidation,
+and `StrategyReport.marginCalls`. The 42-event flag-off liquidation ledger is
+fill/quantity-pinned. What remains absent is the Strategy Tester aggregation
+family that requires per-bar used-margin history or tagged liquidation volume.
 
 ### Average margin used
 
 **Definition:** Average per-bar used-margin value (sampled at bar close) across the tested period.
 **Formula:** Sum of per-bar-close used margin ÷ number of bars.
-**Piner:** Not implemented — no margin model.
+**Piner:** Not implemented — required margin is live broker state, but no per-bar
+used-margin series is retained in `StrategyReport`.
 
 ### Max margin used
 
 **Definition:** Peak margin required at any point in the tested period.
 **Formula:** Not explicitly formulaic.
-**Piner:** Not implemented.
+**Piner:** Not implemented as a report metric.
 
 ### Margin efficiency
 
@@ -280,7 +285,10 @@ below means "no field currently surfaces this," not a commitment to add it.
 
 **Definition:** Count of margin calls triggered over the tested period.
 **Formula:** Not explicitly formulaic.
-**Piner:** Not implemented.
+**Piner:** `StrategyReport.marginCalls`, incremented by the broker's forced
+liquidation path. Implemented. Under COOF, calls use chronological exposure
+intervals, schedule same-bar recalculation, and are capped at one per bar as an
+explicit engineering default pending direct TV COOF evidence.
 
 ## 6. Run-up
 
@@ -395,19 +403,20 @@ Updated 2026-07-06 after a gap-closing pass (every remaining gap was re-checked
 against the original TradingView article; nothing below is implementable from
 what TV publishes without inventing semantics):
 
-**Remaining gaps — no piner equivalent (9 of 53):**
+**Remaining gaps — no piner equivalent (8 of 53):**
 
-- **Margin/liquidation model absent** (6): Average/Max margin used, Margin
-  efficiency, Margin calls, Total/Largest liquidated volume. Piner models no
-  margin (`docs/strategy-broker.md` §11); TV additionally publishes no formula
-  for Margin efficiency, and Margin calls / liquidation require simulating
-  TV's forced-liquidation walk.
+- **Margin summary metrics absent** (5): Average/Max margin used, Margin
+  efficiency, Total/Largest liquidated volume. The broker now models funds
+  gating, liquidation, liquidation price, and the margin-call count; these five
+  Strategy Tester aggregates still need a used-margin time series and/or
+  forced-liquidation volume tags. TV also publishes no formula for Margin
+  efficiency.
 - **Formula unpublished by TradingView** (3): Account size required, Return on
   account size required, Return of max drawdown — the articles are conceptual
   prose only (verified against each article). Not implemented rather than
   guessed. (`calmar` remains the documented cousin of Return of max drawdown.)
 
-**Everything else (44 of 53) has a direct piner field**, split across:
+**Everything else (45 of 53) has a direct piner field**, split across:
 
 - Pine builtins / broker report (`src/runtime/builtins/strategy.ts`) — the
   `strategy.*` family, TV-exact.

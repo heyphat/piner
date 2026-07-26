@@ -989,14 +989,20 @@ describe('realistic strategy corpus (test/pinescripts/strategies)', () => {
     expect(js.strategy.netProfit).toBeCloseTo(-819.4135, 3);
   });
 
-  it('38 + 39 calc_on_order_fills: DEVIATION — the flag is ignored (no intrabar recalculation)', async () => {
-    // TV recalculates after each fill even on historical bars, producing extra
-    // same-bar orders; piner runs the default once-per-bar model.
+  it('38 + 39 calc_on_order_fills: intrabar recalculation after each fill (path-point model)', async () => {
+    // The path-point model (A/W at the open, then E1/E2; close is not a fill
+    // point) — pinned 55/55 against a real TV trade export on BINANCE:XAUUSDT.P
+    // (dev-docs/calc-parity-findings.md; test/calc-on-order-fills-tv-parity).
+    // Brackets placed by the post-entry execution can exit the SAME bar.
     const { js: a } = await runReal(`${TVD}/38-intrabar-exit.pine`);
-    expect(a.strategy.closedTrades.length).toBe(55);
+    expect(a.strategy.closedTrades.length).toBe(87); // was 55 with the flag ignored
+    expect(a.strategy.closedTrades.filter((t) => t.entryBar === t.exitBar).length).toBe(13);
+    expect(a.ctx.strategy.position_size).toBe(1);
     const { js: b } = await runReal(`${TVD}/39-buy-on-every-fill.pine`);
     expect(b.strategy.closedTrades.length).toBe(0);
-    expect(b.ctx.strategy.position_size).toBe(25); // one fill per bar over the last 26 signals
+    // 26 signal bars × 4 fills per bar = 104 attempts, capped by pyramiding=100
+    // (was 25 — one fill per bar — with the flag ignored).
+    expect(b.ctx.strategy.position_size).toBe(100);
   });
 
   it('40 + 41 commission demos: commission drags netProfit and is reported as totalCommission', async () => {
