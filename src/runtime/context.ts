@@ -55,6 +55,7 @@ import {
   SettlementNs,
 } from './builtins/constants.js';
 import type { BarState } from './barstate.js';
+import type { BarMagnifierData } from '../engine/feed.js';
 
 /** Seconds in one bar of a timeframe string ("" / "S" / "D" / "W" / "M" units).
  *  Memoized: `time_close`/`timenow` read it every bar, but a context's timeframe is fixed
@@ -228,11 +229,22 @@ export class ExecutionContext {
   /** Symbol & timeframe of the current run (set by the Engine). */
   symbol = '';
   tfStr = '';
+  /** Validated mapped target for the current requested run. Undefined before a
+   *  successful bind or when Bar Magnifier is off; reports never remap ad hoc. */
+  barMagnifierTargetTimeframe: string | undefined;
   /** Full base-bar series (for request.security resampling); set by the Engine. */
   allBars: BaseBar[] = [];
   /** Host-injected base bars for CROSS-symbol request.security, keyed by the requested
    *  symbol (piner never fetches — fractal supplies these from its market-data layer). */
   securityBars = new Map<string, BaseBar[]>();
+  /** Host-injected Bar Magnifier LTF dataset (bar-magnifier plan §3.4). A dedicated
+   *  channel, never a securityBars key: a script's own request.security_lower_tf for
+   *  the same timeframe must not couple to fill simulation. null → no data (every
+   *  chart bar keeps the exact non-magnifier fallback). Driver validates and prepares
+   *  private immutable buckets before historical execution, then consumes available
+   *  buckets only for the experimental no-COOF slice; COOF/realtime/cap/no-data keep
+   *  the established chart path (plan §5.4/§5.5). */
+  magnifierData: BarMagnifierData | null = null;
   /** History columns declared (for request.security sub-contexts). */
   historySlotCount = BuiltinSlot.Count;
   private secCache = new Map<number, unknown[]>();

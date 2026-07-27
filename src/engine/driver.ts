@@ -13,8 +13,16 @@
 import type { ExecutionContext, RollbackSnapshot } from '../runtime/context.js';
 import { BuiltinSlot } from '../runtime/context.js';
 import { historicalBarState, realtimeBarState } from '../runtime/barstate.js';
-import { emulatorTickPath } from '../runtime/builtins/strategy.js';
+import {
+  beginMagnifiedChartBar,
+  emulatorTickPath,
+  endMagnifiedChartBar,
+  processMagnifierIntrabar,
+  recordMagnifierFallback,
+  recordRealtimeMagnifierFallback,
+} from '../runtime/builtins/strategy.js';
 import type { Bar } from './feed.js';
+import { prepareMagnifierBuckets, type IntrabarBucket } from './intrabars.js';
 
 /** A compiled script body: runs once for the current bar against `$`. */
 export type ScriptFn = ($: ExecutionContext) => void;
@@ -28,15 +36,48 @@ export class Driver {
   /** Bars bound by prepareHistorical(), consumed one at a time by stepHistorical(). */
   private pending: Bar[] | null = null;
   private stepIdx = 0;
+  /** Validated immutable buckets for the current historical run. */
+  private magnifierBuckets: readonly IntrabarBucket[] | null = null;
 
   constructor(
     private readonly main: ScriptFn,
     private readonly $: ExecutionContext,
   ) {}
 
+  /**
+   * Prepare all run-wide historical state before the first script execution.
+   * Both runHistorical() and prepareHistorical()/stepHistorical() enter through
+   * this seam, so injected magnifier data is validated/partitioned exactly once
+   * per prepared run. Flag-off and null-data runs do not touch the dataset.
+   */
+  private prepareHistoricalRun(bars: Bar[]): void {
+    this.magnifierBuckets = null;
+    this.$.lastBarIndex = bars.length - 1;
+    const broker = this.$.strategyBroker;
+    if (broker.active && broker.settings.useBarMagnifier && this.$.magnifierData !== null) {
+      this.magnifierBuckets = prepareMagnifierBuckets(bars, this.$.tfStr, this.$.magnifierData);
+      // Bucket count is part of the internal data contract. Fail before any
+      // script execution rather than silently mixing mismatched chart indices.
+      if (this.magnifierBuckets.length !== bars.length) {
+        throw new Error('bar magnifier: internal bucket/chart length mismatch');
+      }
+    }
+  }
+
+  /** Discard work bound by an earlier prepare(). Engine calls this before
+   *  run-identity validation too, so even a bind-time failure cannot leave stale
+   *  bars step-able under a rejected symbol/timeframe. */
+  discardHistoricalPreparation(): void {
+    this.pending = null;
+    this.stepIdx = 0;
+    this.magnifierBuckets = null;
+  }
+
   /** Run the full historical dataset, committing each bar. */
   runHistorical(bars: Bar[]): void {
-    this.$.lastBarIndex = bars.length - 1;
+    // runHistorical() also defends direct Driver callers that bypass Engine.
+    this.discardHistoricalPreparation();
+    this.prepareHistoricalRun(bars);
     for (let i = 0; i < bars.length; i++) this.historicalBar(bars, i);
     // Capture state as of the last confirmed bar so realtime ticks can roll back.
     this.snapshot = this.$.snapshotMutable();
@@ -51,9 +92,10 @@ export class Driver {
    * the realtime onTick() path cannot provide that.
    */
   prepareHistorical(bars: Bar[]): void {
+    // Also defend direct Driver callers: failed validation cannot expose stale work.
+    this.discardHistoricalPreparation();
+    this.prepareHistoricalRun(bars);
     this.pending = bars;
-    this.stepIdx = 0;
-    this.$.lastBarIndex = bars.length - 1;
   }
 
   /** Execute the next prepared historical bar. Returns false when exhausted. */
@@ -72,17 +114,53 @@ export class Driver {
     const $ = this.$;
     const isLast = i === bars.length - 1;
     const broker = $.strategyBroker;
+    const bucket = !broker.settings.calcOnOrderFills ? this.magnifierBuckets?.[i] : undefined;
     if (broker.active && broker.settings.calcOnOrderFills) {
       this.historicalBarOnFills(bars, i, isLast); // runs the close pass itself (POC × coof)
+    } else if (bucket?.coverage === 'available') {
+      this.historicalBarWithMagnifier(bars[i], bucket, i, isLast);
     } else {
       this.beginBar(bars[i], i);
       $.bar = historicalBarState(isLast, i === 0);
       $.onStrategyBar(); // fill pending strategy orders against this bar's open/range
+      if (bucket) recordMagnifierFallback(broker, bucket.fallbackReason ?? 'data');
       this.main($);
       $.onStrategyBarClose(); // process_orders_on_close: fill this bar's market orders at close
     }
     $.series.commitBar();
     this.committed = $.series.committedBars;
+  }
+
+  /**
+   * Historical no-COOF traversal over validated lower-timeframe buckets. Each
+   * LTF row is an independent broker bar, so no continuous segment is invented
+   * across row boundaries. Pine executes once with chart OHLC/time restored,
+   * followed by the ordinary chart-close POC pass.
+   *
+   * This is experimental proxy-validated behavior, not a claim of complete
+   * TradingView parity. COOF and non-available buckets stay on their established
+   * chart-OHLC paths.
+   */
+  private historicalBarWithMagnifier(
+    chartBar: Bar,
+    bucket: IntrabarBucket,
+    i: number,
+    isLast: boolean,
+  ): void {
+    const $ = this.$;
+    const broker = $.strategyBroker;
+    this.beginBar(chartBar, i);
+    beginMagnifiedChartBar(broker);
+    for (const intrabar of bucket.bars) {
+      this.setBuiltins(intrabar);
+      processMagnifierIntrabar(broker);
+    }
+    endMagnifiedChartBar(broker, bucket.bars.length);
+
+    this.setBuiltins(chartBar);
+    $.bar = historicalBarState(isLast, i === 0);
+    this.main($);
+    $.onStrategyBarClose();
   }
 
   /**
@@ -172,6 +250,7 @@ export class Driver {
     $.invalidateSecurityCaches();
     $.bar = realtimeBarState(firstTick, isClose, this.committed === 0);
     $.onStrategyBar(); // same fill pass as historical bars — orders fill on ticks too
+    recordRealtimeMagnifierFallback(broker);
 
     // A closing POC fill happens after main(), so COOF needs a second execution
     // before commit. Snapshot ordinary script state before the first execution;

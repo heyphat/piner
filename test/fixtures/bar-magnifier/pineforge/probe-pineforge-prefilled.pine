@@ -1,0 +1,54 @@
+//@version=6
+// Bar Magnifier M1 parity probe — PineForge variant, pre-filled form.
+//
+// Why this form exists: in PineForge, a bracket armed by strategy.exit BEFORE
+// its from_entry has filled never fires while the magnifier is on (see
+// findings.md). Both other probe forms arm the bracket with the entry — the
+// TradingView-correct way to get a same-chart-bar bracket — so under the
+// magnifier they can only ever report the harness force-close.
+//
+// This form sidesteps that: it takes a MARKET entry several bars early, then
+// re-states the bracket on every bar the position is open. By the time the
+// scenario bar arrives the bracket is long since live, so the magnifier's
+// intrabar walk is the only thing deciding whether the stop or the target is
+// reached first. That is the actual question the M1 probe is asking, minus the
+// same-bar entry.
+strategy(
+    "BM M1 parity probe (PineForge, pre-filled)",
+    overlay = true,
+    initial_capital = 100000,
+    default_qty_type = strategy.fixed,
+    default_qty_value = 1,
+    pyramiding = 1,
+    commission_type = strategy.commission.percent,
+    commission_value = 0,
+    slippage = 0,
+    backtest_fill_limits_assumption = 0,
+    calc_on_order_fills = false,
+    calc_on_every_tick = false,
+    process_orders_on_close = false,
+    use_bar_magnifier = true
+)
+
+armAfterBars  = input.int(3, "1. Arm bar", minval = 1)
+direction     = input.string("Long", "2. Direction", options = ["Long", "Short"])
+quantity      = input.float(1.0, "4. Quantity", minval = 0.00000001)
+stopLevel     = input.float(95.0, "6. Stop-loss level", minval = 0.00000001)
+targetLevel   = input.float(105.0, "7. Take-profit level", minval = 0.00000001)
+forceCloseBar = input.int(0, "9. Force close bar", minval = 0)
+
+isLong = direction == "Long"
+
+var int barsSeen = 0
+barsSeen := barsSeen + 1
+
+if barsSeen == armAfterBars and strategy.closedtrades == 0
+    strategy.entry("BM_ENTRY", isLong ? strategy.long : strategy.short, qty = quantity)
+
+// Bracket re-stated every bar the position is open, so it is unambiguously
+// live before the scenario bar starts.
+if strategy.position_size != 0
+    strategy.exit("BM_EXIT", from_entry = "BM_ENTRY", stop = stopLevel, limit = targetLevel)
+
+if forceCloseBar > 0 and barsSeen == forceCloseBar and strategy.position_size != 0
+    strategy.close("BM_ENTRY")

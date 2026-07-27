@@ -135,6 +135,12 @@ export interface SecurityDependency {
   /** true when the symbol or timeframe could not be resolved statically (a run is
    *  needed to know the concrete dependency). */
   dynamic: boolean;
+  /** Exact constant request.security lookahead (`false` includes the omitted default).
+   *  Null means dynamic/unprovable, or not applicable to request.security_lower_tf. */
+  lookahead: boolean | null;
+  /** Number of requested-timeframe bars required before the first target bar to
+   *  evaluate the requested expression. Null means no sound finite proof is available. */
+  expressionPriorBars: number | null;
 }
 
 export interface AnalyzeResult {
@@ -462,9 +468,9 @@ class Analyzer {
   private inputs: InputDecl[] = [];
   private inputCounter = 0;
   private inputKeys = new Set<string>();
-  /** Global `name = <expr>` initializers, for resolving const refs in input metadata
-   *  (e.g. `input.string(HISTORICAL, options = [HISTORICAL, PRESENT])`). */
-  private constEnv = new Map<string, Expr>();
+  /** Global `name = <expr>` initializers paired with their resolved binding, for
+   *  resolving const refs without folding through a later same-named declaration. */
+  private constEnv = new Map<string, { expr: Expr; sym: SymRef }>();
   private securityCounter = 0;
   private securityDeps: SecurityDependency[] = [];
   /** request.security[_lower_tf] call sites (with their lexical scope), collected during
@@ -552,7 +558,7 @@ class Analyzer {
         // Record global `name = <expr>` initializers so input metadata can resolve
         // references to named constants (`GREEN`, `HISTORICAL`, …) to their values.
         if (this.scope === this.global && s.mode === 'none' && !this.constEnv.has(s.name)) {
-          this.constEnv.set(s.name, s.init);
+          this.constEnv.set(s.name, { expr: s.init, sym });
         }
         break;
       }
@@ -951,7 +957,8 @@ class Analyzer {
     return (e.type = this.callReturnType(nsName, fnName));
   }
 
-  /** Best-effort static extraction of a request.security[_lower_tf] dependency. */
+  /** Static extraction for one exact post-inline request call. The same call object
+   *  supplies identity, ordering, lookahead, and expression history requirements. */
   private extractSecurityDep(
     e: Extract<Expr, { kind: 'Call' }>,
     lowerTf: boolean,
@@ -959,6 +966,8 @@ class Analyzer {
     const positional = e.args.filter((a) => !a.name).map((a) => a.value);
     const symArg = e.args.find((a) => a.name === 'symbol')?.value ?? positional[0];
     const tfArg = e.args.find((a) => a.name === 'timeframe')?.value ?? positional[1];
+    const expressionArg = e.args.find((a) => a.name === 'expression')?.value ?? positional[2];
+    const lookaheadArg = e.args.find((a) => a.name === 'lookahead')?.value ?? positional[4];
 
     const symNode = this.deref(symArg);
     let self = false;
@@ -1003,7 +1012,152 @@ class Analyzer {
       }
     }
 
-    return { lowerTf, self, symbol, tfSelf, timeframe, dynamic: symDynamic || tfDynamic };
+    return {
+      lowerTf,
+      self,
+      symbol,
+      tfSelf,
+      timeframe,
+      dynamic: symDynamic || tfDynamic,
+      lookahead: lowerTf
+        ? null
+        : lookaheadArg === undefined
+          ? false
+          : this.constantLookahead(lookaheadArg),
+      expressionPriorBars: this.securityExpressionPriorBars(expressionArg),
+    };
+  }
+
+  /** Resolve only lookahead values whose runtime boolean is exact. */
+  private constantLookahead(node: Expr, depth = 0): boolean | null {
+    if (depth > 64) return null;
+    const n = this.deref(node);
+    if (!n) return null;
+    if (n.kind === 'Bool') return n.value;
+    if (n.kind === 'Member' && n.object.kind === 'Ident' && n.object.sym?.kind === 'builtin-ns') {
+      const value = NS_CONST[n.object.name]?.[n.property];
+      return typeof value === 'boolean' ? value : null;
+    }
+    if (n.kind === 'Unary' && n.op === 'not') {
+      const value = this.constantLookahead(n.operand, depth + 1);
+      return value === null ? null : !value;
+    }
+    if (n.kind === 'Binary' && (n.op === 'and' || n.op === 'or')) {
+      const left = this.constantLookahead(n.left, depth + 1);
+      const right = this.constantLookahead(n.right, depth + 1);
+      if (left === null || right === null) return null;
+      return n.op === 'and' ? left && right : left || right;
+    }
+    if (n.kind === 'Ternary') {
+      const condition = this.constantLookahead(n.cond, depth + 1);
+      if (condition === null) return null;
+      return this.constantLookahead(condition ? n.then : n.else, depth + 1);
+    }
+    return null;
+  }
+
+  /**
+   * Prove the finite requested-timeframe history needed by a security expression.
+   * This intentionally does not chase ordinary identifiers: aliases can capture
+   * chart-context values, mutate, or hide state. Any call/control-flow/stateful or
+   * otherwise unproved construct makes the complete expression unknown.
+   */
+  private securityExpressionPriorBars(node: Expr | undefined, depth = 0): number | null {
+    if (!node || depth > 128) return null;
+    switch (node.kind) {
+      case 'Number':
+      case 'String':
+      case 'Bool':
+      case 'Color':
+      case 'Na':
+        return 0;
+      case 'Ident':
+        return node.sym?.kind === 'builtin-series' ? 0 : null;
+      case 'Member':
+        if (node.stateSite != null) return null;
+        if (node.constExpr) return this.securityExpressionPriorBars(node.constExpr, depth + 1);
+        if (node.object.kind === 'Ident' && node.object.sym?.kind === 'builtin-ns') {
+          return NS_CONST[node.object.name]?.[node.property] !== undefined ? 0 : null;
+        }
+        return null;
+      case 'History': {
+        const base = this.securityExpressionPriorBars(node.base, depth + 1);
+        const offset = this.constantHistoryOffset(node.offset, depth + 1);
+        if (base === null || offset === null) return null;
+        const total = base + offset;
+        return Number.isSafeInteger(total) && total >= 0 ? total : null;
+      }
+      case 'Unary':
+        return this.securityExpressionPriorBars(node.operand, depth + 1);
+      case 'Binary':
+        return this.maxExpressionPriorBars([node.left, node.right], depth + 1);
+      case 'Ternary':
+        return this.maxExpressionPriorBars([node.cond, node.then, node.else], depth + 1);
+      case 'Tuple':
+        return this.maxExpressionPriorBars(node.items, depth + 1);
+      case 'Call':
+      case 'If':
+      case 'Switch':
+      case 'For':
+      case 'ForIn':
+      case 'While':
+        return null;
+    }
+  }
+
+  private maxExpressionPriorBars(nodes: readonly Expr[], depth: number): number | null {
+    let max = 0;
+    for (const node of nodes) {
+      const value = this.securityExpressionPriorBars(node, depth);
+      if (value === null) return null;
+      max = Math.max(max, value);
+    }
+    return max;
+  }
+
+  /** Evaluate a history offset without resolving identifiers or invoking code. */
+  private constantHistoryOffset(node: Expr, depth: number): number | null {
+    const value = this.constantHistoryNumber(node, depth);
+    return value !== null && Number.isSafeInteger(value) && value >= 0 ? value : null;
+  }
+
+  private constantHistoryNumber(node: Expr, depth: number): number | null {
+    if (depth > 128) return null;
+    if (node.kind === 'Number') return Number.isFinite(node.value) ? node.value : null;
+    if (node.kind === 'Unary' && (node.op === '+' || node.op === '-')) {
+      const value = this.constantHistoryNumber(node.operand, depth + 1);
+      if (value === null) return null;
+      const result = node.op === '-' ? -value : value;
+      return Number.isFinite(result) && Math.abs(result) <= Number.MAX_SAFE_INTEGER ? result : null;
+    }
+    if (
+      node.kind === 'Binary' &&
+      (node.op === '+' || node.op === '-' || node.op === '*' || node.op === '/' || node.op === '%')
+    ) {
+      const left = this.constantHistoryNumber(node.left, depth + 1);
+      const right = this.constantHistoryNumber(node.right, depth + 1);
+      if (left === null || right === null) return null;
+      let result: number;
+      switch (node.op) {
+        case '+':
+          result = left + right;
+          break;
+        case '-':
+          result = left - right;
+          break;
+        case '*':
+          result = left * right;
+          break;
+        case '/':
+          result = left / right;
+          break;
+        case '%':
+          result = left % right;
+          break;
+      }
+      return Number.isFinite(result) && Math.abs(result) <= Number.MAX_SAFE_INTEGER ? result : null;
+    }
+    return null;
   }
 
   /** Follow const-bound identifiers to their defining expression (bounded), for static folding. */
@@ -1018,13 +1172,12 @@ class Analyzer {
     return n;
   }
 
-  /** constEnv entry for `name`, but only when the name still binds to that global at the
-   *  current site — a local (or inlined-UDF-param) shadow must not fold to the global's
-   *  initializer. Unresolvable names stay unfolded, so consumers see them as dynamic. */
+  /** constEnv entry for `name`, but only when the name still resolves to the exact
+   *  global binding that supplied it. Local shadows and duplicate declarations are
+   *  deliberately unknown rather than folding a same-named stale initializer. */
   private constLookup(name: string): Expr | undefined {
-    const sym = this.scope.lookup(name);
-    if (sym && !sym.global) return undefined;
-    return this.constEnv.get(name);
+    const entry = this.constEnv.get(name);
+    return entry && this.scope.lookup(name) === entry.sym ? entry.expr : undefined;
   }
 
   private callReturnType(ns: string | undefined, fn: string | undefined): PineType {

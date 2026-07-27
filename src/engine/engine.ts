@@ -11,6 +11,7 @@ import { Driver, type ScriptFn } from './driver.js';
 import type { DataFeed, Bar } from './feed.js';
 import type { CompiledScript } from './compiler.js';
 import type { StrategySettings } from '../runtime/builtins/strategy.js';
+import { barMagnifierTimeframe } from '../runtime/timeframe.js';
 import {
   computeStrategyMetrics,
   type StrategyMetrics,
@@ -78,11 +79,27 @@ export class Engine {
     this.driver = new Driver(main, this.ctx);
   }
 
-  async run(opts: RunOptions): Promise<void> {
+  /** Bind run identity and validate the requested Bar Magnifier mapping. Injected
+   *  data is validated/partitioned later by Driver's shared historical seam,
+   *  after chart bars are known and before any history executes. */
+  private bindRun(opts: RunOptions): void {
+    // A rejected bind must supersede any earlier prepare() without making the
+    // rejected run's identity visible. Validate first, then commit atomically.
+    this.driver.discardHistoricalPreparation();
+    const magnifierTargetTimeframe =
+      this.ctx.strategyBroker.active && this.ctx.strategyBroker.settings.useBarMagnifier
+        ? barMagnifierTimeframe(opts.timeframe)
+        : undefined;
+
     this.ctx.symbol = opts.symbol;
     this.ctx.tfStr = opts.timeframe;
+    this.ctx.barMagnifierTargetTimeframe = magnifierTargetTimeframe;
     if (opts.mintick != null && Number.isFinite(opts.mintick) && opts.mintick > 0)
       this.ctx.mintick = opts.mintick;
+  }
+
+  async run(opts: RunOptions): Promise<void> {
+    this.bindRun(opts);
     const bars = await this.feed.history(opts.symbol, opts.timeframe);
     this.ctx.allBars = bars; // for request.security resampling
     this.driver.runHistorical(bars);
@@ -97,10 +114,7 @@ export class Engine {
    * match run() bit-for-bit, with none of the realtime rollback overhead.
    */
   prepare(opts: RunOptions, bars: Bar[]): void {
-    this.ctx.symbol = opts.symbol;
-    this.ctx.tfStr = opts.timeframe;
-    if (opts.mintick != null && Number.isFinite(opts.mintick) && opts.mintick > 0)
-      this.ctx.mintick = opts.mintick;
+    this.bindRun(opts);
     this.ctx.allBars = bars; // for request.security resampling
     this.driver.prepareHistorical(bars);
   }

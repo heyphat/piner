@@ -1,0 +1,32 @@
+PineForge Bar Magnifier differential summary
+Generated from: piner-sandbox/pineforge/out/parity-artifact.json
+Artifact SHA-256: 1a64693eb35460561434feae42979fdcef24147819a860611bcaa1580ff7e329
+
+Scope
+- 5 synthetic scenarios: A_tp_before_sl, B_sl_before_tp,
+  C_tp_touched_before_limit_entry, D_subbar_gap_entry, E_short_tp_before_sl.
+- 6 Pine probe forms: submit-once, reissue, prefilled, prefilled-once,
+  prefilled-limit, prefilled-stop.
+- Bar Magnifier ON and OFF for every scenario/form pair: 5 x 6 x 2 = 60
+  successful PineForge runs.
+
+Primary path discriminator
+- A and B have identical chart-bar OHLC; only lower-timeframe TP/SL ordering differs.
+- With Bar Magnifier OFF, every probe form is path-blind across A and B.
+- With Bar Magnifier ON, prefilled, prefilled-once, prefilled-limit, and
+  prefilled-stop produce path-aware A/B artifacts. submit-once and reissue remain
+  path-blind because PineForge's flat-position strategy.exit lifetime diverges
+  from piner and is not treated as TradingView truth.
+- Reliable prefilled bracket outcomes: A exits long at TP 105, B exits long at
+  SL 95, and E exits short at TP 91 before SL 101.
+
+Assertion boundary
+- PineForge is a black-box differential oracle, not TradingView ground truth.
+- test/fixtures/bar-magnifier/proxy-validated-artifact.json intentionally keeps
+  only scenarios A, B, and E for prefilled-once, prefilled-limit, and
+  prefilled-stop, with both magnifier modes.
+- Scenarios/forms involving PineForge's flat-position strategy.exit lifetime or
+  scenario D gap-at-level behavior are retained in the full sandbox artifact
+  for investigation but excluded from piner semantic assertions.
+- Direct TradingView-pinned fixtures remain desirable evidence, not a release
+  prerequisite.

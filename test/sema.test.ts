@@ -77,6 +77,51 @@ describe('diagnostics', () => {
   });
 });
 
+describe('security dependency metadata proofs', () => {
+  it('reports exact lookahead and finite structural target-bar history', () => {
+    const r = an(
+      HEAD +
+        `a = request.security("A", "D", [open, high, low, close, volume, time, hl2, 7], lookahead = barmerge.lookahead_on)
+b = request.security("B", "D", (close[2] + open)[3])
+c = request.security("C", "D", close > open ? high[1] : low[4])
+`,
+    );
+    expect(
+      r.securityDependencies.map(({ lookahead, expressionPriorBars }) => ({
+        lookahead,
+        expressionPriorBars,
+      })),
+    ).toEqual([
+      { lookahead: true, expressionPriorBars: 0 },
+      { lookahead: false, expressionPriorBars: 5 },
+      { lookahead: false, expressionPriorBars: 4 },
+    ]);
+  });
+
+  it('fails closed for runtime lookahead, calls, aliases, and dynamic offsets', () => {
+    const r = an(
+      HEAD +
+        `runtimeLookahead = input.bool(false, "Lookahead")
+sourceAlias = close[3]
+offset = input.int(2, "Offset")
+a = request.security("A", "D", ta.sma(close, 3), lookahead = runtimeLookahead)
+b = request.security("B", "D", sourceAlias)
+c = request.security("C", "D", close[offset])
+`,
+    );
+    expect(
+      r.securityDependencies.map(({ lookahead, expressionPriorBars }) => ({
+        lookahead,
+        expressionPriorBars,
+      })),
+    ).toEqual([
+      { lookahead: null, expressionPriorBars: null },
+      { lookahead: false, expressionPriorBars: null },
+      { lookahead: false, expressionPriorBars: null },
+    ]);
+  });
+});
+
 describe('slot allocation', () => {
   it('a var that is also []-referenced gets BOTH a var slot and a history column', () => {
     const r = an(HEAD + 'var float run = 0.0\nrun := run + close\nprev = run[1]\n');

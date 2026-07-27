@@ -141,6 +141,8 @@ describe('securityDependencies metadata (static extraction)', () => {
         tfSelf: false,
         timeframe: 'D',
         dynamic: false,
+        lookahead: false,
+        expressionPriorBars: 0,
       },
     ]);
     expect(
@@ -155,6 +157,8 @@ describe('securityDependencies metadata (static extraction)', () => {
         tfSelf: false,
         timeframe: 'D',
         dynamic: false,
+        lookahead: false,
+        expressionPriorBars: 0,
       },
     ]);
   });
@@ -163,7 +167,16 @@ describe('securityDependencies metadata (static extraction)', () => {
     expect(
       deps('a = request.security_lower_tf(syminfo.tickerid, "1", close)\nplot(close)\n'),
     ).toEqual([
-      { lowerTf: true, self: true, symbol: null, tfSelf: false, timeframe: '1', dynamic: false },
+      {
+        lowerTf: true,
+        self: true,
+        symbol: null,
+        tfSelf: false,
+        timeframe: '1',
+        dynamic: false,
+        lookahead: null,
+        expressionPriorBars: 0,
+      },
     ]);
   });
 
@@ -173,7 +186,16 @@ describe('securityDependencies metadata (static extraction)', () => {
     expect(
       deps('d = request.security(syminfo.tickerid, timeframe.period, close)\nplot(d)\n'),
     ).toEqual([
-      { lowerTf: false, self: true, symbol: null, tfSelf: true, timeframe: null, dynamic: false },
+      {
+        lowerTf: false,
+        self: true,
+        symbol: null,
+        tfSelf: true,
+        timeframe: null,
+        dynamic: false,
+        lookahead: false,
+        expressionPriorBars: 0,
+      },
     ]);
     expect(deps('d = request.security("NASDAQ:AAPL", "", close)\nplot(d)\n')).toEqual([
       {
@@ -183,6 +205,8 @@ describe('securityDependencies metadata (static extraction)', () => {
         tfSelf: true,
         timeframe: null,
         dynamic: false,
+        lookahead: false,
+        expressionPriorBars: 0,
       },
     ]);
   });
@@ -198,8 +222,96 @@ describe('securityDependencies metadata (static extraction)', () => {
         tfSelf: false,
         timeframe: '240',
         dynamic: false,
+        lookahead: false,
+        expressionPriorBars: 0,
       },
     ]);
+  });
+
+  it('records exact lookahead and marks dynamic/shadowed/redeclared values unknown', () => {
+    const d = deps(`ON = barmerge.lookahead_on
+runtimeLookahead = input.bool(false, "Lookahead")
+a = request.security("A", "D", close)
+b = request.security("B", "D", close, barmerge.gaps_off, barmerge.lookahead_off)
+c = request.security("C", "D", close, lookahead = ON)
+d = request.security("D", "D", close, lookahead = runtimeLookahead)
+type LookaheadShadow
+    bool lookahead_on
+barmerge = LookaheadShadow.new(input.bool(false, "Shadow"))
+e = request.security("E", "D", close, lookahead = barmerge.lookahead_on)
+REDECLARED = true
+REDECLARED = input.bool(false, "Redeclared")
+f = request.security("F", "D", close, lookahead = REDECLARED)
+`);
+    expect(d.map((dependency) => dependency.lookahead)).toEqual([
+      false,
+      false,
+      true,
+      null,
+      null,
+      null,
+    ]);
+  });
+
+  it('proves direct series, constants, composition, tuples, and nested constant history', () => {
+    const d =
+      deps(`a = request.security("A", "D", [open, high, low, close, volume, time, hl2, bar_index, 42])
+b = request.security("B", "D", close > open ? high[2] + 1 : low[4] * 2)
+c = request.security("C", "D", close[1][2])
+d = request.security("D", "D", (close[2] + open[1])[4])
+e = request.security("E", "D", close[1 + 2])
+`);
+    expect(d.map((dependency) => dependency.expressionPriorBars)).toEqual([0, 4, 3, 6, 3]);
+  });
+
+  it('marks calls, stateful members, aliases, and dynamic history offsets unknown', () => {
+    const d = deps(`sourceAlias = close[3]
+offset = input.int(2, "Offset")
+a = request.security("A", "D", sourceAlias)
+b = request.security("B", "D", math.abs(close))
+c = request.security("C", "D", ta.sma(close, 3))
+d = request.security("D", "D", ta.tr)
+e = request.security("E", "D", close[offset])
+f = request.security("F", "D", session.isfirstbar)
+`);
+    expect(d.map((dependency) => dependency.expressionPriorBars)).toEqual([
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+    ]);
+  });
+
+  it('binds facts to post-inline call identity and preserves repeated/lower-TF order', () => {
+    const declarationFirst = `late() => request.security("B", "D", close[3], lookahead = barmerge.lookahead_on)
+direct = request.security("C", "D", close, lookahead = barmerge.lookahead_off)
+one = late()
+intr = request.security_lower_tf("L", "1", close[2])
+two = late()
+`;
+    const declarationLast = `direct = request.security("C", "D", close, lookahead = barmerge.lookahead_off)
+one = late()
+intr = request.security_lower_tf("L", "1", close[2])
+two = late()
+late() => request.security("B", "D", close[3], lookahead = barmerge.lookahead_on)
+`;
+    const project = (src: string) =>
+      deps(src).map(({ lowerTf, symbol, lookahead, expressionPriorBars }) => ({
+        lowerTf,
+        symbol,
+        lookahead,
+        expressionPriorBars,
+      }));
+    const expected = [
+      { lowerTf: false, symbol: 'C', lookahead: false, expressionPriorBars: 0 },
+      { lowerTf: false, symbol: 'B', lookahead: true, expressionPriorBars: 3 },
+      { lowerTf: true, symbol: 'L', lookahead: null, expressionPriorBars: 2 },
+      { lowerTf: false, symbol: 'B', lookahead: true, expressionPriorBars: 3 },
+    ];
+    expect(project(declarationFirst)).toEqual(expected);
+    expect(project(declarationLast)).toEqual(expected);
   });
 
   it('REGRESSION: a global reassigned via := before the call is dynamic, not the stale initializer', () => {
@@ -208,7 +320,16 @@ describe('securityDependencies metadata (static extraction)', () => {
       'tf = "D"\nif close > open\n    tf := "W"\nd = request.security(syminfo.tickerid, tf, close)\nplot(d)\n',
     );
     expect(d).toEqual([
-      { lowerTf: false, self: true, symbol: null, tfSelf: false, timeframe: null, dynamic: true },
+      {
+        lowerTf: false,
+        self: true,
+        symbol: null,
+        tfSelf: false,
+        timeframe: null,
+        dynamic: true,
+        lookahead: false,
+        expressionPriorBars: 0,
+      },
     ]);
   });
 
@@ -220,7 +341,16 @@ describe('securityDependencies metadata (static extraction)', () => {
       'tf = "D"\nd = request.security(syminfo.tickerid, tf, close)\ntf := "W"\nplot(d)\n',
     );
     expect(d).toEqual([
-      { lowerTf: false, self: true, symbol: null, tfSelf: false, timeframe: null, dynamic: true },
+      {
+        lowerTf: false,
+        self: true,
+        symbol: null,
+        tfSelf: false,
+        timeframe: null,
+        dynamic: true,
+        lookahead: false,
+        expressionPriorBars: 0,
+      },
     ]);
   });
 
@@ -230,7 +360,16 @@ describe('securityDependencies metadata (static extraction)', () => {
       'tf = "D"\nsum = 0.0\nfor i = 0 to 1\n    sum := sum + request.security(syminfo.tickerid, tf, close)\n    tf := "W"\nplot(sum)\n',
     );
     expect(d).toEqual([
-      { lowerTf: false, self: true, symbol: null, tfSelf: false, timeframe: null, dynamic: true },
+      {
+        lowerTf: false,
+        self: true,
+        symbol: null,
+        tfSelf: false,
+        timeframe: null,
+        dynamic: true,
+        lookahead: false,
+        expressionPriorBars: 0,
+      },
     ]);
   });
 
@@ -241,7 +380,16 @@ describe('securityDependencies metadata (static extraction)', () => {
       'tf = "D"\nhtf(tf) => request.security(syminfo.tickerid, tf, close)\nplot(htf("60"))\n',
     );
     expect(d).toEqual([
-      { lowerTf: false, self: true, symbol: null, tfSelf: false, timeframe: null, dynamic: true },
+      {
+        lowerTf: false,
+        self: true,
+        symbol: null,
+        tfSelf: false,
+        timeframe: null,
+        dynamic: true,
+        lookahead: false,
+        expressionPriorBars: 0,
+      },
     ]);
   });
 
@@ -257,6 +405,8 @@ describe('securityDependencies metadata (static extraction)', () => {
         tfSelf: false,
         timeframe: null,
         dynamic: true,
+        lookahead: false,
+        expressionPriorBars: 0,
       },
     ]);
   });

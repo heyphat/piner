@@ -1,0 +1,59 @@
+{
+ "A_tp_before_sl": {
+  "scenario_bar_ohlc": [
+   98.0,
+   106.0,
+   94.0,
+   99.0
+  ],
+  "inputs": {},
+  "expect": "magnifier: exit at TP 105. whole-bar: chart bar is O98 H106 L94 C99, same as scenario B, so a path-blind engine must answer identically for both."
+ },
+ "B_sl_before_tp": {
+  "scenario_bar_ohlc": [
+   98.0,
+   106.0,
+   94.0,
+   99.0
+  ],
+  "inputs": {},
+  "expect": "magnifier: exit at SL 95. Chart OHLC identical to scenario A."
+ },
+ "C_tp_touched_before_limit_entry": {
+  "scenario_bar_ohlc": [
+   102.0,
+   106.0,
+   99.0,
+   101.0
+  ],
+  "inputs": {
+   "3. Entry order": "Limit"
+  },
+  "expect": "magnifier: no exit on the entry bar (105 printed pre-entry); trade closes at SL 95 on the settling bar. whole-bar: entry 100 then H106 >= 105 -> TP same bar."
+ },
+ "D_subbar_gap_entry": {
+  "scenario_bar_ohlc": [
+   98.0,
+   103.0,
+   98.0,
+   102.0
+  ],
+  "inputs": {},
+  "expect": "magnifier: entry fills at the gapped sub-bar open 101.2. whole-bar: chart bar opens 98 < 100 with H103, so a path-blind engine fills at the stop level 100."
+ },
+ "E_short_tp_before_sl": {
+  "scenario_bar_ohlc": [
+   98.0,
+   102.0,
+   90.0,
+   97.0
+  ],
+  "inputs": {
+   "2. Direction": "Short",
+   "5. Entry level": "96",
+   "6. Stop-loss level": "101",
+   "7. Take-profit level": "91"
+  },
+  "expect": "magnifier: short entry ~96 then TP 91 before SL 101."
+ }
+}

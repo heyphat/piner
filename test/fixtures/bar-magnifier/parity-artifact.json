@@ -1,0 +1,1262 @@
+{
+ "produced_by": "pineforge ghcr.io/pineforge-4pass/pineforge-engine:latest",
+ "feed": "synthetic M1, aggregated 1m -> 60m by the engine (input_tf=1, script_tf=60)",
+ "caveat": "PineForge is a third-party engine, NOT TradingView. Treat as a cross-engine reference, never as TV ground truth.",
+ "scenarios": {
+  "A_tp_before_sl": {
+   "scenario_bar_ohlc": [
+    98.0,
+    106.0,
+    94.0,
+    99.0
+   ],
+   "expect": "magnifier: exit at TP 105. whole-bar: chart bar is O98 H106 L94 C99, same as scenario B, so a path-blind engine must answer identically for both.",
+   "runs": {
+    "prefilled": {
+     "mag_off": {
+      "applied_inputs": {
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": false,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 0,
+       "magnifier_sample_ticks_total": 0,
+       "bar_magnifier_enabled": false
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735691400000,
+        "exit_time": 1735693200000,
+        "entry_price": 98.0,
+        "exit_price": 95.0,
+        "qty": 1.0,
+        "pnl": -3.0,
+        "entry_bar_index": 3,
+        "exit_bar_index": 6
+       }
+      ],
+      "engine_fingerprint": "sha256:ffa5d309d85f4b750cb29ecd4a9c485d330edf6309e35bacafe7af4865ae3f32"
+     },
+     "mag_on": {
+      "applied_inputs": {
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": true,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 100,
+       "magnifier_sample_ticks_total": 400,
+       "bar_magnifier_enabled": true
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735691400000,
+        "exit_time": 1735693500000,
+        "entry_price": 98.0,
+        "exit_price": 105.0,
+        "qty": 1.0,
+        "pnl": 7.0,
+        "entry_bar_index": 3,
+        "exit_bar_index": 6
+       }
+      ],
+      "engine_fingerprint": "sha256:7e2035076e784d0eb03155a0d358fddd7a978eb6d1b4cc0c0fa37f254d0a85b5"
+     }
+    },
+    "reissue": {
+     "mag_off": {
+      "applied_inputs": {
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": false,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 0,
+       "magnifier_sample_ticks_total": 0,
+       "bar_magnifier_enabled": false
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735693200000,
+        "exit_time": 1735693200000,
+        "entry_price": 100.0,
+        "exit_price": 95.0,
+        "qty": 1.0,
+        "pnl": -5.0,
+        "entry_bar_index": 6,
+        "exit_bar_index": 6
+       }
+      ],
+      "engine_fingerprint": "sha256:243921c57df489ec4154648797d23b6d62d9d8d19bf4b42322fd4d2edd9d1bdd"
+     },
+     "mag_on": {
+      "applied_inputs": {
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": true,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 100,
+       "magnifier_sample_ticks_total": 400,
+       "bar_magnifier_enabled": true
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735693320000,
+        "exit_time": 1735695000000,
+        "entry_price": 100.0,
+        "exit_price": 98.0,
+        "qty": 1.0,
+        "pnl": -2.0,
+        "entry_bar_index": 6,
+        "exit_bar_index": 9
+       }
+      ],
+      "engine_fingerprint": "sha256:da7293c8eee483296d958ef0c35619e6d3b6127971d29a85a6c900ba9227f079"
+     }
+    },
+    "submit-once": {
+     "mag_off": {
+      "applied_inputs": {
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": false,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 0,
+       "magnifier_sample_ticks_total": 0,
+       "bar_magnifier_enabled": false
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735693200000,
+        "exit_time": 1735693200000,
+        "entry_price": 100.0,
+        "exit_price": 95.0,
+        "qty": 1.0,
+        "pnl": -5.0,
+        "entry_bar_index": 6,
+        "exit_bar_index": 6
+       }
+      ],
+      "engine_fingerprint": "sha256:5ac010f41d1c2252b41726a5f8f6a74075112fbe0a9baa753dd30c6692ff0f9d"
+     },
+     "mag_on": {
+      "applied_inputs": {
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": true,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 100,
+       "magnifier_sample_ticks_total": 400,
+       "bar_magnifier_enabled": true
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735693320000,
+        "exit_time": 1735695000000,
+        "entry_price": 100.0,
+        "exit_price": 98.0,
+        "qty": 1.0,
+        "pnl": -2.0,
+        "entry_bar_index": 6,
+        "exit_bar_index": 9
+       }
+      ],
+      "engine_fingerprint": "sha256:0dadb0cbdaf6fce6bff2612c87cfcced7577e4ddc55b14389fa47fc93edda66e"
+     }
+    }
+   }
+  },
+  "B_sl_before_tp": {
+   "scenario_bar_ohlc": [
+    98.0,
+    106.0,
+    94.0,
+    99.0
+   ],
+   "expect": "magnifier: exit at SL 95. Chart OHLC identical to scenario A.",
+   "runs": {
+    "prefilled": {
+     "mag_off": {
+      "applied_inputs": {
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": false,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 0,
+       "magnifier_sample_ticks_total": 0,
+       "bar_magnifier_enabled": false
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735691400000,
+        "exit_time": 1735693200000,
+        "entry_price": 98.0,
+        "exit_price": 95.0,
+        "qty": 1.0,
+        "pnl": -3.0,
+        "entry_bar_index": 3,
+        "exit_bar_index": 6
+       }
+      ],
+      "engine_fingerprint": "sha256:ffa5d309d85f4b750cb29ecd4a9c485d330edf6309e35bacafe7af4865ae3f32"
+     },
+     "mag_on": {
+      "applied_inputs": {
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": true,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 100,
+       "magnifier_sample_ticks_total": 400,
+       "bar_magnifier_enabled": true
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735691400000,
+        "exit_time": 1735693500000,
+        "entry_price": 98.0,
+        "exit_price": 95.0,
+        "qty": 1.0,
+        "pnl": -3.0,
+        "entry_bar_index": 3,
+        "exit_bar_index": 6
+       }
+      ],
+      "engine_fingerprint": "sha256:7e2035076e784d0eb03155a0d358fddd7a978eb6d1b4cc0c0fa37f254d0a85b5"
+     }
+    },
+    "reissue": {
+     "mag_off": {
+      "applied_inputs": {
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": false,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 0,
+       "magnifier_sample_ticks_total": 0,
+       "bar_magnifier_enabled": false
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735693200000,
+        "exit_time": 1735693200000,
+        "entry_price": 100.0,
+        "exit_price": 95.0,
+        "qty": 1.0,
+        "pnl": -5.0,
+        "entry_bar_index": 6,
+        "exit_bar_index": 6
+       }
+      ],
+      "engine_fingerprint": "sha256:243921c57df489ec4154648797d23b6d62d9d8d19bf4b42322fd4d2edd9d1bdd"
+     },
+     "mag_on": {
+      "applied_inputs": {
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": true,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 100,
+       "magnifier_sample_ticks_total": 400,
+       "bar_magnifier_enabled": true
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735693320000,
+        "exit_time": 1735695000000,
+        "entry_price": 100.0,
+        "exit_price": 98.0,
+        "qty": 1.0,
+        "pnl": -2.0,
+        "entry_bar_index": 6,
+        "exit_bar_index": 9
+       }
+      ],
+      "engine_fingerprint": "sha256:da7293c8eee483296d958ef0c35619e6d3b6127971d29a85a6c900ba9227f079"
+     }
+    },
+    "submit-once": {
+     "mag_off": {
+      "applied_inputs": {
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": false,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 0,
+       "magnifier_sample_ticks_total": 0,
+       "bar_magnifier_enabled": false
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735693200000,
+        "exit_time": 1735693200000,
+        "entry_price": 100.0,
+        "exit_price": 95.0,
+        "qty": 1.0,
+        "pnl": -5.0,
+        "entry_bar_index": 6,
+        "exit_bar_index": 6
+       }
+      ],
+      "engine_fingerprint": "sha256:5ac010f41d1c2252b41726a5f8f6a74075112fbe0a9baa753dd30c6692ff0f9d"
+     },
+     "mag_on": {
+      "applied_inputs": {
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": true,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 100,
+       "magnifier_sample_ticks_total": 400,
+       "bar_magnifier_enabled": true
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735693320000,
+        "exit_time": 1735695000000,
+        "entry_price": 100.0,
+        "exit_price": 98.0,
+        "qty": 1.0,
+        "pnl": -2.0,
+        "entry_bar_index": 6,
+        "exit_bar_index": 9
+       }
+      ],
+      "engine_fingerprint": "sha256:0dadb0cbdaf6fce6bff2612c87cfcced7577e4ddc55b14389fa47fc93edda66e"
+     }
+    }
+   }
+  },
+  "C_tp_touched_before_limit_entry": {
+   "scenario_bar_ohlc": [
+    102.0,
+    106.0,
+    99.0,
+    101.0
+   ],
+   "expect": "magnifier: no exit on the entry bar (105 printed pre-entry); trade closes at SL 95 on the settling bar. whole-bar: entry 100 then H106 >= 105 -> TP same bar.",
+   "runs": {
+    "prefilled": {
+     "mag_off": {
+      "applied_inputs": {
+       "3. Entry order": "Limit",
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": false,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 0,
+       "magnifier_sample_ticks_total": 0,
+       "bar_magnifier_enabled": false
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735691400000,
+        "exit_time": 1735693200000,
+        "entry_price": 98.0,
+        "exit_price": 105.0,
+        "qty": 1.0,
+        "pnl": 7.0,
+        "entry_bar_index": 3,
+        "exit_bar_index": 6
+       }
+      ],
+      "engine_fingerprint": "sha256:31df696a12c728b14863653d4618b749f274c1503c784a1db916035263ff356f"
+     },
+     "mag_on": {
+      "applied_inputs": {
+       "3. Entry order": "Limit",
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": true,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 100,
+       "magnifier_sample_ticks_total": 400,
+       "bar_magnifier_enabled": true
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735691400000,
+        "exit_time": 1735693320000,
+        "entry_price": 98.0,
+        "exit_price": 105.0,
+        "qty": 1.0,
+        "pnl": 7.0,
+        "entry_bar_index": 3,
+        "exit_bar_index": 6
+       }
+      ],
+      "engine_fingerprint": "sha256:bf658b9ffb37191cab5d157538ac9584ae595147e02f69004f863238917ebca8"
+     }
+    },
+    "reissue": {
+     "mag_off": {
+      "applied_inputs": {
+       "3. Entry order": "Limit",
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": false,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 0,
+       "magnifier_sample_ticks_total": 0,
+       "bar_magnifier_enabled": false
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735693200000,
+        "exit_time": 1735693200000,
+        "entry_price": 100.0,
+        "exit_price": 105.0,
+        "qty": 1.0,
+        "pnl": 5.0,
+        "entry_bar_index": 6,
+        "exit_bar_index": 6
+       }
+      ],
+      "engine_fingerprint": "sha256:338fbc18b32f4d81f1a1fa5b26c505fe0995a60aa507e9ceb3933dacf39b81d9"
+     },
+     "mag_on": {
+      "applied_inputs": {
+       "3. Entry order": "Limit",
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": true,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 100,
+       "magnifier_sample_ticks_total": 400,
+       "bar_magnifier_enabled": true
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735693560000,
+        "exit_time": 1735694640000,
+        "entry_price": 100.0,
+        "exit_price": 95.0,
+        "qty": 1.0,
+        "pnl": -5.0,
+        "entry_bar_index": 6,
+        "exit_bar_index": 8
+       }
+      ],
+      "engine_fingerprint": "sha256:331c51dcd6ae780a643a7fac8524bf718a2e3f15b0e1ab851e2a7f6253ab1290"
+     }
+    },
+    "submit-once": {
+     "mag_off": {
+      "applied_inputs": {
+       "3. Entry order": "Limit",
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": false,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 0,
+       "magnifier_sample_ticks_total": 0,
+       "bar_magnifier_enabled": false
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735693200000,
+        "exit_time": 1735693200000,
+        "entry_price": 100.0,
+        "exit_price": 105.0,
+        "qty": 1.0,
+        "pnl": 5.0,
+        "entry_bar_index": 6,
+        "exit_bar_index": 6
+       }
+      ],
+      "engine_fingerprint": "sha256:dd4d5595d141ec11b55c4017eefa258bd5d9d7a3760b93b19ad3deab5e18285a"
+     },
+     "mag_on": {
+      "applied_inputs": {
+       "3. Entry order": "Limit",
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": true,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 100,
+       "magnifier_sample_ticks_total": 400,
+       "bar_magnifier_enabled": true
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735693560000,
+        "exit_time": 1735695000000,
+        "entry_price": 100.0,
+        "exit_price": 96.0,
+        "qty": 1.0,
+        "pnl": -4.0,
+        "entry_bar_index": 6,
+        "exit_bar_index": 9
+       }
+      ],
+      "engine_fingerprint": "sha256:3e6ce340b9227596ed8961c48b7bf4cd1d8fe9d8d4c60d93944321a06b94449f"
+     }
+    }
+   }
+  },
+  "D_subbar_gap_entry": {
+   "scenario_bar_ohlc": [
+    98.0,
+    103.0,
+    98.0,
+    102.0
+   ],
+   "expect": "magnifier: entry fills at the gapped sub-bar open 101.2. whole-bar: chart bar opens 98 < 100 with H103, so a path-blind engine fills at the stop level 100.",
+   "runs": {
+    "prefilled": {
+     "mag_off": {
+      "applied_inputs": {
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": false,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 0,
+       "magnifier_sample_ticks_total": 0,
+       "bar_magnifier_enabled": false
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735691400000,
+        "exit_time": 1735694400000,
+        "entry_price": 98.0,
+        "exit_price": 95.0,
+        "qty": 1.0,
+        "pnl": -3.0,
+        "entry_bar_index": 3,
+        "exit_bar_index": 8
+       }
+      ],
+      "engine_fingerprint": "sha256:ffa5d309d85f4b750cb29ecd4a9c485d330edf6309e35bacafe7af4865ae3f32"
+     },
+     "mag_on": {
+      "applied_inputs": {
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": true,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 100,
+       "magnifier_sample_ticks_total": 400,
+       "bar_magnifier_enabled": true
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735691400000,
+        "exit_time": 1735694640000,
+        "entry_price": 98.0,
+        "exit_price": 95.0,
+        "qty": 1.0,
+        "pnl": -3.0,
+        "entry_bar_index": 3,
+        "exit_bar_index": 8
+       }
+      ],
+      "engine_fingerprint": "sha256:7e2035076e784d0eb03155a0d358fddd7a978eb6d1b4cc0c0fa37f254d0a85b5"
+     }
+    },
+    "reissue": {
+     "mag_off": {
+      "applied_inputs": {
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": false,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 0,
+       "magnifier_sample_ticks_total": 0,
+       "bar_magnifier_enabled": false
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735693200000,
+        "exit_time": 1735694400000,
+        "entry_price": 100.0,
+        "exit_price": 95.0,
+        "qty": 1.0,
+        "pnl": -5.0,
+        "entry_bar_index": 6,
+        "exit_bar_index": 8
+       }
+      ],
+      "engine_fingerprint": "sha256:243921c57df489ec4154648797d23b6d62d9d8d19bf4b42322fd4d2edd9d1bdd"
+     },
+     "mag_on": {
+      "applied_inputs": {
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": true,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 100,
+       "magnifier_sample_ticks_total": 400,
+       "bar_magnifier_enabled": true
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735693380000,
+        "exit_time": 1735694640000,
+        "entry_price": 100.0,
+        "exit_price": 95.0,
+        "qty": 1.0,
+        "pnl": -5.0,
+        "entry_bar_index": 6,
+        "exit_bar_index": 8
+       }
+      ],
+      "engine_fingerprint": "sha256:da7293c8eee483296d958ef0c35619e6d3b6127971d29a85a6c900ba9227f079"
+     }
+    },
+    "submit-once": {
+     "mag_off": {
+      "applied_inputs": {
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": false,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 0,
+       "magnifier_sample_ticks_total": 0,
+       "bar_magnifier_enabled": false
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735693200000,
+        "exit_time": 1735694400000,
+        "entry_price": 100.0,
+        "exit_price": 95.0,
+        "qty": 1.0,
+        "pnl": -5.0,
+        "entry_bar_index": 6,
+        "exit_bar_index": 8
+       }
+      ],
+      "engine_fingerprint": "sha256:5ac010f41d1c2252b41726a5f8f6a74075112fbe0a9baa753dd30c6692ff0f9d"
+     },
+     "mag_on": {
+      "applied_inputs": {
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": true,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 100,
+       "magnifier_sample_ticks_total": 400,
+       "bar_magnifier_enabled": true
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "long",
+        "entry_time": 1735693380000,
+        "exit_time": 1735695000000,
+        "entry_price": 100.0,
+        "exit_price": 96.0,
+        "qty": 1.0,
+        "pnl": -4.0,
+        "entry_bar_index": 6,
+        "exit_bar_index": 9
+       }
+      ],
+      "engine_fingerprint": "sha256:0dadb0cbdaf6fce6bff2612c87cfcced7577e4ddc55b14389fa47fc93edda66e"
+     }
+    }
+   }
+  },
+  "E_short_tp_before_sl": {
+   "scenario_bar_ohlc": [
+    98.0,
+    102.0,
+    90.0,
+    97.0
+   ],
+   "expect": "magnifier: short entry ~96 then TP 91 before SL 101.",
+   "runs": {
+    "prefilled": {
+     "mag_off": {
+      "applied_inputs": {
+       "2. Direction": "Short",
+       "5. Entry level": "96",
+       "6. Stop-loss level": "101",
+       "7. Take-profit level": "91",
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": false,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 0,
+       "magnifier_sample_ticks_total": 0,
+       "bar_magnifier_enabled": false
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "short",
+        "entry_time": 1735691400000,
+        "exit_time": 1735693200000,
+        "entry_price": 98.0,
+        "exit_price": 101.0,
+        "qty": 1.0,
+        "pnl": -3.0,
+        "entry_bar_index": 3,
+        "exit_bar_index": 6
+       }
+      ],
+      "engine_fingerprint": "sha256:027f3c160a1351fcded0c635f57c90e7d8b957f0321149fdea859a770e313856"
+     },
+     "mag_on": {
+      "applied_inputs": {
+       "2. Direction": "Short",
+       "5. Entry level": "96",
+       "6. Stop-loss level": "101",
+       "7. Take-profit level": "91",
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": true,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 100,
+       "magnifier_sample_ticks_total": 400,
+       "bar_magnifier_enabled": true
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "short",
+        "entry_time": 1735691400000,
+        "exit_time": 1735693500000,
+        "entry_price": 98.0,
+        "exit_price": 91.0,
+        "qty": 1.0,
+        "pnl": 7.0,
+        "entry_bar_index": 3,
+        "exit_bar_index": 6
+       }
+      ],
+      "engine_fingerprint": "sha256:06fcd1cb41daa3109c317bbc7b8da5e8f5fcda4581855fa2d4e3b83c455f37be"
+     }
+    },
+    "reissue": {
+     "mag_off": {
+      "applied_inputs": {
+       "2. Direction": "Short",
+       "5. Entry level": "96",
+       "6. Stop-loss level": "101",
+       "7. Take-profit level": "91",
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": false,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 0,
+       "magnifier_sample_ticks_total": 0,
+       "bar_magnifier_enabled": false
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "short",
+        "entry_time": 1735693200000,
+        "exit_time": 1735693200000,
+        "entry_price": 96.0,
+        "exit_price": 101.0,
+        "qty": 1.0,
+        "pnl": -5.0,
+        "entry_bar_index": 6,
+        "exit_bar_index": 6
+       }
+      ],
+      "engine_fingerprint": "sha256:0ede22ff2b5ad146ed24f3b126ef71a49d3c6465dbfc7209207eada71c83a603"
+     },
+     "mag_on": {
+      "applied_inputs": {
+       "2. Direction": "Short",
+       "5. Entry level": "96",
+       "6. Stop-loss level": "101",
+       "7. Take-profit level": "91",
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": true,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 100,
+       "magnifier_sample_ticks_total": 400,
+       "bar_magnifier_enabled": true
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "short",
+        "entry_time": 1735693320000,
+        "exit_time": 1735695000000,
+        "entry_price": 96.0,
+        "exit_price": 98.0,
+        "qty": 1.0,
+        "pnl": -2.0,
+        "entry_bar_index": 6,
+        "exit_bar_index": 9
+       }
+      ],
+      "engine_fingerprint": "sha256:cdaa02e177288944f99c05b28cb6c653de98d29acf442c1a2a98fd9a09993079"
+     }
+    },
+    "submit-once": {
+     "mag_off": {
+      "applied_inputs": {
+       "2. Direction": "Short",
+       "5. Entry level": "96",
+       "6. Stop-loss level": "101",
+       "7. Take-profit level": "91",
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": false,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 0,
+       "magnifier_sample_ticks_total": 0,
+       "bar_magnifier_enabled": false
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "short",
+        "entry_time": 1735693200000,
+        "exit_time": 1735693200000,
+        "entry_price": 96.0,
+        "exit_price": 101.0,
+        "qty": 1.0,
+        "pnl": -5.0,
+        "entry_bar_index": 6,
+        "exit_bar_index": 6
+       }
+      ],
+      "engine_fingerprint": "sha256:fcbcb5cea3e8c5f1c94782d20fc55b005061e9b0a08e85081c10ec0f711e18a1"
+     },
+     "mag_on": {
+      "applied_inputs": {
+       "2. Direction": "Short",
+       "5. Entry level": "96",
+       "6. Stop-loss level": "101",
+       "7. Take-profit level": "91",
+       "9. Force close bar": "9"
+      },
+      "applied_runtime": {
+       "input_tf": "1",
+       "script_tf": "10",
+       "input_tf_seconds": 60,
+       "script_tf_seconds": 600,
+       "script_tf_ratio": 10,
+       "needs_aggregation": true,
+       "bar_magnifier": true,
+       "magnifier_samples": 4,
+       "magnifier_dist": "endpoints"
+      },
+      "diagnostics": {
+       "input_bars_processed": 100,
+       "script_bars_processed": 10,
+       "magnifier_sub_bars_total": 100,
+       "magnifier_sample_ticks_total": 400,
+       "bar_magnifier_enabled": true
+      },
+      "trades": [
+       {
+        "n": 1,
+        "side": "short",
+        "entry_time": 1735693320000,
+        "exit_time": 1735695000000,
+        "entry_price": 96.0,
+        "exit_price": 98.0,
+        "qty": 1.0,
+        "pnl": -2.0,
+        "entry_bar_index": 6,
+        "exit_bar_index": 9
+       }
+      ],
+      "engine_fingerprint": "sha256:0f47b2fe510e0c65609d7eb0ea1d6a6f1e2bb7b8010aed7f15b974b1ec5744f5"
+     }
+    }
+   }
+  }
+ }
+}

@@ -21,3 +21,4 @@ src/*.js
 dev-docs
 .vscode
 *.html
+semantic-review

@@ -1,0 +1,202 @@
+//@version=6
+// TradingView Bar Magnifier M1 parity probe.
+//
+// This script is a probe template, not TradingView evidence by itself. A parity
+// artifact exists only after you run it on TradingView and save the exact
+// symbol/feed, chart timeframe, session/timezone, inputs, lower-timeframe OHLC,
+// List of Trades CSV, chart-data CSV, and Pine Logs output.
+//
+// M1 scope: historical ordering without calc_on_order_fills. The script submits
+// exactly one stop/limit entry and its stop/target bracket at the close of the
+// first chart bar whose open is on or after "Arm on/after (UTC)". The orders are
+// eligible from the following chart bar. Choose levels that the mapped
+// lower-timeframe bars cross in a useful order inside that chart bar.
+strategy(
+    "Bar Magnifier M1 parity probe",
+    overlay = true,
+    initial_capital = 100000,
+    default_qty_type = strategy.fixed,
+    default_qty_value = 1,
+    pyramiding = 1,
+    commission_type = strategy.commission.percent,
+    commission_value = 0,
+    slippage = 0,
+    backtest_fill_limits_assumption = 0,
+    calc_on_order_fills = false,
+    calc_on_every_tick = false,
+    process_orders_on_close = false,
+    use_bar_magnifier = true,
+    max_labels_count = 50
+)
+
+// Set these inputs before collecting an export. Absolute levels make one TV run
+// reproducible in piner with the exact same chart and mapped-LTF bars.
+armTime = input.time(timestamp("01 Jan 2025 00:00 +0000"), "1. Arm on/after (UTC)")
+direction = input.string("Long", "2. Direction", options = ["Long", "Short"])
+entryOrder = input.string("Stop", "3. Entry order", options = ["Stop", "Limit"])
+quantity = input.float(1.0, "4. Quantity", minval = 0.00000001)
+entryLevel = input.float(100.0, "5. Entry level", minval = 0.00000001)
+stopLevel = input.float(95.0, "6. Stop-loss level", minval = 0.00000001)
+targetLevel = input.float(105.0, "7. Take-profit level", minval = 0.00000001)
+cancelAfterBars = input.int(20, "8. Cancel unfilled entry after chart bars", minval = 1)
+
+isLong = direction == "Long"
+levelsValid = isLong ? stopLevel < entryLevel and entryLevel < targetLevel : targetLevel < entryLevel and entryLevel < stopLevel
+
+if barstate.isfirst and not levelsValid
+    validationMessage = isLong ? "Long levels must satisfy stop < entry < target" : "Short levels must satisfy target < entry < stop"
+    runtime.error(validationMessage)
+
+var bool submitted = false
+var bool canceled = false
+var int submittedAtBar = na
+var int observedClosedTrades = 0
+var float observedPosition = 0.0
+
+submitNow = not submitted and time >= armTime
+if submitNow
+    submitted := true
+    submittedAtBar := bar_index
+
+    if entryOrder == "Stop"
+        strategy.entry("BM_ENTRY", isLong ? strategy.long : strategy.short, qty = quantity, stop = entryLevel)
+    else
+        strategy.entry("BM_ENTRY", isLong ? strategy.long : strategy.short, qty = quantity, limit = entryLevel)
+
+    // Submit the bracket with the entry. Waiting for position_size to become
+    // nonzero would miss possible post-entry movement in the same chart bar.
+    strategy.exit(
+        "BM_EXIT",
+        from_entry = "BM_ENTRY",
+        stop = stopLevel,
+        limit = targetLevel
+    )
+
+    log.info(
+        "BM_SUBMIT" +
+        "|ticker=" + syminfo.tickerid +
+        "|exchange_tz=" + syminfo.timezone +
+        "|chart_tf=" + timeframe.period +
+        "|bar_index=" + str.tostring(bar_index) +
+        "|bar_open_ms=" + str.tostring(time) +
+        "|bar_close_ms=" + str.tostring(time_close) +
+        "|direction=" + direction +
+        "|entry_order=" + entryOrder +
+        "|entry=" + str.tostring(entryLevel, format.mintick) +
+        "|stop=" + str.tostring(stopLevel, format.mintick) +
+        "|target=" + str.tostring(targetLevel, format.mintick)
+    )
+    label.new(
+        bar_index,
+        isLong ? low : high,
+        "BM submit\norders active next bar",
+        style = isLong ? label.style_label_up : label.style_label_down,
+        color = color.blue,
+        textcolor = color.white
+    )
+
+entryStillPending = submitted and not canceled and strategy.opentrades == 0 and strategy.closedtrades == 0
+cancelNow = entryStillPending and bar_index - submittedAtBar >= cancelAfterBars
+if cancelNow
+    strategy.cancel_all()
+    canceled := true
+    log.info(
+        "BM_CANCEL" +
+        "|bar_index=" + str.tostring(bar_index) +
+        "|bar_open_ms=" + str.tostring(time)
+    )
+    label.new(bar_index, close, "BM unfilled entry canceled", color = color.gray, textcolor = color.white)
+
+if strategy.position_size != observedPosition
+    log.info(
+        "BM_POSITION" +
+        "|bar_index=" + str.tostring(bar_index) +
+        "|bar_open_ms=" + str.tostring(time) +
+        "|bar_close_ms=" + str.tostring(time_close) +
+        "|previous=" + str.tostring(observedPosition) +
+        "|current=" + str.tostring(strategy.position_size) +
+        "|avg_price=" + str.tostring(strategy.position_avg_price, format.mintick)
+    )
+    observedPosition := strategy.position_size
+
+newClosedTrade = strategy.closedtrades > observedClosedTrades
+if newClosedTrade
+    tradeNo = strategy.closedtrades - 1
+    tradeEntryPrice = strategy.closedtrades.entry_price(tradeNo)
+    tradeExitPrice = strategy.closedtrades.exit_price(tradeNo)
+    tradeEntryTime = strategy.closedtrades.entry_time(tradeNo)
+    tradeExitTime = strategy.closedtrades.exit_time(tradeNo)
+    tradeEntryBar = strategy.closedtrades.entry_bar_index(tradeNo)
+    tradeExitBar = strategy.closedtrades.exit_bar_index(tradeNo)
+
+    log.info(
+        "BM_CLOSED" +
+        "|trade=" + str.tostring(tradeNo) +
+        "|entry_id=" + strategy.closedtrades.entry_id(tradeNo) +
+        "|entry_bar=" + str.tostring(tradeEntryBar) +
+        "|exit_bar=" + str.tostring(tradeExitBar) +
+        "|entry_time_ms=" + str.tostring(tradeEntryTime) +
+        "|exit_time_ms=" + str.tostring(tradeExitTime) +
+        "|entry_price=" + str.tostring(tradeEntryPrice, format.mintick) +
+        "|exit_price=" + str.tostring(tradeExitPrice, format.mintick) +
+        "|size=" + str.tostring(strategy.closedtrades.size(tradeNo)) +
+        "|profit=" + str.tostring(strategy.closedtrades.profit(tradeNo))
+    )
+    label.new(
+        bar_index,
+        close,
+        "BM closed\n" + str.tostring(tradeEntryPrice, format.mintick) + " -> " + str.tostring(tradeExitPrice, format.mintick),
+        style = label.style_label_left,
+        color = strategy.closedtrades.profit(tradeNo) >= 0 ? color.green : color.red,
+        textcolor = color.white
+    )
+    observedClosedTrades := strategy.closedtrades
+
+// State code exported with chart data:
+// 0 = waiting, 1 = entry pending, 2 = position open, 3 = trade closed,
+// 4 = unfilled entry canceled.
+stateCode = 0
+if submitted
+    stateCode := canceled ? 4 : strategy.closedtrades > 0 ? 3 : strategy.opentrades > 0 ? 2 : 1
+
+// Visible order levels make it easy to inspect the mapped LTF sequence. The
+// data-window telemetry is intended for TradingView's "Export chart data" CSV.
+plot(submitted and strategy.closedtrades == 0 and not canceled ? entryLevel : na, "BM entry level", color = color.blue, linewidth = 2, style = plot.style_linebr)
+plot(submitted and strategy.closedtrades == 0 and not canceled ? stopLevel : na, "BM stop level", color = color.red, linewidth = 2, style = plot.style_linebr)
+plot(submitted and strategy.closedtrades == 0 and not canceled ? targetLevel : na, "BM target level", color = color.green, linewidth = 2, style = plot.style_linebr)
+plot(stateCode, "BM state code", display = display.data_window)
+plot(strategy.position_size, "BM position size", display = display.data_window)
+plot(strategy.opentrades, "BM open trades", display = display.data_window)
+plot(strategy.closedtrades, "BM closed trades", display = display.data_window)
+plot(submittedAtBar, "BM submission bar index", display = display.data_window)
+plot(time, "BM chart open time ms", display = display.data_window)
+plot(time_close, "BM chart close time ms", display = display.data_window)
+
+lastTradeNo = strategy.closedtrades - 1
+plot(lastTradeNo >= 0 ? strategy.closedtrades.entry_bar_index(lastTradeNo) : na, "BM last entry bar index", display = display.data_window)
+plot(lastTradeNo >= 0 ? strategy.closedtrades.exit_bar_index(lastTradeNo) : na, "BM last exit bar index", display = display.data_window)
+plot(lastTradeNo >= 0 ? strategy.closedtrades.entry_time(lastTradeNo) : na, "BM last entry time ms", display = display.data_window)
+plot(lastTradeNo >= 0 ? strategy.closedtrades.exit_time(lastTradeNo) : na, "BM last exit time ms", display = display.data_window)
+plot(lastTradeNo >= 0 ? strategy.closedtrades.entry_price(lastTradeNo) : na, "BM last entry price", display = display.data_window)
+plot(lastTradeNo >= 0 ? strategy.closedtrades.exit_price(lastTradeNo) : na, "BM last exit price", display = display.data_window)
+
+var table summary = table.new(position.top_right, 2, 9, border_width = 1)
+if barstate.islast
+    table.cell(summary, 0, 0, "Bar Magnifier")
+    table.cell(summary, 1, 0, "explicitly ON")
+    table.cell(summary, 0, 1, "COOF")
+    table.cell(summary, 1, 1, "OFF (M1)")
+    table.cell(summary, 0, 2, "Ticker")
+    table.cell(summary, 1, 2, syminfo.tickerid)
+    table.cell(summary, 0, 3, "Chart TF")
+    table.cell(summary, 1, 3, timeframe.period)
+    table.cell(summary, 0, 4, "Exchange TZ")
+    table.cell(summary, 1, 4, syminfo.timezone)
+    table.cell(summary, 0, 5, "State code")
+    table.cell(summary, 1, 5, str.tostring(stateCode))
+    table.cell(summary, 0, 6, "Closed trades")
+    table.cell(summary, 1, 6, str.tostring(strategy.closedtrades))
+    table.cell(summary, 0, 7, "Entry time ms")
+    table.cell(summary, 1, 7, lastTradeNo >= 0 ? str.tostring(strategy.closedtrades.entry_time(lastTradeNo)) : "na")
+    table.cell(summary, 0, 8, "Exit time ms")
+    table.cell(summary, 1, 8, lastTradeNo >= 0 ? str.tostring(strategy.closedtrades.exit_time(lastTradeNo)) : "na")
