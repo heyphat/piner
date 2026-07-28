@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.1]
+
+### Changed
+
+- **Byte-reproducible releases.** The release and CI workflows now pin the
+  exact Bun version instead of `latest`, so a published tarball can be
+  binary-verified against a local build of the tagged tree (bun's bundler
+  changes its CJS interop scaffolding between versions, which previously made
+  `dist/*.cjs` differ across toolchains with identical sources). No functional
+  changes to the engine — `0.11.1` is content-equivalent to `0.11.0`, rebuilt
+  under the pinned toolchain with the tag on `main`.
+
 ## [0.11.0]
 
 ### Added
@@ -589,6 +601,7 @@ Initial release: clean-room Pine Script v6 engine. `compile(src)` lexes → pars
 → analyzes → emits JS and an interpreter oracle, cross-checked for identical
 output. Real indicators (SMA/EMA cross, RSI, Bollinger, ATR, …) run end-to-end.
 
+[0.11.1]: https://github.com/heyphat/piner/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/heyphat/piner/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/heyphat/piner/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/heyphat/piner/compare/v0.8.1...v0.9.0
