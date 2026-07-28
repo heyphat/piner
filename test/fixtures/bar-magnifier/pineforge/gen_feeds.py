@@ -74,6 +74,22 @@ def walk(points, n=BARS_PER_CHART):
     return [tuple(round(x, 4) for x in bar) for bar in bars]
 
 
+def one_wide_subbar(level, low, high, close, n=BARS_PER_CHART, at=5):
+    """A quiet bar whose sub-bar `at` alone spans [low, high].
+
+    walk() interpolates between waypoints, so it can never put two distant
+    levels inside ONE M1 row. This can: exactly one sub-bar is wide enough to
+    contain both the stop and the target, which is the intrabar tie case.
+    """
+    bars = []
+    for i in range(n):
+        if i == at:
+            bars.append((level, high, low, close))
+        else:
+            bars.append((level, level + 0.1, level - 0.1, level))
+    return [tuple(round(x, 4) for x in b) for b in bars]
+
+
 def flat_bar(level=FLAT, n=BARS_PER_CHART):
     """A quiet chart bar: a shallow ±0.1 breathe around `level`."""
     return walk([level, level + 0.1, level - 0.1, level], n)
@@ -166,6 +182,79 @@ SCENARIOS = {
         "tail": TAIL_FLAT,
         "expect": "magnifier: short entry ~96 then TP 91 before SL 101.",
     },
+
+    # Trailing stops only diverge when retrace-vs-peak ORDER differs. L and M are
+    # the trailing analogue of A/B: IDENTICAL chart OHLC (O102 H104 L101.5 C103),
+    # opposite intrabar order. A path-blind engine must answer both the same.
+    "L_trail_peak_then_dip": {
+        "inputs": {},
+        "scenario_bar": walk([102.0, 104.0, 101.5, 103.0]),
+        "tail": [flat_bar(103.0), flat_bar(103.0)],
+        "expect": "peak 104 FIRST, then a 2.5 retrace. A 2.00 trail armed at 104 "
+                  "stops out at 102.",
+    },
+    "M_trail_dip_then_peak": {
+        "inputs": {},
+        "scenario_bar": walk([102.0, 101.5, 104.0, 103.0]),
+        "tail": [flat_bar(103.0), flat_bar(103.0)],
+        "expect": "the dip to 101.5 comes BEFORE the peak 104, so the trail is never "
+                  "armed above the dip and there is no exit. Chart OHLC identical to L.",
+    },
+
+    # --- extended coverage -------------------------------------------------
+    # BOTH levels inside ONE sub-bar: the tie the whole-bar model cannot express.
+    "F_tie_same_subbar": {
+        "inputs": {},
+        "scenario_bar": one_wide_subbar(98.0, 94.0, 106.0, 99.0),
+        "tail": TAIL_FLAT,
+        "expect": "one M1 bar spans 94->106, touching SL 95 and TP 105 inside a single "
+                  "sub-bar. Pins the intrabar tie policy; magnifier and whole-bar may agree "
+                  "by accident, so read this row against F's sibling scenarios.",
+    },
+    # Price touches each level EXACTLY, never overshooting.
+    "G_exact_touch": {
+        "inputs": {},
+        "scenario_bar": walk([98.0, 105.0, 95.0, 99.0]),
+        "tail": TAIL_FLAT,
+        "expect": "the path reaches exactly 105 then exactly 95 — no overshoot. Pins "
+                  "inclusive (<=/>=) trigger comparison at the level itself.",
+    },
+    # A chart bar with NO intrabar rows -> documented fallback + dataFallbackBars.
+    "H_empty_bucket": {
+        "inputs": {},
+        "scenario_bar": walk([98.0, 100.5, 106.0, 94.0, 99.0]),
+        "tail": TAIL_FLAT,
+        "expect": "the scenario bar's M1 rows are dropped after generation, so its bucket is "
+                  "empty: that one chart bar must fall back to chart OHLC and be counted in "
+                  "dataFallbackBars while its neighbours stay magnified.",
+        "drop_scenario_intrabars": True,
+    },
+    # Rise then retrace — the path a trailing stop is defined by.
+    "I_trail_retrace": {
+        "inputs": {},
+        "scenario_bar": walk([98.0, 104.0, 101.5, 103.0]),
+        "tail": [walk([103.0, 99.0, 100.0]), flat_bar(100.0)],
+        "expect": "monotonic rise to 104 then a 2.5 retrace, then a deeper drop on the "
+                  "settling bar. Trailing-stop activation and offset are pure path "
+                  "questions the chart bar cannot answer.",
+    },
+    # The EXIT level is jumped over between two M1 rows (D does this for entries).
+    "J_exit_gap": {
+        "inputs": {},
+        "scenario_bar": walk([98.0, 99.0, ("gap", 106.5), 106.0, 106.2]),
+        "tail": TAIL_FLAT,
+        "expect": "the take-profit at 105 is never traded — the path gaps 99 -> 106.5 "
+                  "between two M1 rows. Pins exit gap-fill pricing (fill at the sub-bar "
+                  "open, not at the level).",
+    },
+    # Two complete round trips, so sequencing and repeat entries are exercised.
+    "K_two_roundtrips": {
+        "inputs": {},
+        "scenario_bar": walk([98.0, 106.0, 99.0]),
+        "tail": [walk([99.0, 94.0, 98.0]), walk([98.0, 106.0, 99.0]), flat_bar(99.0)],
+        "expect": "TP, then a drop through SL, then a second TP — multiple magnified "
+                  "round trips in one run.",
+    },
 }
 
 
@@ -178,6 +267,12 @@ def main():
         # issued on the last scenario bar always has a next bar open to fill at.
         paths = paths + [flat_bar(paths[-1][-1][3])]
         m1, chart = build(paths)
+        if spec.get('drop_scenario_intrabars'):
+            # remove exactly the scenario bar's rows; the bucket becomes empty while
+            # its chart bar still exists, which is the fallback case under test.
+            lo = chart[6]['timestamp']
+            hi = lo + MS_CHART
+            m1 = [b for b in m1 if not (lo <= b['timestamp'] < hi)]
 
         for rows, suffix in ((m1, "m1"), (chart, "chart")):
             path = os.path.join(OUT, f"{name}.{suffix}.csv")

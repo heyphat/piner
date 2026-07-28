@@ -1,32 +1,699 @@
-PineForge Bar Magnifier differential summary
-Generated from: piner-sandbox/pineforge/out/parity-artifact.json
-Artifact SHA-256: 1a64693eb35460561434feae42979fdcef24147819a860611bcaa1580ff7e329
 
-Scope
-- 5 synthetic scenarios: A_tp_before_sl, B_sl_before_tp,
-  C_tp_touched_before_limit_entry, D_subbar_gap_entry, E_short_tp_before_sl.
-- 6 Pine probe forms: submit-once, reissue, prefilled, prefilled-once,
-  prefilled-limit, prefilled-stop.
-- Bar Magnifier ON and OFF for every scenario/form pair: 5 x 6 x 2 = 60
-  successful PineForge runs.
+### A_tp_before_sl   chart scenario bar OHLC = [98.0, 106.0, 94.0, 99.0]
+    magnifier: exit at TP 105. whole-bar: chart bar is O98 H106 L94 C99, same as scenario B, so a path-blind engine must answer identically for both.
+  [submit-once]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 98.0@bar9 pnl -2.00
+      mag OFF : long 100.0@bar6 -> 95.0@bar6 pnl -5.00
+  [reissue]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 98.0@bar9 pnl -2.00
+      mag OFF : long 100.0@bar6 -> 95.0@bar6 pnl -5.00
+  [prefilled]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+  [prefilled-once]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+  [prefilled-limit]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+  [prefilled-stop]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+  [prefilled-trail]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 104.0@bar6 pnl +6.00
+  [prefilled-partial]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+  [prefilled-oca]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+  [prefilled-pyramid]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar4 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00; long 98.0@bar4 -> 95.0@bar6 pnl -3.00
+  [prefilled-slippage]  magnifier changed the outcome: YES
+      mag ON  : long 98.05@bar3 -> 105.0@bar6 pnl +6.95
+      mag OFF : long 98.05@bar3 -> 94.95@bar6 pnl -3.10
+  [prefilled-commission]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +6.85
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.14
+  [stop-limit-entry]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 98.0@bar9 pnl -2.00
+      mag OFF : long 100.0@bar6 -> 98.0@bar9 pnl -2.00
+  [multi-roundtrip]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar7 -> 98.0@bar9 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00; long 98.0@bar7 -> 98.0@bar9 pnl +0.00
+  [reversal]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+  [qty-percent-equity]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
 
-Primary path discriminator
-- A and B have identical chart-bar OHLC; only lower-timeframe TP/SL ordering differs.
-- With Bar Magnifier OFF, every probe form is path-blind across A and B.
-- With Bar Magnifier ON, prefilled, prefilled-once, prefilled-limit, and
-  prefilled-stop produce path-aware A/B artifacts. submit-once and reissue remain
-  path-blind because PineForge's flat-position strategy.exit lifetime diverges
-  from piner and is not treated as TradingView truth.
-- Reliable prefilled bracket outcomes: A exits long at TP 105, B exits long at
-  SL 95, and E exits short at TP 91 before SL 101.
+### B_sl_before_tp   chart scenario bar OHLC = [98.0, 106.0, 94.0, 99.0]
+    magnifier: exit at SL 95. Chart OHLC identical to scenario A.
+  [submit-once]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 98.0@bar9 pnl -2.00
+      mag OFF : long 100.0@bar6 -> 95.0@bar6 pnl -5.00
+  [reissue]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 98.0@bar9 pnl -2.00
+      mag OFF : long 100.0@bar6 -> 95.0@bar6 pnl -5.00
+  [prefilled]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+  [prefilled-once]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+  [prefilled-limit]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+  [prefilled-stop]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+  [prefilled-trail]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 104.0@bar6 pnl +6.00
+  [prefilled-partial]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar6 pnl -3.00; long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+  [prefilled-oca]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+  [prefilled-pyramid]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar6 pnl -3.00; long 98.0@bar4 -> 95.0@bar6 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00; long 98.0@bar4 -> 95.0@bar6 pnl -3.00
+  [prefilled-slippage]  magnifier changed the outcome: YES
+      mag ON  : long 98.05@bar3 -> 94.95@bar6 pnl -3.10
+      mag OFF : long 98.05@bar3 -> 94.95@bar6 pnl -3.10
+  [prefilled-commission]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar6 pnl -3.14
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.14
+  [stop-limit-entry]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 98.0@bar9 pnl -2.00
+      mag OFF : long 100.0@bar6 -> 98.0@bar9 pnl -2.00
+  [multi-roundtrip]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar6 pnl -3.00; long 98.0@bar7 -> 98.0@bar9 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00; long 98.0@bar7 -> 98.0@bar9 pnl +0.00
+  [reversal]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+  [qty-percent-equity]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
 
-Assertion boundary
-- PineForge is a black-box differential oracle, not TradingView ground truth.
-- test/fixtures/bar-magnifier/proxy-validated-artifact.json intentionally keeps
-  only scenarios A, B, and E for prefilled-once, prefilled-limit, and
-  prefilled-stop, with both magnifier modes.
-- Scenarios/forms involving PineForge's flat-position strategy.exit lifetime or
-  scenario D gap-at-level behavior are retained in the full sandbox artifact
-  for investigation but excluded from piner semantic assertions.
-- Direct TradingView-pinned fixtures remain desirable evidence, not a release
-  prerequisite.
+### C_tp_touched_before_limit_entry   chart scenario bar OHLC = [102.0, 106.0, 99.0, 101.0]
+    magnifier: no exit on the entry bar (105 printed pre-entry); trade closes at SL 95 on the settling bar. whole-bar: entry 100 then H106 >= 105 -> TP same bar.
+  [submit-once]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 96.0@bar9 pnl -4.00
+      mag OFF : long 100.0@bar6 -> 105.0@bar6 pnl +5.00
+  [reissue]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 95.0@bar8 pnl -5.00
+      mag OFF : long 100.0@bar6 -> 105.0@bar6 pnl +5.00
+  [prefilled]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+  [prefilled-once]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+  [prefilled-limit]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+  [prefilled-stop]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar8 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar8 pnl -3.00
+  [prefilled-trail]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 102.0@bar6 pnl +4.00
+      mag OFF : long 98.0@bar3 -> 104.0@bar6 pnl +6.00
+  [prefilled-partial]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar3 -> 95.0@bar8 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar3 -> 95.0@bar8 pnl -3.00
+  [prefilled-oca]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+  [prefilled-pyramid]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar4 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar4 -> 105.0@bar6 pnl +7.00
+  [prefilled-slippage]  magnifier changed the outcome: YES
+      mag ON  : long 98.05@bar3 -> 105.0@bar6 pnl +6.95
+      mag OFF : long 98.05@bar3 -> 105.0@bar6 pnl +6.95
+  [prefilled-commission]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +6.85
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +6.85
+  [stop-limit-entry]  magnifier changed the outcome: YES
+      mag ON  : long 101.0@bar6 -> 95.0@bar8 pnl -6.00
+      mag OFF : long 101.0@bar6 -> 95.0@bar8 pnl -6.00
+  [multi-roundtrip]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar7 -> 95.0@bar8 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar7 -> 95.0@bar8 pnl -3.00
+  [reversal]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 102.0@bar6 pnl +4.00
+      mag OFF : long 98.0@bar3 -> 102.0@bar6 pnl +4.00
+  [qty-percent-equity]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+
+### D_subbar_gap_entry   chart scenario bar OHLC = [98.0, 103.0, 98.0, 102.0]
+    magnifier: entry fills at the gapped sub-bar open 101.2. whole-bar: chart bar opens 98 < 100 with H103, so a path-blind engine fills at the stop level 100.
+  [submit-once]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 96.0@bar9 pnl -4.00
+      mag OFF : long 100.0@bar6 -> 95.0@bar8 pnl -5.00
+  [reissue]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 95.0@bar8 pnl -5.00
+      mag OFF : long 100.0@bar6 -> 95.0@bar8 pnl -5.00
+  [prefilled]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar8 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar8 pnl -3.00
+  [prefilled-once]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar8 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar8 pnl -3.00
+  [prefilled-limit]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 96.0@bar9 pnl -2.00
+      mag OFF : long 98.0@bar3 -> 96.0@bar9 pnl -2.00
+  [prefilled-stop]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar8 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar8 pnl -3.00
+  [prefilled-trail]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 101.0@bar8 pnl +3.00
+  [prefilled-partial]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar8 pnl -3.00; long 98.0@bar3 -> 96.0@bar9 pnl -2.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar8 pnl -3.00; long 98.0@bar3 -> 96.0@bar9 pnl -2.00
+  [prefilled-oca]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar8 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar8 pnl -3.00
+  [prefilled-pyramid]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar8 pnl -3.00; long 98.0@bar4 -> 95.0@bar8 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar8 pnl -3.00; long 98.0@bar4 -> 95.0@bar8 pnl -3.00
+  [prefilled-slippage]  magnifier changed the outcome: YES
+      mag ON  : long 98.05@bar3 -> 94.95@bar8 pnl -3.10
+      mag OFF : long 98.05@bar3 -> 94.95@bar8 pnl -3.10
+  [prefilled-commission]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar8 pnl -3.14
+      mag OFF : long 98.0@bar3 -> 95.0@bar8 pnl -3.14
+  [stop-limit-entry]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 95.0@bar8 pnl -5.00
+      mag OFF : long 100.0@bar6 -> 95.0@bar8 pnl -5.00
+  [multi-roundtrip]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar8 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar8 pnl -3.00
+  [reversal]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+  [qty-percent-equity]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar8 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar8 pnl -3.00
+
+### E_short_tp_before_sl   chart scenario bar OHLC = [98.0, 102.0, 90.0, 97.0]
+    magnifier: short entry ~96 then TP 91 before SL 101.
+  [submit-once]  magnifier changed the outcome: YES
+      mag ON  : short 96.0@bar6 -> 98.0@bar9 pnl -2.00
+      mag OFF : short 96.0@bar6 -> 101.0@bar6 pnl -5.00
+  [reissue]  magnifier changed the outcome: YES
+      mag ON  : short 96.0@bar6 -> 98.0@bar9 pnl -2.00
+      mag OFF : short 96.0@bar6 -> 101.0@bar6 pnl -5.00
+  [prefilled]  magnifier changed the outcome: YES
+      mag ON  : short 98.0@bar3 -> 91.0@bar6 pnl +7.00
+      mag OFF : short 98.0@bar3 -> 101.0@bar6 pnl -3.00
+  [prefilled-once]  magnifier changed the outcome: YES
+      mag ON  : short 98.0@bar3 -> 91.0@bar6 pnl +7.00
+      mag OFF : short 98.0@bar3 -> 101.0@bar6 pnl -3.00
+  [prefilled-limit]  magnifier changed the outcome: YES
+      mag ON  : short 98.0@bar3 -> 91.0@bar6 pnl +7.00
+      mag OFF : short 98.0@bar3 -> 91.0@bar6 pnl +7.00
+  [prefilled-stop]  magnifier changed the outcome: YES
+      mag ON  : short 98.0@bar3 -> 101.0@bar6 pnl -3.00
+      mag OFF : short 98.0@bar3 -> 101.0@bar6 pnl -3.00
+  [prefilled-trail]  magnifier changed the outcome: YES
+      mag ON  : short 98.0@bar3 -> 98.0@bar6 pnl +0.00
+      mag OFF : short 98.0@bar3 -> 92.0@bar6 pnl +6.00
+  [prefilled-partial]  magnifier changed the outcome: YES
+      mag ON  : short 98.0@bar3 -> 91.0@bar6 pnl +7.00; short 98.0@bar3 -> 101.0@bar6 pnl -3.00
+      mag OFF : short 98.0@bar3 -> 91.0@bar6 pnl +7.00; short 98.0@bar3 -> 101.0@bar6 pnl -3.00
+  [prefilled-oca]  magnifier changed the outcome: YES
+      mag ON  : short 98.0@bar3 -> 91.0@bar6 pnl +7.00
+      mag OFF : short 98.0@bar3 -> 101.0@bar6 pnl -3.00
+  [prefilled-pyramid]  magnifier changed the outcome: YES
+      mag ON  : short 98.0@bar3 -> 91.0@bar6 pnl +7.00; short 98.0@bar4 -> 91.0@bar6 pnl +7.00
+      mag OFF : short 98.0@bar3 -> 101.0@bar6 pnl -3.00; short 98.0@bar4 -> 101.0@bar6 pnl -3.00
+  [prefilled-slippage]  magnifier changed the outcome: YES
+      mag ON  : short 97.95@bar3 -> 91.0@bar6 pnl +6.95
+      mag OFF : short 97.95@bar3 -> 101.05@bar6 pnl -3.10
+  [prefilled-commission]  magnifier changed the outcome: YES
+      mag ON  : short 98.0@bar3 -> 91.0@bar6 pnl +6.86
+      mag OFF : short 98.0@bar3 -> 101.0@bar6 pnl -3.15
+  [stop-limit-entry]  magnifier changed the outcome: YES
+      mag ON  : short 101.0@bar6 -> 98.0@bar9 pnl +3.00
+      mag OFF : (no closed trade)
+  [multi-roundtrip]  magnifier changed the outcome: YES
+      mag ON  : short 98.0@bar3 -> 91.0@bar6 pnl +7.00; short 98.0@bar7 -> 98.0@bar9 pnl +0.00
+      mag OFF : short 98.0@bar3 -> 101.0@bar6 pnl -3.00; short 98.0@bar7 -> 98.0@bar9 pnl +0.00
+  [reversal]  magnifier changed the outcome: no 
+      mag ON  : short 98.0@bar3 -> 98.0@bar6 pnl +0.00
+      mag OFF : short 98.0@bar3 -> 98.0@bar6 pnl +0.00
+  [qty-percent-equity]  magnifier changed the outcome: YES
+      mag ON  : short 98.0@bar3 -> 91.0@bar6 pnl +7.00
+      mag OFF : short 98.0@bar3 -> 101.0@bar6 pnl -3.00
+
+### F_tie_same_subbar   chart scenario bar OHLC = [98.0, 106.0, 94.0, 98.0]
+    one M1 bar spans 94->106, touching SL 95 and TP 105 inside a single sub-bar. Pins the intrabar tie policy; magnifier and whole-bar may agree by accident, so read this row against F's sibling scenarios.
+  [submit-once]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 98.0@bar9 pnl -2.00
+      mag OFF : long 100.0@bar6 -> 95.0@bar6 pnl -5.00
+  [reissue]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 98.0@bar9 pnl -2.00
+      mag OFF : long 100.0@bar6 -> 95.0@bar6 pnl -5.00
+  [prefilled]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+  [prefilled-once]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+  [prefilled-limit]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+  [prefilled-stop]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+  [prefilled-trail]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 104.0@bar6 pnl +6.00
+  [prefilled-partial]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar6 pnl -3.00; long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+  [prefilled-oca]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+  [prefilled-pyramid]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar6 pnl -3.00; long 98.0@bar4 -> 95.0@bar6 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00; long 98.0@bar4 -> 95.0@bar6 pnl -3.00
+  [prefilled-slippage]  magnifier changed the outcome: YES
+      mag ON  : long 98.05@bar3 -> 94.95@bar6 pnl -3.10
+      mag OFF : long 98.05@bar3 -> 94.95@bar6 pnl -3.10
+  [prefilled-commission]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar6 pnl -3.14
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.14
+  [stop-limit-entry]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 98.0@bar9 pnl -2.00
+      mag OFF : long 100.0@bar6 -> 98.0@bar9 pnl -2.00
+  [multi-roundtrip]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar6 pnl -3.00; long 98.0@bar7 -> 98.0@bar9 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00; long 98.0@bar7 -> 98.0@bar9 pnl +0.00
+  [reversal]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+  [qty-percent-equity]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+
+### G_exact_touch   chart scenario bar OHLC = [98.0, 105.0, 95.0, 99.0]
+    the path reaches exactly 105 then exactly 95 — no overshoot. Pins inclusive (<=/>=) trigger comparison at the level itself.
+  [submit-once]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 98.0@bar9 pnl -2.00
+      mag OFF : long 100.0@bar6 -> 95.0@bar6 pnl -5.00
+  [reissue]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 98.0@bar9 pnl -2.00
+      mag OFF : long 100.0@bar6 -> 95.0@bar6 pnl -5.00
+  [prefilled]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+  [prefilled-once]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+  [prefilled-limit]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+  [prefilled-stop]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+  [prefilled-trail]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 103.0@bar6 pnl +5.00
+  [prefilled-partial]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+  [prefilled-oca]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+  [prefilled-pyramid]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar4 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00; long 98.0@bar4 -> 95.0@bar6 pnl -3.00
+  [prefilled-slippage]  magnifier changed the outcome: YES
+      mag ON  : long 98.05@bar3 -> 105.0@bar6 pnl +6.95
+      mag OFF : long 98.05@bar3 -> 94.95@bar6 pnl -3.10
+  [prefilled-commission]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +6.85
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.14
+  [stop-limit-entry]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 98.0@bar9 pnl -2.00
+      mag OFF : long 100.0@bar6 -> 98.0@bar9 pnl -2.00
+  [multi-roundtrip]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar7 -> 98.0@bar9 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00; long 98.0@bar7 -> 98.0@bar9 pnl +0.00
+  [reversal]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+  [qty-percent-equity]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar6 pnl -3.00
+
+### H_empty_bucket   chart scenario bar OHLC = [98.0, 106.0, 94.0, 99.0]
+    the scenario bar's M1 rows are dropped after generation, so its bucket is empty: that one chart bar must fall back to chart OHLC and be counted in dataFallbackBars while its neighbours stay magnified.
+  [submit-once]  magnifier changed the outcome: no 
+      mag ON  : (no closed trade)
+      mag OFF : (no closed trade)
+  [reissue]  magnifier changed the outcome: no 
+      mag ON  : (no closed trade)
+      mag OFF : (no closed trade)
+  [prefilled]  magnifier changed the outcome: no 
+      mag ON  : (no closed trade)
+      mag OFF : (no closed trade)
+  [prefilled-once]  magnifier changed the outcome: no 
+      mag ON  : (no closed trade)
+      mag OFF : (no closed trade)
+  [prefilled-limit]  magnifier changed the outcome: no 
+      mag ON  : (no closed trade)
+      mag OFF : (no closed trade)
+  [prefilled-stop]  magnifier changed the outcome: no 
+      mag ON  : (no closed trade)
+      mag OFF : (no closed trade)
+  [prefilled-trail]  magnifier changed the outcome: no 
+      mag ON  : (no closed trade)
+      mag OFF : (no closed trade)
+  [prefilled-partial]  magnifier changed the outcome: no 
+      mag ON  : (no closed trade)
+      mag OFF : (no closed trade)
+  [prefilled-oca]  magnifier changed the outcome: no 
+      mag ON  : (no closed trade)
+      mag OFF : (no closed trade)
+  [prefilled-pyramid]  magnifier changed the outcome: no 
+      mag ON  : (no closed trade)
+      mag OFF : (no closed trade)
+  [prefilled-slippage]  magnifier changed the outcome: no 
+      mag ON  : (no closed trade)
+      mag OFF : (no closed trade)
+  [prefilled-commission]  magnifier changed the outcome: no 
+      mag ON  : (no closed trade)
+      mag OFF : (no closed trade)
+  [stop-limit-entry]  magnifier changed the outcome: no 
+      mag ON  : (no closed trade)
+      mag OFF : (no closed trade)
+  [multi-roundtrip]  magnifier changed the outcome: no 
+      mag ON  : (no closed trade)
+      mag OFF : (no closed trade)
+  [reversal]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+  [qty-percent-equity]  magnifier changed the outcome: no 
+      mag ON  : (no closed trade)
+      mag OFF : (no closed trade)
+
+### I_trail_retrace   chart scenario bar OHLC = [98.0, 104.0, 98.0, 103.0]
+    monotonic rise to 104 then a 2.5 retrace, then a deeper drop on the settling bar. Trailing-stop activation and offset are pure path questions the chart bar cannot answer.
+  [submit-once]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 100.0@bar9 pnl +0.00
+      mag OFF : long 100.0@bar6 -> 100.0@bar9 pnl +0.00
+  [reissue]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 100.0@bar9 pnl +0.00
+      mag OFF : long 100.0@bar6 -> 100.0@bar9 pnl +0.00
+  [prefilled]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 100.0@bar9 pnl +2.00
+      mag OFF : long 98.0@bar3 -> 100.0@bar9 pnl +2.00
+  [prefilled-once]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 100.0@bar9 pnl +2.00
+      mag OFF : long 98.0@bar3 -> 100.0@bar9 pnl +2.00
+  [prefilled-limit]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 100.0@bar9 pnl +2.00
+      mag OFF : long 98.0@bar3 -> 100.0@bar9 pnl +2.00
+  [prefilled-stop]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 100.0@bar9 pnl +2.00
+      mag OFF : long 98.0@bar3 -> 100.0@bar9 pnl +2.00
+  [prefilled-trail]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 102.0@bar7 pnl +4.00
+  [prefilled-partial]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 100.0@bar9 pnl +4.00
+      mag OFF : long 98.0@bar3 -> 100.0@bar9 pnl +4.00
+  [prefilled-oca]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 100.0@bar9 pnl +2.00
+      mag OFF : long 98.0@bar3 -> 100.0@bar9 pnl +2.00
+  [prefilled-pyramid]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 100.0@bar9 pnl +2.00
+      mag OFF : long 98.0@bar3 -> 100.0@bar9 pnl +2.00
+  [prefilled-slippage]  magnifier changed the outcome: no 
+      mag ON  : long 98.05@bar3 -> 99.95@bar9 pnl +1.90
+      mag OFF : long 98.05@bar3 -> 99.95@bar9 pnl +1.90
+  [prefilled-commission]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 100.0@bar9 pnl +1.85
+      mag OFF : long 98.0@bar3 -> 100.0@bar9 pnl +1.85
+  [stop-limit-entry]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 100.0@bar9 pnl +0.00
+      mag OFF : long 100.0@bar6 -> 100.0@bar9 pnl +0.00
+  [multi-roundtrip]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 100.0@bar9 pnl +2.00
+      mag OFF : long 98.0@bar3 -> 100.0@bar9 pnl +2.00
+  [reversal]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+  [qty-percent-equity]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 100.0@bar9 pnl +2.00
+      mag OFF : long 98.0@bar3 -> 100.0@bar9 pnl +2.00
+
+### J_exit_gap   chart scenario bar OHLC = [98.0, 106.5, 98.0, 106.2]
+    the take-profit at 105 is never traded — the path gaps 99 -> 106.5 between two M1 rows. Pins exit gap-fill pricing (fill at the sub-bar open, not at the level).
+  [submit-once]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 98.0@bar9 pnl -2.00
+      mag OFF : long 100.0@bar6 -> 105.0@bar6 pnl +5.00
+  [reissue]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 98.0@bar9 pnl -2.00
+      mag OFF : long 100.0@bar6 -> 105.0@bar6 pnl +5.00
+  [prefilled]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+  [prefilled-once]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+  [prefilled-limit]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+  [prefilled-stop]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 98.0@bar9 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 98.0@bar9 pnl +0.00
+  [prefilled-trail]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 98.0@bar7 pnl +0.00
+  [prefilled-partial]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar3 -> 98.0@bar9 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar3 -> 98.0@bar9 pnl +0.00
+  [prefilled-oca]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+  [prefilled-pyramid]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar4 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar4 -> 105.0@bar6 pnl +7.00
+  [prefilled-slippage]  magnifier changed the outcome: YES
+      mag ON  : long 98.05@bar3 -> 105.0@bar6 pnl +6.95
+      mag OFF : long 98.05@bar3 -> 105.0@bar6 pnl +6.95
+  [prefilled-commission]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +6.85
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +6.85
+  [stop-limit-entry]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 98.0@bar9 pnl -2.00
+      mag OFF : long 100.0@bar6 -> 98.0@bar9 pnl -2.00
+  [multi-roundtrip]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar7 -> 98.0@bar9 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar7 -> 98.0@bar9 pnl +0.00
+  [reversal]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+  [qty-percent-equity]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+
+### K_two_roundtrips   chart scenario bar OHLC = [98.0, 106.0, 98.0, 99.0]
+    TP, then a drop through SL, then a second TP — multiple magnified round trips in one run.
+  [submit-once]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 99.0@bar9 pnl -1.00
+      mag OFF : long 100.0@bar6 -> 105.0@bar6 pnl +5.00
+  [reissue]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 95.0@bar7 pnl -5.00
+      mag OFF : long 100.0@bar6 -> 105.0@bar6 pnl +5.00
+  [prefilled]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+  [prefilled-once]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+  [prefilled-limit]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+  [prefilled-stop]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 95.0@bar7 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 95.0@bar7 pnl -3.00
+  [prefilled-trail]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 104.0@bar6 pnl +6.00
+  [prefilled-partial]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar3 -> 95.0@bar7 pnl -3.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar3 -> 95.0@bar7 pnl -3.00
+  [prefilled-oca]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+  [prefilled-pyramid]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar4 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 98.0@bar4 -> 105.0@bar6 pnl +7.00
+  [prefilled-slippage]  magnifier changed the outcome: YES
+      mag ON  : long 98.05@bar3 -> 105.0@bar6 pnl +6.95
+      mag OFF : long 98.05@bar3 -> 105.0@bar6 pnl +6.95
+  [prefilled-commission]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +6.85
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +6.85
+  [stop-limit-entry]  magnifier changed the outcome: YES
+      mag ON  : long 100.0@bar6 -> 95.0@bar7 pnl -5.00
+      mag OFF : long 100.0@bar6 -> 95.0@bar7 pnl -5.00
+  [multi-roundtrip]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 99.0@bar7 -> 105.0@bar8 pnl +6.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00; long 99.0@bar7 -> 105.0@bar8 pnl +6.00
+  [reversal]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+      mag OFF : long 98.0@bar3 -> 98.0@bar6 pnl +0.00
+  [qty-percent-equity]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+      mag OFF : long 98.0@bar3 -> 105.0@bar6 pnl +7.00
+
+### L_trail_peak_then_dip   chart scenario bar OHLC = [102.0, 104.0, 101.5, 103.0]
+    peak 104 FIRST, then a 2.5 retrace. A 2.00 trail armed at 104 stops out at 102.
+  [submit-once]  magnifier changed the outcome: no 
+      mag ON  : long 102.0@bar6 -> 103.0@bar9 pnl +1.00
+      mag OFF : long 102.0@bar6 -> 103.0@bar9 pnl +1.00
+  [reissue]  magnifier changed the outcome: no 
+      mag ON  : long 102.0@bar6 -> 103.0@bar9 pnl +1.00
+      mag OFF : long 102.0@bar6 -> 103.0@bar9 pnl +1.00
+  [prefilled]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+  [prefilled-once]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+  [prefilled-limit]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+  [prefilled-stop]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+  [prefilled-trail]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 102.0@bar6 pnl +4.00
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+  [prefilled-partial]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 103.0@bar9 pnl +10.00
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +10.00
+  [prefilled-oca]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+  [prefilled-pyramid]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+  [prefilled-slippage]  magnifier changed the outcome: no 
+      mag ON  : long 98.05@bar3 -> 102.95@bar9 pnl +4.90
+      mag OFF : long 98.05@bar3 -> 102.95@bar9 pnl +4.90
+  [prefilled-commission]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 103.0@bar9 pnl +4.85
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +4.85
+  [stop-limit-entry]  magnifier changed the outcome: no 
+      mag ON  : (no closed trade)
+      mag OFF : (no closed trade)
+  [multi-roundtrip]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+  [reversal]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 102.0@bar6 pnl +4.00
+      mag OFF : long 98.0@bar3 -> 102.0@bar6 pnl +4.00
+  [qty-percent-equity]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+
+### M_trail_dip_then_peak   chart scenario bar OHLC = [102.0, 104.0, 101.5, 103.0]
+    the dip to 101.5 comes BEFORE the peak 104, so the trail is never armed above the dip and there is no exit. Chart OHLC identical to L.
+  [submit-once]  magnifier changed the outcome: no 
+      mag ON  : long 102.0@bar6 -> 103.0@bar9 pnl +1.00
+      mag OFF : long 102.0@bar6 -> 103.0@bar9 pnl +1.00
+  [reissue]  magnifier changed the outcome: no 
+      mag ON  : long 102.0@bar6 -> 103.0@bar9 pnl +1.00
+      mag OFF : long 102.0@bar6 -> 103.0@bar9 pnl +1.00
+  [prefilled]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+  [prefilled-once]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+  [prefilled-limit]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+  [prefilled-stop]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+  [prefilled-trail]  magnifier changed the outcome: YES
+      mag ON  : long 98.0@bar3 -> 101.72@bar6 pnl +3.72
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+  [prefilled-partial]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 103.0@bar9 pnl +10.00
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +10.00
+  [prefilled-oca]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+  [prefilled-pyramid]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+  [prefilled-slippage]  magnifier changed the outcome: no 
+      mag ON  : long 98.05@bar3 -> 102.95@bar9 pnl +4.90
+      mag OFF : long 98.05@bar3 -> 102.95@bar9 pnl +4.90
+  [prefilled-commission]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 103.0@bar9 pnl +4.85
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +4.85
+  [stop-limit-entry]  magnifier changed the outcome: no 
+      mag ON  : (no closed trade)
+      mag OFF : (no closed trade)
+  [multi-roundtrip]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+  [reversal]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 102.0@bar6 pnl +4.00
+      mag OFF : long 98.0@bar3 -> 102.0@bar6 pnl +4.00
+  [qty-percent-equity]  magnifier changed the outcome: no 
+      mag ON  : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+      mag OFF : long 98.0@bar3 -> 103.0@bar9 pnl +5.00
+
+A vs B share identical chart-bar OHLC; only the M1 ordering differs.
+  submit-once  mag_on   A==B ? yes (path-blind)
+  submit-once  mag_off  A==B ? yes (path-blind)
+  reissue      mag_on   A==B ? yes (path-blind)
+  reissue      mag_off  A==B ? yes (path-blind)
+  prefilled    mag_on   A==B ? NO  (path-aware)
+  prefilled    mag_off  A==B ? yes (path-blind)
+  prefilled-once mag_on   A==B ? NO  (path-aware)
+  prefilled-once mag_off  A==B ? yes (path-blind)
+  prefilled-limit mag_on   A==B ? NO  (path-aware)
+  prefilled-limit mag_off  A==B ? yes (path-blind)
+  prefilled-stop mag_on   A==B ? NO  (path-aware)
+  prefilled-stop mag_off  A==B ? yes (path-blind)
+  prefilled-trail mag_on   A==B ? yes (path-blind)
+  prefilled-trail mag_off  A==B ? yes (path-blind)
+  prefilled-partial mag_on   A==B ? NO  (path-aware)
+  prefilled-partial mag_off  A==B ? yes (path-blind)
+  prefilled-oca mag_on   A==B ? NO  (path-aware)
+  prefilled-oca mag_off  A==B ? yes (path-blind)
+  prefilled-pyramid mag_on   A==B ? NO  (path-aware)
+  prefilled-pyramid mag_off  A==B ? yes (path-blind)
+  prefilled-slippage mag_on   A==B ? NO  (path-aware)
+  prefilled-slippage mag_off  A==B ? yes (path-blind)
+  prefilled-commission mag_on   A==B ? NO  (path-aware)
+  prefilled-commission mag_off  A==B ? yes (path-blind)
+  stop-limit-entry mag_on   A==B ? yes (path-blind)
+  stop-limit-entry mag_off  A==B ? yes (path-blind)
+  multi-roundtrip mag_on   A==B ? NO  (path-aware)
+  multi-roundtrip mag_off  A==B ? yes (path-blind)
+  reversal     mag_on   A==B ? yes (path-blind)
+  reversal     mag_off  A==B ? yes (path-blind)
+  qty-percent-equity mag_on   A==B ? NO  (path-aware)
+  qty-percent-equity mag_off  A==B ? yes (path-blind)
+
+wrote /Users/phat/phat.vn/piner-sandbox/pineforge/out/parity-artifact.json

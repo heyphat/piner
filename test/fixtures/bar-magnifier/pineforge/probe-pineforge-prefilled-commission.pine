@@ -1,0 +1,38 @@
+//@version=6
+strategy(
+    "BM probe (prefilled-commission)",
+    overlay = true,
+    initial_capital = 100000,
+    default_qty_type = strategy.fixed,
+    default_qty_value = 1,
+    pyramiding = 1,
+    commission_type = strategy.commission.percent,
+    commission_value = 0.075,
+    slippage = 0,
+    backtest_fill_limits_assumption = 0,
+    calc_on_order_fills = false,
+    calc_on_every_tick = false,
+    process_orders_on_close = false,
+    use_bar_magnifier = true
+)
+
+armAfterBars  = input.int(3, "1. Arm bar", minval = 1)
+direction     = input.string("Long", "2. Direction", options = ["Long", "Short"])
+quantity      = input.float(1.0, "4. Quantity", minval = 0.00000001)
+stopLevel     = input.float(95.0, "6. Stop-loss level", minval = 0.00000001)
+targetLevel   = input.float(105.0, "7. Take-profit level", minval = 0.00000001)
+forceCloseBar = input.int(0, "9. Force close bar", minval = 0)
+
+isLong = direction == "Long"
+
+var int barsSeen = 0
+barsSeen := barsSeen + 1
+
+if barsSeen == armAfterBars and strategy.closedtrades == 0
+    strategy.entry("BM_ENTRY", isLong ? strategy.long : strategy.short, qty = quantity)
+
+if strategy.position_size != 0
+    strategy.exit("BM_EXIT", from_entry = "BM_ENTRY", stop = stopLevel, limit = targetLevel)
+
+if forceCloseBar > 0 and barsSeen == forceCloseBar and strategy.position_size != 0
+    strategy.close("BM_ENTRY")

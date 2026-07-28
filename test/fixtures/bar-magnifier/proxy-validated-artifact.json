@@ -1,235 +1,235 @@
 {
-  "produced_by": "pineforge ghcr.io/pineforge-4pass/pineforge-engine:latest",
-  "full_matrix_sha256": "1a64693eb35460561434feae42979fdcef24147819a860611bcaa1580ff7e329",
-  "feed": "synthetic M1, aggregated 1m -> 10m by the engine (input_tf=1, script_tf=10)",
-  "caveat": "PineForge is a third-party engine, not TradingView. These rows are only a black-box differential oracle for already-live historical no-COOF exits.",
-  "excluded": [
-    "submit-once and reissue flat-position exit lifetime",
-    "scenario D gap fill pricing",
-    "COOF, realtime, risk, margin, and complete TradingView parity"
-  ],
-  "scenarios": {
-    "A_tp_before_sl": {
-      "prefilled-once": {
-        "mag_on": {
-          "side": "long",
-          "entry_time": 1735691400000,
-          "exit_time": 1735693500000,
-          "entry_price": 98,
-          "exit_price": 105,
-          "qty": 1,
-          "pnl": 7,
-          "entry_bar_index": 3,
-          "exit_bar_index": 6
-        },
-        "mag_off": {
-          "side": "long",
-          "entry_time": 1735691400000,
-          "exit_time": 1735693200000,
-          "entry_price": 98,
-          "exit_price": 95,
-          "qty": 1,
-          "pnl": -3,
-          "entry_bar_index": 3,
-          "exit_bar_index": 6
-        }
-      },
-      "prefilled-limit": {
-        "mag_on": {
-          "side": "long",
-          "entry_time": 1735691400000,
-          "exit_time": 1735693500000,
-          "entry_price": 98,
-          "exit_price": 105,
-          "qty": 1,
-          "pnl": 7,
-          "entry_bar_index": 3,
-          "exit_bar_index": 6
-        },
-        "mag_off": {
-          "side": "long",
-          "entry_time": 1735691400000,
-          "exit_time": 1735693200000,
-          "entry_price": 98,
-          "exit_price": 105,
-          "qty": 1,
-          "pnl": 7,
-          "entry_bar_index": 3,
-          "exit_bar_index": 6
-        }
-      },
-      "prefilled-stop": {
-        "mag_on": {
-          "side": "long",
-          "entry_time": 1735691400000,
-          "exit_time": 1735693620000,
-          "entry_price": 98,
-          "exit_price": 95,
-          "qty": 1,
-          "pnl": -3,
-          "entry_bar_index": 3,
-          "exit_bar_index": 6
-        },
-        "mag_off": {
-          "side": "long",
-          "entry_time": 1735691400000,
-          "exit_time": 1735693200000,
-          "entry_price": 98,
-          "exit_price": 95,
-          "qty": 1,
-          "pnl": -3,
-          "entry_bar_index": 3,
-          "exit_bar_index": 6
-        }
-      }
+ "produced_by": "pineforge ghcr.io/pineforge-4pass/pineforge-engine:latest",
+ "feed": "synthetic M1, aggregated 1m -> 10m by the engine (input_tf=1, script_tf=10)",
+ "caveat": "PineForge is a third-party engine, not TradingView. These rows are only a black-box differential oracle for already-live historical no-COOF exits.",
+ "excluded": [
+  "submit-once and reissue flat-position exit lifetime",
+  "scenario D gap fill pricing",
+  "COOF, realtime, risk, margin, and complete TradingView parity"
+ ],
+ "full_matrix_sha256": "3ee5a6c943d9ab5ea9409a96cd47fc9fa81ff46b455b99805f8af2108af496eb",
+ "scenarios": {
+  "A_tp_before_sl": {
+   "prefilled-once": {
+    "mag_on": {
+     "side": "long",
+     "entry_time": 1735691400000,
+     "exit_time": 1735693500000,
+     "entry_price": 98.0,
+     "exit_price": 105.0,
+     "qty": 1.0,
+     "pnl": 7.0,
+     "entry_bar_index": 3,
+     "exit_bar_index": 6
     },
-    "B_sl_before_tp": {
-      "prefilled-once": {
-        "mag_on": {
-          "side": "long",
-          "entry_time": 1735691400000,
-          "exit_time": 1735693500000,
-          "entry_price": 98,
-          "exit_price": 95,
-          "qty": 1,
-          "pnl": -3,
-          "entry_bar_index": 3,
-          "exit_bar_index": 6
-        },
-        "mag_off": {
-          "side": "long",
-          "entry_time": 1735691400000,
-          "exit_time": 1735693200000,
-          "entry_price": 98,
-          "exit_price": 95,
-          "qty": 1,
-          "pnl": -3,
-          "entry_bar_index": 3,
-          "exit_bar_index": 6
-        }
-      },
-      "prefilled-limit": {
-        "mag_on": {
-          "side": "long",
-          "entry_time": 1735691400000,
-          "exit_time": 1735693620000,
-          "entry_price": 98,
-          "exit_price": 105,
-          "qty": 1,
-          "pnl": 7,
-          "entry_bar_index": 3,
-          "exit_bar_index": 6
-        },
-        "mag_off": {
-          "side": "long",
-          "entry_time": 1735691400000,
-          "exit_time": 1735693200000,
-          "entry_price": 98,
-          "exit_price": 105,
-          "qty": 1,
-          "pnl": 7,
-          "entry_bar_index": 3,
-          "exit_bar_index": 6
-        }
-      },
-      "prefilled-stop": {
-        "mag_on": {
-          "side": "long",
-          "entry_time": 1735691400000,
-          "exit_time": 1735693500000,
-          "entry_price": 98,
-          "exit_price": 95,
-          "qty": 1,
-          "pnl": -3,
-          "entry_bar_index": 3,
-          "exit_bar_index": 6
-        },
-        "mag_off": {
-          "side": "long",
-          "entry_time": 1735691400000,
-          "exit_time": 1735693200000,
-          "entry_price": 98,
-          "exit_price": 95,
-          "qty": 1,
-          "pnl": -3,
-          "entry_bar_index": 3,
-          "exit_bar_index": 6
-        }
-      }
-    },
-    "E_short_tp_before_sl": {
-      "prefilled-once": {
-        "mag_on": {
-          "side": "short",
-          "entry_time": 1735691400000,
-          "exit_time": 1735693500000,
-          "entry_price": 98,
-          "exit_price": 91,
-          "qty": 1,
-          "pnl": 7,
-          "entry_bar_index": 3,
-          "exit_bar_index": 6
-        },
-        "mag_off": {
-          "side": "short",
-          "entry_time": 1735691400000,
-          "exit_time": 1735693200000,
-          "entry_price": 98,
-          "exit_price": 101,
-          "qty": 1,
-          "pnl": -3,
-          "entry_bar_index": 3,
-          "exit_bar_index": 6
-        }
-      },
-      "prefilled-limit": {
-        "mag_on": {
-          "side": "short",
-          "entry_time": 1735691400000,
-          "exit_time": 1735693500000,
-          "entry_price": 98,
-          "exit_price": 91,
-          "qty": 1,
-          "pnl": 7,
-          "entry_bar_index": 3,
-          "exit_bar_index": 6
-        },
-        "mag_off": {
-          "side": "short",
-          "entry_time": 1735691400000,
-          "exit_time": 1735693200000,
-          "entry_price": 98,
-          "exit_price": 91,
-          "qty": 1,
-          "pnl": 7,
-          "entry_bar_index": 3,
-          "exit_bar_index": 6
-        }
-      },
-      "prefilled-stop": {
-        "mag_on": {
-          "side": "short",
-          "entry_time": 1735691400000,
-          "exit_time": 1735693620000,
-          "entry_price": 98,
-          "exit_price": 101,
-          "qty": 1,
-          "pnl": -3,
-          "entry_bar_index": 3,
-          "exit_bar_index": 6
-        },
-        "mag_off": {
-          "side": "short",
-          "entry_time": 1735691400000,
-          "exit_time": 1735693200000,
-          "entry_price": 98,
-          "exit_price": 101,
-          "qty": 1,
-          "pnl": -3,
-          "entry_bar_index": 3,
-          "exit_bar_index": 6
-        }
-      }
+    "mag_off": {
+     "side": "long",
+     "entry_time": 1735691400000,
+     "exit_time": 1735693200000,
+     "entry_price": 98.0,
+     "exit_price": 95.0,
+     "qty": 1.0,
+     "pnl": -3.0,
+     "entry_bar_index": 3,
+     "exit_bar_index": 6
     }
+   },
+   "prefilled-limit": {
+    "mag_on": {
+     "side": "long",
+     "entry_time": 1735691400000,
+     "exit_time": 1735693500000,
+     "entry_price": 98.0,
+     "exit_price": 105.0,
+     "qty": 1.0,
+     "pnl": 7.0,
+     "entry_bar_index": 3,
+     "exit_bar_index": 6
+    },
+    "mag_off": {
+     "side": "long",
+     "entry_time": 1735691400000,
+     "exit_time": 1735693200000,
+     "entry_price": 98.0,
+     "exit_price": 105.0,
+     "qty": 1.0,
+     "pnl": 7.0,
+     "entry_bar_index": 3,
+     "exit_bar_index": 6
+    }
+   },
+   "prefilled-stop": {
+    "mag_on": {
+     "side": "long",
+     "entry_time": 1735691400000,
+     "exit_time": 1735693620000,
+     "entry_price": 98.0,
+     "exit_price": 95.0,
+     "qty": 1.0,
+     "pnl": -3.0,
+     "entry_bar_index": 3,
+     "exit_bar_index": 6
+    },
+    "mag_off": {
+     "side": "long",
+     "entry_time": 1735691400000,
+     "exit_time": 1735693200000,
+     "entry_price": 98.0,
+     "exit_price": 95.0,
+     "qty": 1.0,
+     "pnl": -3.0,
+     "entry_bar_index": 3,
+     "exit_bar_index": 6
+    }
+   }
+  },
+  "B_sl_before_tp": {
+   "prefilled-once": {
+    "mag_on": {
+     "side": "long",
+     "entry_time": 1735691400000,
+     "exit_time": 1735693500000,
+     "entry_price": 98.0,
+     "exit_price": 95.0,
+     "qty": 1.0,
+     "pnl": -3.0,
+     "entry_bar_index": 3,
+     "exit_bar_index": 6
+    },
+    "mag_off": {
+     "side": "long",
+     "entry_time": 1735691400000,
+     "exit_time": 1735693200000,
+     "entry_price": 98.0,
+     "exit_price": 95.0,
+     "qty": 1.0,
+     "pnl": -3.0,
+     "entry_bar_index": 3,
+     "exit_bar_index": 6
+    }
+   },
+   "prefilled-limit": {
+    "mag_on": {
+     "side": "long",
+     "entry_time": 1735691400000,
+     "exit_time": 1735693620000,
+     "entry_price": 98.0,
+     "exit_price": 105.0,
+     "qty": 1.0,
+     "pnl": 7.0,
+     "entry_bar_index": 3,
+     "exit_bar_index": 6
+    },
+    "mag_off": {
+     "side": "long",
+     "entry_time": 1735691400000,
+     "exit_time": 1735693200000,
+     "entry_price": 98.0,
+     "exit_price": 105.0,
+     "qty": 1.0,
+     "pnl": 7.0,
+     "entry_bar_index": 3,
+     "exit_bar_index": 6
+    }
+   },
+   "prefilled-stop": {
+    "mag_on": {
+     "side": "long",
+     "entry_time": 1735691400000,
+     "exit_time": 1735693500000,
+     "entry_price": 98.0,
+     "exit_price": 95.0,
+     "qty": 1.0,
+     "pnl": -3.0,
+     "entry_bar_index": 3,
+     "exit_bar_index": 6
+    },
+    "mag_off": {
+     "side": "long",
+     "entry_time": 1735691400000,
+     "exit_time": 1735693200000,
+     "entry_price": 98.0,
+     "exit_price": 95.0,
+     "qty": 1.0,
+     "pnl": -3.0,
+     "entry_bar_index": 3,
+     "exit_bar_index": 6
+    }
+   }
+  },
+  "E_short_tp_before_sl": {
+   "prefilled-once": {
+    "mag_on": {
+     "side": "short",
+     "entry_time": 1735691400000,
+     "exit_time": 1735693500000,
+     "entry_price": 98.0,
+     "exit_price": 91.0,
+     "qty": 1.0,
+     "pnl": 7.0,
+     "entry_bar_index": 3,
+     "exit_bar_index": 6
+    },
+    "mag_off": {
+     "side": "short",
+     "entry_time": 1735691400000,
+     "exit_time": 1735693200000,
+     "entry_price": 98.0,
+     "exit_price": 101.0,
+     "qty": 1.0,
+     "pnl": -3.0,
+     "entry_bar_index": 3,
+     "exit_bar_index": 6
+    }
+   },
+   "prefilled-limit": {
+    "mag_on": {
+     "side": "short",
+     "entry_time": 1735691400000,
+     "exit_time": 1735693500000,
+     "entry_price": 98.0,
+     "exit_price": 91.0,
+     "qty": 1.0,
+     "pnl": 7.0,
+     "entry_bar_index": 3,
+     "exit_bar_index": 6
+    },
+    "mag_off": {
+     "side": "short",
+     "entry_time": 1735691400000,
+     "exit_time": 1735693200000,
+     "entry_price": 98.0,
+     "exit_price": 91.0,
+     "qty": 1.0,
+     "pnl": 7.0,
+     "entry_bar_index": 3,
+     "exit_bar_index": 6
+    }
+   },
+   "prefilled-stop": {
+    "mag_on": {
+     "side": "short",
+     "entry_time": 1735691400000,
+     "exit_time": 1735693620000,
+     "entry_price": 98.0,
+     "exit_price": 101.0,
+     "qty": 1.0,
+     "pnl": -3.0,
+     "entry_bar_index": 3,
+     "exit_bar_index": 6
+    },
+    "mag_off": {
+     "side": "short",
+     "entry_time": 1735691400000,
+     "exit_time": 1735693200000,
+     "entry_price": 98.0,
+     "exit_price": 101.0,
+     "qty": 1.0,
+     "pnl": -3.0,
+     "entry_bar_index": 3,
+     "exit_bar_index": 6
+    }
+   }
   }
+ }
 }

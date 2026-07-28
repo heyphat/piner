@@ -106,6 +106,34 @@ python3 scripts/summarize.py > out/summary.txt
 ```
 
 The current compact full artifact SHA-256 is
-`1a64693eb35460561434feae42979fdcef24147819a860611bcaa1580ff7e329`.
+`3ee5a6c943d9ab5ea9409a96cd47fc9fa81ff46b455b99805f8af2108af496eb`.
 Two consecutive summarizations are byte-identical; release validation also
 reruns the complete matrix when Docker is available.
+
+## Expanded matrix
+
+The artifact now covers **13 scenarios x 16 probe forms x ON/OFF = 352 runs**
+(SHA-256 `3ee5a6c9…f496eb`). Beyond the original brackets the forms exercise
+trailing stops, partial exits, OCA, pyramiding, stop-limit entries, slippage,
+commission, multi-round-trips, reversals, and percent-of-equity sizing; the
+scenarios add an intrabar tie (F), exact-touch triggers (G), an empty bucket
+(H), a trail retrace (I), an exit-side gap (J), two round trips (K), and a
+trailing order pair (L/M) with identical chart OHLC.
+
+Additional rows that are **not** piner evidence, on top of those already listed
+under `excluded`:
+
+- **`prefilled-trail` with the magnifier ON.** PineForge exits every magnified
+  trailing-stop run at the entry price; piner reproduces PineForge's own
+  non-magnified answer. Oracle defect, not a piner divergence.
+- **`H_empty_bucket` entirely.** PineForge derives its chart by aggregating the
+  LTF feed, so removing M1 rows changes its chart rather than emptying a bucket.
+  The two engines are not running the same chart. piner's fallback accounting is
+  asserted directly in `test/bar-magnifier-pineforge-fixtures.test.ts`.
+- **`stop-limit-entry` and `prefilled-oca`.** These disagree with the magnifier
+  OFF as well, so the divergence is in base order semantics, not magnification.
+
+One finding is genuinely open: `F_tie_same_subbar` / `prefilled-partial`
+produces the same two trades in **opposite ledger order**, both stamped at the
+same sub-bar. That is plan Q3/M2 (intrabar tie ordering) and needs TradingView
+to settle.
