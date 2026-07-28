@@ -292,7 +292,19 @@ describe('bar magnifier — chart→intrabar mapping (plan §1.3, TV Help Center
     // The published final row has no upper bound, so every chart at or above one
     // week maps to 1D. Treating it as "exactly 1W" would make month and
     // multi-week charts unmappable and contradict the table.
-    for (const atOrAboveAWeek of ['1W', '7D', 'W', '2W', '4W', '52W', '8D', '30D', '1M', 'M', '12M'])
+    for (const atOrAboveAWeek of [
+      '1W',
+      '7D',
+      'W',
+      '2W',
+      '4W',
+      '52W',
+      '8D',
+      '30D',
+      '1M',
+      'M',
+      '12M',
+    ])
       expect(barMagnifierTimeframe(atOrAboveAWeek)).toBe('1D');
     // The row below it is unaffected — 6D is still under one week.
     expect(barMagnifierTimeframe('6D')).toBe('240');

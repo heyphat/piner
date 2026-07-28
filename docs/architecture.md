@@ -380,7 +380,7 @@ is cheap because state objects are small (ring buffers, accumulators).
 
 ### 6.1 Bar Magnifier — historical lower-timeframe fill traversal
 
-`strategy(use_bar_magnifier = true)` replaces the broker's *assumed* intrabar
+`strategy(use_bar_magnifier = true)` replaces the broker's _assumed_ intrabar
 path with **real lower-timeframe OHLC** on historical bars. The engine never
 fetches: the host injects the dataset through a dedicated channel,
 `$.magnifierData: BarMagnifierData | null` (`engine/feed.ts` — target bars,
@@ -406,7 +406,7 @@ smallest correct thing: for a no-COOF historical bar whose bucket is
 a row boundary (a jumped level gap-fills at the next row's open, exactly like
 chart-level gaps). Chart OHLC/time are then restored before the single Pine
 execution and the ordinary close pass, so the script itself still sees chart
-bars; only order *fills* see the LTF path. Trades carry the sub-bar fill
+bars; only order _fills_ see the LTF path. Trades carry the sub-bar fill
 timestamp.
 
 Everything else keeps the existing paths, by construction: empty and
@@ -631,19 +631,19 @@ timeframe must not couple to fill simulation.
 
 ## 13. Hard-semantics → mechanism map (quick reference)
 
-| Pine semantic (verified)                                        | Engine mechanism                                                   |
-| --------------------------------------------------------------- | ------------------------------------------------------------------ |
-| Whole script runs once per bar, repeatedly per realtime tick    | `Driver.runHistorical` loop + `onTick`                             |
-| `close[1]`, constant offset shifts per bar, out-of-range = `na` | `SeriesStore.get(slot, off)` over a global bar counter             |
-| `na` propagates through arithmetic                              | numerics = JS `NaN`; non-numerics = `NA` sentinel                  |
-| `var` init-once / persist                                       | `Context.getVar(slot, init)` + `vars` map                          |
-| `varip` persists across ticks                                   | separate `varips` map, exempt from `rollback()`                    |
-| Realtime rollback clears vars/exprs/outputs                     | `truncateTo(committed)` + state restore + drop uncommitted outputs |
-| Repainting (mutable realtime H/L/C)                             | replay open bar each tick with live tick values                    |
-| `barstate.isconfirmed`                                          | `= isClose` of the current tick                                    |
-| `request.security()` confirmed vs unconfirmed                   | nested engine; historical = last confirmed, realtime = developing  |
-| `execTick` repaint/alert dedupe                                 | monotonic counter ++ per bar start                                 |
-| Bar Magnifier: real LTF rows replace the assumed intrabar path  | `Driver.historicalBarWithMagnifier` over immutable `IntrabarBucket`s |
+| Pine semantic (verified)                                        | Engine mechanism                                                      |
+| --------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Whole script runs once per bar, repeatedly per realtime tick    | `Driver.runHistorical` loop + `onTick`                                |
+| `close[1]`, constant offset shifts per bar, out-of-range = `na` | `SeriesStore.get(slot, off)` over a global bar counter                |
+| `na` propagates through arithmetic                              | numerics = JS `NaN`; non-numerics = `NA` sentinel                     |
+| `var` init-once / persist                                       | `Context.getVar(slot, init)` + `vars` map                             |
+| `varip` persists across ticks                                   | separate `varips` map, exempt from `rollback()`                       |
+| Realtime rollback clears vars/exprs/outputs                     | `truncateTo(committed)` + state restore + drop uncommitted outputs    |
+| Repainting (mutable realtime H/L/C)                             | replay open bar each tick with live tick values                       |
+| `barstate.isconfirmed`                                          | `= isClose` of the current tick                                       |
+| `request.security()` confirmed vs unconfirmed                   | nested engine; historical = last confirmed, realtime = developing     |
+| `execTick` repaint/alert dedupe                                 | monotonic counter ++ per bar start                                    |
+| Bar Magnifier: real LTF rows replace the assumed intrabar path  | `Driver.historicalBarWithMagnifier` over immutable `IntrabarBucket`s  |
 | Bar Magnifier: uncovered chart bars keep the normal assumption  | `'none'`/`'cap-boundary'` buckets → standard path + fallback counters |
 
 ```

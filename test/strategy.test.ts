@@ -371,20 +371,36 @@ describe('strategy — broker simulator', () => {
       '//@version=6\nstrategy("s")\nif bar_index == 0\n    strategy.entry("E", strategy.long, stop = 100, limit = 101)\nif bar_index == 3\n    strategy.close("E")\nplot(strategy.position_size)\n';
 
     // Limit 101 is never traded (bar high 100.5) — the fill must be the stop, 100.
-    const reg = await bothBackends(SRC, undefined, px({ open: 99, high: 100.5, low: 99, close: 100.5 }));
+    const reg = await bothBackends(
+      SRC,
+      undefined,
+      px({ open: 99, high: 100.5, low: 99, close: 100.5 }),
+    );
     expect(reg.strategy.closedTrades[0].entryPrice).toBe(100);
 
     // Even when the bar DOES reach 101 later, activation came first at 100.
-    const through = await bothBackends(SRC, undefined, px({ open: 99, high: 102, low: 99, close: 102 }));
+    const through = await bothBackends(
+      SRC,
+      undefined,
+      px({ open: 99, high: 102, low: 99, close: 102 }),
+    );
     expect(through.strategy.closedTrades[0].entryPrice).toBe(100);
 
     // Gapping past the stop activates at the open, not at the stop level.
-    const gapped = await bothBackends(SRC, undefined, px({ open: 100.4, high: 100.6, low: 100.4, close: 100.6 }));
+    const gapped = await bothBackends(
+      SRC,
+      undefined,
+      px({ open: 100.4, high: 100.6, low: 100.4, close: 100.6 }),
+    );
     expect(gapped.strategy.closedTrades[0].entryPrice).toBe(100.4);
 
     // Gapping clean past the limit is not marketable at all: it stays armed and
     // fills only once price returns to <= 101 (the next bar's open, 100).
-    const beyond = await bothBackends(SRC, undefined, px({ open: 103, high: 104, low: 103, close: 104 }));
+    const beyond = await bothBackends(
+      SRC,
+      undefined,
+      px({ open: 103, high: 104, low: 103, close: 104 }),
+    );
     expect(beyond.strategy.closedTrades[0].entryBar).toBe(2);
     expect(beyond.strategy.closedTrades[0].entryPrice).toBe(100);
   });
