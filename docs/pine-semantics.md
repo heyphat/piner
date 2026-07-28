@@ -140,7 +140,53 @@ every item maps to a mechanism in [`architecture.md`](./architecture.md) §13.
   → [other-timeframes-and-data](https://www.tradingview.com/pine-script-docs/concepts/other-timeframes-and-data/),
   [repainting](https://www.tradingview.com/pine-script-docs/concepts/repainting/)
 
-## 9. Language surface (coverage scope)
+## 9. Bar Magnifier (`use_bar_magnifier`)
+
+- **What it is.** `[verified]` A strategy Properties toggle (const bool, default
+  `false`): on historical bars the broker emulator fills orders against **real
+  lower-timeframe OHLC** instead of the assumed one-bar intrabar path. Entry and
+  exit can resolve inside one chart bar in the order the LTF data actually
+  moved.
+  → [Help Center — Bar Magnifier](https://www.tradingview.com/support/solutions/43000669285-what-is-bar-magnifier-backtesting-mode/)
+- **Chart→intrabar mapping.** `[verified]` Range-based: `1m ≤ chart < 5m → 10S`,
+  `10m ≤ chart < 15m → 1m`, `60m ≤ chart < 240m → 10m`, `1D ≤ chart < 3D → 60m`,
+  … with unbounded terminal rows (`chart ≥ 1W → 1D`; `chart ≥ 1000T → 100T`).
+  Implemented once in `runtime/timeframe.ts` (`barMagnifierTimeframe()`,
+  `BAR_MAGNIFIER_MAPPING_VERSION = 3`); verified 36/36 including both edges of
+  every range. Invalid Pine timeframes throw; the mapping never clamps.
+  → [Help Center table](https://www.tradingview.com/support/solutions/43000669285-what-is-bar-magnifier-backtesting-mode/)
+- **200,000-target-bar limit.** `[verified]` TV requests at most 200k LTF bars,
+  so older chart bars may stay unmagnified. Piner enforces it as broker
+  semantics: filter to the chart envelope **first**, then keep the newest 200k
+  eligible rows (`engine/intrabars.ts`); the earliest cap-intersected bucket
+  falls back whole (conservative — TV's exact partial-bucket policy is
+  unpublished, plan Q4).
+- **Uncovered bars use the standard assumption.** `[verified]` A chart bar with
+  no LTF rows keeps the ordinary chart-OHLC fill model; the optional
+  `StrategyReport.barMagnifier` block counts `dataFallbackBars` /
+  `capFallbackBars` separately, and `active` requires at least one consumed
+  bucket — requested is not effective.
+  → [strategies §bar-magnifier](https://www.tradingview.com/pine-script-docs/concepts/strategies/#bar-magnifier)
+- **No intrabars are invented.** `[verified]` The gap rule carries down one
+  level: movement inside one LTF row and arrival at the next row's open are
+  distinct events, so a level jumped between two rows gap-fills at the next
+  row's open — never at an interpolated price. Fills stay within each row's
+  high-low range.
+  → [strategies §broker-emulator](https://www.tradingview.com/pine-script-docs/concepts/strategies/#broker-emulator)
+- **Script view is unchanged.** `[unverified engineering default]` Pine executes
+  once per chart bar with full chart OHLC/time restored (asserted by test);
+  only fills see LTF data. Fill timestamps are the LTF row's open time.
+  Intrabar tie order (two exits resolving at the same LTF row) is a documented
+  open (plan Q3/M2).
+- **Piner scope.** `[proxy-validated partial support]` Historical, no-COOF bars
+  only. `calc_on_order_fills` keeps the audited chart scheduler, realtime
+  updates fall back per tick, and the host must inject the LTF dataset
+  (`ctx.magnifierData`) — piner never fetches. Validated against TradingView's
+  public documentation plus a deterministic 352-run PineForge differential
+  matrix (`test/fixtures/bar-magnifier/`, `test/bar-magnifier*.test.ts`); not a
+  TradingView-parity claim. Full design: `dev-docs/bar-magnifier-plan.md`.
+
+## 10. Language surface (coverage scope)
 
 Not individually verified in research — treat as implementation scope, not settled
 semantics: `ta.*` library, `plot/plotshape/plotchar/hline/fill/bgcolor`, drawing
@@ -150,7 +196,7 @@ backtesting/order model, and `alert`/`alertcondition`.
 → [reference](https://www.tradingview.com/pine-script-reference/v6/),
 [built-ins](https://www.tradingview.com/pine-script-docs/language/built-ins/)
 
-### 9.1 `strategy.risk.*` rules
+### 10.1 `strategy.risk.*` rules
 
 Per the v6 reference + the [Strategies § Risk management](https://www.tradingview.com/pine-script-docs/concepts/strategies/#risk-management)
 doc: risk rules apply to the whole strategy, run on every tick/order event, and

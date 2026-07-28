@@ -378,6 +378,49 @@ The **snapshot** is taken once when transitioning from historical → realtime
 (after the last confirmed bar): deep-ish copy of builtin states + `var` store. It
 is cheap because state objects are small (ring buffers, accumulators).
 
+### 6.1 Bar Magnifier — historical lower-timeframe fill traversal
+
+`strategy(use_bar_magnifier = true)` replaces the broker's *assumed* intrabar
+path with **real lower-timeframe OHLC** on historical bars. The engine never
+fetches: the host injects the dataset through a dedicated channel,
+`$.magnifierData: BarMagnifierData | null` (`engine/feed.ts` — target bars,
+explicit per-chart-bar close times, and a coverage contract that must be
+`complete`). The chart→intrabar mapping (`10m` chart → `1m` target, etc.) is
+`barMagnifierTimeframe()` in `runtime/timeframe.ts`, exported with
+`BAR_MAGNIFIER_CONTRACT_VERSION`/`MAPPING_VERSION` so hosts can key caches and
+acquire the right data.
+
+Preparation happens once per prepared run, inside the same seam `runHistorical`
+and `prepare()/step()` share (`Driver.prepareHistoricalRun`): validate the
+dataset (fail closed — no sorting, repairing, or clamping), restrict it to the
+chart envelope, retain the **newest 200,000** eligible target rows (TV's limit;
+filtering before capping so trailing out-of-range rows cannot evict usable
+data), and partition into one immutable `IntrabarBucket` per chart bar
+(`engine/intrabars.ts`).
+
+The traversal itself (`Driver.historicalBarWithMagnifier`) is deliberately the
+smallest correct thing: for a no-COOF historical bar whose bucket is
+`'available'`, each LTF row is fed to the broker as an **independent bar** —
+`beginMagnifiedChartBar` → per-row `processMagnifierIntrabar` →
+`endMagnifiedChartBar` — so no continuous price segment is ever invented across
+a row boundary (a jumped level gap-fills at the next row's open, exactly like
+chart-level gaps). Chart OHLC/time are then restored before the single Pine
+execution and the ordinary close pass, so the script itself still sees chart
+bars; only order *fills* see the LTF path. Trades carry the sub-bar fill
+timestamp.
+
+Everything else keeps the existing paths, by construction: empty and
+cap-intersected buckets fall back to the standard chart-OHLC assumption (and
+are counted as `dataFallbackBars`/`capFallbackBars`), `calc_on_order_fills`
+stays on the audited path-point scheduler (magnified COOF is unbuilt —
+`engine/broker-events.ts` holds the reserved resumable-cursor types), and
+realtime ticks fall back per update. The optional `StrategyReport.barMagnifier`
+block reports what actually happened (`active`, `magnifiedBars`,
+`intrabarsUsed`, coverage precedence); it is present only when requested, so
+flag-off reports stay byte-identical. Scope and evidence:
+[`pine-semantics.md`](./pine-semantics.md) §10 and
+`dev-docs/bar-magnifier-plan.md`.
+
 ---
 
 ## 7. Built-in library structure (`runtime/builtins/`)
@@ -561,6 +604,12 @@ engine.strategy; // StrategyReport (net/gross PnL, trades, equity curve)
 `ScriptMetadata` carries the inputs schema, plot declarations, and overlay flags
 so a UI can render the settings panel and wire plots to a chart.
 
+Bar Magnifier data is injected before `run()`/`prepare()` via
+`engine.ctx.magnifierData = data` (per-sleeve: `PortfolioSleeveSpec.magnifierData`)
+— deliberately a context channel rather than an `EngineOptions` field, and never
+a `securityBars` key: a script's own `request.security_lower_tf` for the same
+timeframe must not couple to fill simulation.
+
 ---
 
 ## 12. Build order (suggested phases)
@@ -594,6 +643,8 @@ so a UI can render the settings panel and wire plots to a chart.
 | `barstate.isconfirmed`                                          | `= isClose` of the current tick                                    |
 | `request.security()` confirmed vs unconfirmed                   | nested engine; historical = last confirmed, realtime = developing  |
 | `execTick` repaint/alert dedupe                                 | monotonic counter ++ per bar start                                 |
+| Bar Magnifier: real LTF rows replace the assumed intrabar path  | `Driver.historicalBarWithMagnifier` over immutable `IntrabarBucket`s |
+| Bar Magnifier: uncovered chart bars keep the normal assumption  | `'none'`/`'cap-boundary'` buckets → standard path + fallback counters |
 
 ```
 

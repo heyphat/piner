@@ -8,7 +8,7 @@ byte-for-byte invariant holds for strategies by construction).
 Everything here is implemented clean-room from the public TradingView v6
 reference + [Strategies](https://www.tradingview.com/pine-script-docs/concepts/strategies/)
 docs. The v6 semantics being targeted are summarized in
-[pine-semantics.md](./pine-semantics.md) (§9.1 for the risk rules); the
+[pine-semantics.md](./pine-semantics.md) (§10.1 for the risk rules); the
 per-feature status table is in
 [pine-v6-feature-support.md](./pine-v6-feature-support.md).
 
