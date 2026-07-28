@@ -1,0 +1,79 @@
+//@version=6
+// Bar Magnifier M1 parity probe — PineForge variant, re-issuing form.
+//
+// Same order intent as probe-pineforge.pine, but the entry and the bracket are
+// RE-ISSUED on every chart bar while they are still relevant, instead of being
+// submitted exactly once at the arm bar.
+//
+// In TradingView re-issuing an order under the same id replaces it with an
+// identical order, so this is observationally identical to the submit-once
+// form. In PineForge it is not: a submit-once priced entry stops being
+// eligible after its first bar, which is itself a parity finding — running
+// both forms separates "the magnifier disagrees" from "the order was gone".
+//
+// `9. Force close on chart bar` flattens any still-open position near the end
+// of the feed, so an unfilled exit shows up as a closed trade with a bar-open
+// exit price rather than silently vanishing from the JSON trade list.
+strategy(
+    "BM M1 parity probe (PineForge, re-issue)",
+    overlay = true,
+    initial_capital = 100000,
+    default_qty_type = strategy.fixed,
+    default_qty_value = 1,
+    pyramiding = 1,
+    commission_type = strategy.commission.percent,
+    commission_value = 0,
+    slippage = 0,
+    backtest_fill_limits_assumption = 0,
+    calc_on_order_fills = false,
+    calc_on_every_tick = false,
+    process_orders_on_close = false,
+    use_bar_magnifier = true
+)
+
+armAfterBars    = input.int(6, "1. Arm bar", minval = 1)
+direction       = input.string("Long", "2. Direction", options = ["Long", "Short"])
+entryOrder      = input.string("Stop", "3. Entry order", options = ["Stop", "Limit"])
+quantity        = input.float(1.0, "4. Quantity", minval = 0.00000001)
+entryLevel      = input.float(100.0, "5. Entry level", minval = 0.00000001)
+stopLevel       = input.float(95.0, "6. Stop-loss level", minval = 0.00000001)
+targetLevel     = input.float(105.0, "7. Take-profit level", minval = 0.00000001)
+cancelAfterBars = input.int(20, "8. Cancel after bars", minval = 1)
+forceCloseBar   = input.int(0, "9. Force close bar", minval = 0)
+
+isLong = direction == "Long"
+
+var int  barsSeen       = 0
+var bool canceled       = false
+var int  submittedAtBar = 0
+
+barsSeen := barsSeen + 1
+
+armed = barsSeen >= armAfterBars
+if armed and submittedAtBar == 0
+    submittedAtBar := barsSeen
+
+live = armed and not canceled and strategy.closedtrades == 0
+
+if live
+    if strategy.position_size == 0
+        if entryOrder == "Stop"
+            strategy.entry("BM_ENTRY", isLong ? strategy.long : strategy.short, qty = quantity, stop = entryLevel)
+        else
+            strategy.entry("BM_ENTRY", isLong ? strategy.long : strategy.short, qty = quantity, limit = entryLevel)
+
+    // The bracket is kept alive both while flat and while in position, so it
+    // can act on the same chart bar the entry fills on.
+    strategy.exit(
+        "BM_EXIT",
+        from_entry = "BM_ENTRY",
+        stop = stopLevel,
+        limit = targetLevel
+    )
+
+if live and strategy.position_size == 0 and (barsSeen - submittedAtBar) >= cancelAfterBars
+    strategy.cancel_all()
+    canceled := true
+
+if forceCloseBar > 0 and barsSeen == forceCloseBar and strategy.position_size != 0
+    strategy.close("BM_ENTRY")

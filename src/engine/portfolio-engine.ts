@@ -21,7 +21,7 @@
  */
 
 import { Engine } from './engine.js';
-import { ArrayFeed, type Bar } from './feed.js';
+import { ArrayFeed, type Bar, type BarMagnifierData } from './feed.js';
 import type { CompiledScript } from './compiler.js';
 import { Account, type StrategyReport, type ClosedTrade } from '../runtime/builtins/strategy.js';
 import { tfSeconds } from '../runtime/context.js';
@@ -47,6 +47,11 @@ export interface PortfolioSleeveSpec {
   /** Host-fetched request.security bars, keyed `SYMBOL@TF` — injected into the
    *  sleeve's context before the run, exactly as a single-symbol host does. */
   securityBars?: Record<string, Bar[]>;
+  /** Host-fetched Bar Magnifier data for this sleeve only. It uses the dedicated
+   *  broker-data channel and its LTF timestamps never join the master clock.
+   *  The current experimental traversal supports isolated mode only; a requested
+   *  shared-account run with injected data fails closed. */
+  magnifierData?: BarMagnifierData;
 }
 
 export interface PortfolioEngineOptions {
@@ -105,6 +110,21 @@ export class PortfolioEngine {
   run(sleeves: PortfolioSleeveSpec[]): PortfolioReport {
     const n = sleeves.length;
     if (n === 0) throw new Error('PortfolioEngine: empty basket');
+    const magnifierRequested = this.script.metadata.strategy?.useBarMagnifier === true;
+    if (
+      this.mode === 'shared' &&
+      magnifierRequested &&
+      sleeves.some((s) => s.magnifierData != null)
+    ) {
+      throw new Error(
+        'PortfolioEngine: Bar Magnifier data is not supported in shared account mode',
+      );
+    }
+    if (magnifierRequested && sleeves.some((s) => s.timeframe !== sleeves[0].timeframe)) {
+      throw new Error(
+        'PortfolioEngine: Bar Magnifier requires one common chart timeframe per basket',
+      );
+    }
 
     const headerCapital = this.script.metadata.strategy?.initialCapital ?? 1_000_000;
     const capital = this.opts.capital ?? n * headerCapital;
@@ -135,6 +155,10 @@ export class PortfolioEngine {
       if (s.securityBars)
         for (const [key, bars] of Object.entries(s.securityBars))
           engines[i].ctx.securityBars.set(key, bars);
+      // Dedicated per-sleeve injection: Driver.prepareHistorical() validates and
+      // partitions it before any sleeve is stepped. It is never a securityBars
+      // entry and unionTimes() below continues to see chart bars only.
+      engines[i].ctx.magnifierData = s.magnifierData ?? null;
       engines[i].prepare({ symbol: s.symbol, timeframe: s.timeframe, mintick: s.mintick }, s.bars);
     }
 
@@ -222,6 +246,42 @@ export class PortfolioEngine {
       barsInMarket,
       marginCalls: sum((r) => r.marginCalls),
     };
+
+    // Optional Bar Magnifier aggregate block (bar-magnifier plan §3.5/§8.3),
+    // added atomically with the ordinary constructor's: present iff ANY sleeve
+    // requested magnifier, so a flag-off portfolio report stays byte-identical
+    // and block absence keeps meaning "no sleeve requested" (§8.3). Counters
+    // are sleeve sums; coverage precedence is §8.3's (any mixed → any cap →
+    // complete, or no-data when none was active). A requested basket is
+    // validated above to use one common chart timeframe, so a heterogeneous
+    // target is a contract error rather than an empty-string sentinel.
+    const blocks = reports.flatMap((r) => (r.barMagnifier ? [r.barMagnifier] : []));
+    if (blocks.length > 0) {
+      const bsum = (f: (b: (typeof blocks)[number]) => number) =>
+        blocks.reduce((a, b) => a + f(b), 0);
+      const targetTimeframe = blocks[0].targetTimeframe;
+      if (blocks.some((b) => b.targetTimeframe !== targetTimeframe)) {
+        throw new Error('PortfolioEngine: Bar Magnifier sleeves resolved different targets');
+      }
+      const anyActive = blocks.some((b) => b.active);
+      report.barMagnifier = {
+        requested: true,
+        active: anyActive,
+        targetTimeframe,
+        magnifiedBars: bsum((b) => b.magnifiedBars),
+        fallbackBars: bsum((b) => b.fallbackBars),
+        capFallbackBars: bsum((b) => b.capFallbackBars),
+        dataFallbackBars: bsum((b) => b.dataFallbackBars),
+        intrabarsUsed: bsum((b) => b.intrabarsUsed),
+        coverage: blocks.some((b) => b.coverage === 'mixed-data-fallback')
+          ? 'mixed-data-fallback'
+          : blocks.some((b) => b.coverage === 'tv-cap-fallback')
+            ? 'tv-cap-fallback'
+            : anyActive
+              ? 'complete'
+              : 'no-data',
+      };
+    }
 
     this.result = {
       mode: this.mode,

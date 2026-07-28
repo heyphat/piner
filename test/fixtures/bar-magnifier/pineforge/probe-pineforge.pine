@@ -1,0 +1,79 @@
+//@version=6
+// Bar Magnifier M1 parity probe — PineForge-compatible variant.
+//
+// Order logic is identical to
+//   piner/test/pinescripts/strategies/bar-magnifier-m1-parity-probe.pine
+// with everything PineForge cannot represent removed:
+//   * plot / label / table / log.info  -> "no effect in PineForge backtests"
+//   * bar_index / time_close           -> "diverges from TradingView semantics"
+//   * input.time + timestamp() arming  -> under the magnifier PineForge runs
+//     on_bar on the LAST sub-bar tick, so `time` is a sub-bar timestamp.
+//
+// Arming and cancellation therefore count chart bars with an explicit var
+// counter, which is exact in every engine. The observable output is the JSON
+// trade list, not the chart.
+strategy(
+    "BM M1 parity probe (PineForge variant)",
+    overlay = true,
+    initial_capital = 100000,
+    default_qty_type = strategy.fixed,
+    default_qty_value = 1,
+    pyramiding = 1,
+    commission_type = strategy.commission.percent,
+    commission_value = 0,
+    slippage = 0,
+    backtest_fill_limits_assumption = 0,
+    calc_on_order_fills = false,
+    calc_on_every_tick = false,
+    process_orders_on_close = false,
+    use_bar_magnifier = true
+)
+
+armAfterBars    = input.int(6, "1. Arm bar", minval = 1)
+direction       = input.string("Long", "2. Direction", options = ["Long", "Short"])
+entryOrder      = input.string("Stop", "3. Entry order", options = ["Stop", "Limit"])
+quantity        = input.float(1.0, "4. Quantity", minval = 0.00000001)
+entryLevel      = input.float(100.0, "5. Entry level", minval = 0.00000001)
+stopLevel       = input.float(95.0, "6. Stop-loss level", minval = 0.00000001)
+targetLevel     = input.float(105.0, "7. Take-profit level", minval = 0.00000001)
+cancelAfterBars = input.int(20, "8. Cancel after bars", minval = 1)
+forceCloseBar   = input.int(0, "9. Force close bar", minval = 0)
+
+isLong = direction == "Long"
+
+var int  barsSeen       = 0
+var bool submitted      = false
+var bool canceled       = false
+var int  submittedAtBar = 0
+
+barsSeen := barsSeen + 1
+
+submitNow = not submitted and barsSeen >= armAfterBars
+if submitNow
+    submitted      := true
+    submittedAtBar := barsSeen
+
+    if entryOrder == "Stop"
+        strategy.entry("BM_ENTRY", isLong ? strategy.long : strategy.short, qty = quantity, stop = entryLevel)
+    else
+        strategy.entry("BM_ENTRY", isLong ? strategy.long : strategy.short, qty = quantity, limit = entryLevel)
+
+    // Submit the bracket with the entry. Waiting for position_size to become
+    // nonzero would miss possible post-entry movement in the same chart bar.
+    strategy.exit(
+        "BM_EXIT",
+        from_entry = "BM_ENTRY",
+        stop = stopLevel,
+        limit = targetLevel
+    )
+
+entryStillPending = submitted and not canceled and strategy.opentrades == 0 and strategy.closedtrades == 0
+if entryStillPending and barsSeen - submittedAtBar >= cancelAfterBars
+    strategy.cancel_all()
+    canceled := true
+
+// Harness affordance, inert at 0: flatten any still-open position so that
+// "the bracket never fired" is visible as a closed trade instead of an empty
+// JSON trade list.
+if forceCloseBar > 0 and barsSeen == forceCloseBar and strategy.position_size != 0
+    strategy.close("BM_ENTRY")

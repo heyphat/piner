@@ -14,6 +14,48 @@
  */
 import { isNa } from '../series.js';
 
+/**
+ * Module-private adapter for historical Bar Magnifier traversal. StrategyBroker
+ * is part of the public API, so this lifecycle stays off the class itself. Only
+ * internal source modules can import these functions; the package export map
+ * exposes only the root and node entrypoints.
+ */
+interface MagnifierLifecycle {
+  beginMagnifiedChartBar(): void;
+  processMagnifierIntrabar(): void;
+  endMagnifiedChartBar(intrabarsUsed: number): void;
+  recordMagnifierFallback(reason: 'cap' | 'data'): void;
+  recordRealtimeMagnifierFallback(): void;
+}
+
+const MAGNIFIER_LIFECYCLES = new WeakMap<StrategyBroker, MagnifierLifecycle>();
+
+function magnifierLifecycle(broker: StrategyBroker): MagnifierLifecycle {
+  const lifecycle = MAGNIFIER_LIFECYCLES.get(broker);
+  if (!lifecycle) throw new Error('bar magnifier: internal broker lifecycle is unavailable');
+  return lifecycle;
+}
+
+export function beginMagnifiedChartBar(broker: StrategyBroker): void {
+  magnifierLifecycle(broker).beginMagnifiedChartBar();
+}
+
+export function processMagnifierIntrabar(broker: StrategyBroker): void {
+  magnifierLifecycle(broker).processMagnifierIntrabar();
+}
+
+export function endMagnifiedChartBar(broker: StrategyBroker, intrabarsUsed: number): void {
+  magnifierLifecycle(broker).endMagnifiedChartBar(intrabarsUsed);
+}
+
+export function recordMagnifierFallback(broker: StrategyBroker, reason: 'cap' | 'data'): void {
+  magnifierLifecycle(broker).recordMagnifierFallback(reason);
+}
+
+export function recordRealtimeMagnifierFallback(broker: StrategyBroker): void {
+  magnifierLifecycle(broker).recordRealtimeMagnifierFallback();
+}
+
 const DIR_LONG = 1;
 const DIR_SHORT = -1;
 const sign = (x: number) => (x > 0 ? 1 : x < 0 ? -1 : 0);
@@ -60,6 +102,13 @@ export interface StrategyHost {
   /** Trading-day bucket for the strategy.risk intraday rules: the calendar trading
    *  day on daily-or-faster timeframes, one bucket per bar above daily. */
   tradingDayKey: number;
+  /** Chart timeframe (Pine format) when the host knows it — ExecutionContext
+   *  supplies its tfStr. Fill/mark logic must never read it (bar-magnifier plan
+   *  §5.5: event clocks arrive explicitly, not derived from chart context). */
+  tfStr?: string;
+  /** Bar Magnifier target resolved and validated by Engine.bindRun(). Reports
+   *  consume this stored run identity and never guess from an absent timeframe. */
+  barMagnifierTargetTimeframe?: string;
 }
 
 export interface StrategySettings {
@@ -85,6 +134,15 @@ export interface StrategySettings {
    *  false does not yet reproduce TradingView's close-only realtime cadence.
    *  Default false. */
   calcOnEveryTick: boolean;
+  /** Pine's use_bar_magnifier (const bool, default false). Optional here so
+   *  adding the host override remains source-compatible for consumers that
+   *  construct a complete legacy StrategySettings object; StrategyBroker
+   *  normalizes it to a required boolean internally. Requested is not effective
+   *  (bar-magnifier plan §0.8): this flag requests lower-timeframe fill
+   *  traversal; StrategyReport.barMagnifier reports what actually happened.
+   *  Historical no-COOF traversal is experimental and proxy-validated; COOF and
+   *  realtime retain the established chart-OHLC behavior. */
+  useBarMagnifier?: boolean;
   /** Percent of a long position's value that must be covered by the strategy's own
    *  equity (margin_long). 0 disables the funds check and margin calls for longs —
    *  the Pine v5 default; v6 defaults to 100 (no leverage). */
@@ -209,6 +267,31 @@ export interface StrategyReport {
   /** Forced liquidations by the margin simulation (TradingView's "Margin Calls"
    *  Performance Summary field). Always 0 when margin_long/short are 0. */
   marginCalls: number;
+  /** Bar Magnifier effective state (bar-magnifier plan §3.5). Present ONLY when
+   *  the strategy requested use_bar_magnifier (header or host override), so every
+   *  flag-off serialized report stays byte-identical. `active` requires at least
+   *  one chart bar to have actually consumed an LTF bucket — requested is not
+   *  effective (plan §0.8). */
+  barMagnifier?: {
+    requested: true;
+    active: boolean;
+    /** Pine TF of the mapped intrabar target. A requested run with an
+     *  unsupported chart timeframe fails closed before execution/reporting. */
+    targetTimeframe: string;
+    /** Chart bars whose fills used an LTF bucket. */
+    magnifiedBars: number;
+    /** Chart bars that fell back to the standard assumption (all reasons). */
+    fallbackBars: number;
+    /** Fallback bars attributable to the 200,000-target-bar cap suffix. */
+    capFallbackBars: number;
+    /** Fallback bars attributable to empty buckets inside complete coverage. */
+    dataFallbackBars: number;
+    /** Total LTF bars consumed across all magnified chart bars. */
+    intrabarsUsed: number;
+    /** Chart index of the first magnified bar; absent when none was. */
+    firstMagnifiedBar?: number;
+    coverage: 'complete' | 'tv-cap-fallback' | 'mixed-data-fallback' | 'no-data';
+  };
 }
 
 /**
@@ -290,6 +373,9 @@ export class Account {
 export class StrategyBroker {
   active = false;
   host!: StrategyHost;
+  /** Publicly remains the additive StrategySettings shape so legacy complete
+   *  objects (which omit useBarMagnifier) stay assignable. The initialized
+   *  runtime value is false; internal reads intentionally use boolean truthiness. */
   settings: StrategySettings = {
     initialCapital: 1_000_000,
     qtyType: 'fixed',
@@ -301,6 +387,7 @@ export class StrategyBroker {
     processOrdersOnClose: false,
     calcOnOrderFills: false,
     calcOnEveryTick: false,
+    useBarMagnifier: false,
     // Pine v6 defaults (v5 was 0/0 — declare margin_long=0, margin_short=0 to opt out).
     marginLong: 100,
     marginShort: 100,
@@ -366,6 +453,13 @@ export class StrategyBroker {
   // opened by the process_orders_on_close pass counts from the NEXT bar.
   private barsProcessed = 0;
   private barsInMarket = 0;
+  /** Effective historical Bar Magnifier report counters. */
+  private magnifierCountersEnabled = false;
+  private magnifiedBars = 0;
+  private magnifierCapFallbackBars = 0;
+  private magnifierDataFallbackBars = 0;
+  private magnifierIntrabarsUsed = 0;
+  private firstMagnifiedBar: number | undefined;
   /** All commission charged so far, both sides (TradingView's "Commission Paid"). */
   totalCommission = 0;
   /** Forced liquidations booked by the margin simulation (report `marginCalls`). */
@@ -442,6 +536,12 @@ export class StrategyBroker {
     'maxContractsShort',
     'barsProcessed',
     'barsInMarket',
+    'magnifierCountersEnabled',
+    'magnifiedBars',
+    'magnifierCapFallbackBars',
+    'magnifierDataFallbackBars',
+    'magnifierIntrabarsUsed',
+    'firstMagnifiedBar',
     'totalCommission',
     'marginCallCount',
     'lastMarginCallBar',
@@ -940,6 +1040,44 @@ export class StrategyBroker {
   }
 
   // ── per-bar processing (driver hooks) ─────────────────────
+  constructor() {
+    MAGNIFIER_LIFECYCLES.set(this, {
+      // Risk-day state rolls once per chart bar, not once per LTF row.
+      beginMagnifiedChartBar: () => {
+        if (!this.active) return;
+        this.riskRollDay();
+      },
+      // Each bound LTF row is an independent broker bar; the driver owns the
+      // OHLC/time binding and never creates a cross-row segment.
+      processMagnifierIntrabar: () => {
+        if (!this.active) return;
+        const { open, high, low } = this.host;
+        this.processTick(open, high, low, open);
+      },
+      endMagnifiedChartBar: (intrabarsUsed) => {
+        if (!this.active) return;
+        this.barsProcessed++;
+        if (this.size !== 0) this.barsInMarket++;
+        this.magnifierCountersEnabled = true;
+        this.magnifiedBars++;
+        this.magnifierIntrabarsUsed += intrabarsUsed;
+        this.firstMagnifiedBar ??= this.host.idx;
+      },
+      recordMagnifierFallback: (reason) => {
+        if (!this.active) return;
+        this.magnifierCountersEnabled = true;
+        if (reason === 'cap') this.magnifierCapFallbackBars++;
+        else this.magnifierDataFallbackBars++;
+      },
+      // Broker snapshots make developing-tick rollback and the final close
+      // count one realtime fallback bar.
+      recordRealtimeMagnifierFallback: () => {
+        if (!this.active || !this.magnifierCountersEnabled) return;
+        this.magnifierDataFallbackBars++;
+      },
+    });
+  }
+
   /** Bar open (before the script body): fill against the bar's full range. */
   onBar(): void {
     if (!this.active) return;
@@ -1223,13 +1361,29 @@ export class StrategyBroker {
           const p = or.limit!;
           // a limit resting since a PRIOR tick is open-bounded like any limit order
           if (wasTriggered && (or.dir === DIR_LONG ? o <= p : o >= p)) this.fill(or, o);
-          else if (!wasTriggered && directional) {
-            // Just triggered on a MONOTONE segment (audit 2026-07 §5): the limit
-            // may only fill at prices on the REMAINING travel — never at a price
-            // the segment visited before the stop activated.
+          else if (!wasTriggered) {
+            // Just armed on THIS pass (audit 2026-07 §5): the resting limit may
+            // only fill at a price reachable AFTER activation — never at one the
+            // bar/segment visited before the stop fired. TV-doc verified
+            // (calc-parity-findings.md 2026-07-28): the emulator fills only
+            // within the bar's high-low range, and a limit already marketable
+            // fills at the market coordinate without waiting — never snapped to
+            // its level (the docs' gap rule states the same principle).
+            //
+            // At the activation coordinate the market IS `act`. A limit already
+            // through it (long: limit >= act) is marketable there and fills at
+            // `act`, which is what the trader actually pays — collapsing that to
+            // the limit price invents a worse fill, and when limit > bar high it
+            // invents a price that never traded at all.
+            //
+            // A limit on the far side (long: limit < act — the "buy the retrace"
+            // setup) is NOT marketable, so it needs the price to come back: on a
+            // monotone segment only the remaining travel counts, on a whole bar
+            // the bar's own extreme does.
             const act = or.dir === DIR_LONG ? Math.max(o, or.price!) : Math.min(o, or.price!);
+            const reach = directional ? marketPx : or.dir === DIR_LONG ? l : h;
             if (or.dir === DIR_LONG ? act <= p : act >= p) this.fill(or, act);
-            else if (or.dir === DIR_LONG ? marketPx <= p : marketPx >= p) this.fill(or, p);
+            else if (or.dir === DIR_LONG ? reach <= p : reach >= p) this.fill(or, p);
             else stillPending.push(or); // stays an armed limit for later segments/bars
           } else if (or.dir === DIR_LONG ? l <= p : h >= p) this.fill(or, p);
           else stillPending.push(or); // keep `triggered`
@@ -1724,7 +1878,7 @@ export class StrategyBroker {
 
   /** Live closed-trade list + equity curve for the engine's strategy report. */
   report(): StrategyReport {
-    return {
+    const rep: StrategyReport = {
       // The funding account's capital — identical to settings.initialCapital for a
       // private account (configure() syncs them); the POT under a shared account,
       // matching what strategy.initial_capital reads inside the script (spec S2).
@@ -1746,6 +1900,53 @@ export class StrategyBroker {
       barsInMarket: this.barsInMarket,
       marginCalls: this.marginCallCount,
     };
+    // Optional Bar Magnifier block (bar-magnifier plan §3.5) — appended only
+    // for a successfully bound requested run. Before the first bind there is no
+    // chart timeframe/target to report, so a requested pre-run or standalone
+    // broker report remains nonthrowing and omits this run-specific block.
+    // Counters are enabled when historical no-COOF execution either consumes a
+    // validated bucket or records an explicit cap/data fallback.
+    const targetTimeframe = this.host?.barMagnifierTargetTimeframe;
+    if (this.settings.useBarMagnifier && targetTimeframe !== undefined) {
+      if (this.magnifierCountersEnabled) {
+        const active = this.magnifiedBars > 0;
+        const fallbackBars = this.magnifierCapFallbackBars + this.magnifierDataFallbackBars;
+        rep.barMagnifier = {
+          requested: true,
+          active,
+          targetTimeframe,
+          magnifiedBars: this.magnifiedBars,
+          fallbackBars,
+          capFallbackBars: this.magnifierCapFallbackBars,
+          dataFallbackBars: this.magnifierDataFallbackBars,
+          intrabarsUsed: this.magnifierIntrabarsUsed,
+          coverage: !active
+            ? 'no-data'
+            : this.magnifierDataFallbackBars > 0
+              ? 'mixed-data-fallback'
+              : this.magnifierCapFallbackBars > 0
+                ? 'tv-cap-fallback'
+                : 'complete',
+        };
+        if (this.firstMagnifiedBar !== undefined)
+          rep.barMagnifier.firstMagnifiedBar = this.firstMagnifiedBar;
+      } else {
+        // No supported historical bucket was consumed (for example no data or
+        // calc_on_order_fills, whose existing chart scheduler remains authoritative).
+        rep.barMagnifier = {
+          requested: true,
+          active: false,
+          targetTimeframe,
+          magnifiedBars: 0,
+          fallbackBars: this.barsProcessed,
+          capFallbackBars: 0,
+          dataFallbackBars: 0,
+          intrabarsUsed: 0,
+          coverage: 'no-data',
+        };
+      }
+    }
+    return rep;
   }
 
   /**

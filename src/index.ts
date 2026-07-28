@@ -34,6 +34,26 @@ export type { ScriptFn } from './engine/driver.js';
 export { ArrayFeed } from './engine/feed.js';
 export type { DataFeed, Bar, TickHandler } from './engine/feed.js';
 
+// Bar Magnifier contract (dev-docs/bar-magnifier-plan.md §1.3/§3.4). Hosts need
+// the mapping and versions to acquire the right lower-timeframe data; the
+// partitioner and bucket types stay internal so the traversal owns its own
+// invariants.
+export {
+  BAR_MAGNIFIER_CONTRACT_VERSION,
+  BAR_MAGNIFIER_MAPPING_VERSION,
+  parsePineTimeframe,
+  barMagnifierTimeframe,
+} from './runtime/timeframe.js';
+export type { PineTimeframe } from './runtime/timeframe.js';
+export type {
+  UnixMillisecond,
+  PinerBar,
+  HalfOpenIntervalMs,
+  CoverageGapMs,
+  ChartIntervalEnds,
+  BarMagnifierData,
+} from './engine/feed.js';
+
 // Runtime
 export {
   ExecutionContext,

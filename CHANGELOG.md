@@ -4,6 +4,62 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0]
+
+### Added
+
+- **`use_bar_magnifier` — historical lower-timeframe fill traversal**
+  (TradingView's Bar Magnifier Properties toggle). Declaring
+  `strategy(use_bar_magnifier = true)` — or forcing it via
+  `EngineOptions.strategy.useBarMagnifier` — makes the broker fill orders
+  against **real lower-timeframe OHLC** on historical bars instead of the
+  assumed one-bar intrabar path, so an entry and its bracket can resolve
+  inside one chart bar in the order the market actually moved.
+  - **Host-injected data, engine stays pure:** supply the LTF dataset via
+    `engine.ctx.magnifierData` (per-sleeve:
+    `PortfolioSleeveSpec.magnifierData`) as the new exported
+    `BarMagnifierData` shape — target bars, explicit per-chart-bar close
+    times, and a coverage contract. Validation fails closed: piner never
+    sorts, repairs, or clamps injected data, and never fetches.
+  - **TradingView's chart→intrabar mapping**, implemented once and exported
+    (`barMagnifierTimeframe()`, `parsePineTimeframe()`,
+    `BAR_MAGNIFIER_CONTRACT_VERSION = 1`, `BAR_MAGNIFIER_MAPPING_VERSION = 3`)
+    with the published unbounded terminal rows: month, multi-week, and `>7D`
+    charts map to `1D`; `>=1000T` maps to `100T`. TradingView's
+    **200,000-target-bar limit** is enforced as broker semantics (envelope
+    filter first, then the newest 200k), and uncovered chart bars keep the
+    standard chart-OHLC assumption.
+  - **Scope — proxy-validated partial support, not TV parity:** historical
+    no-COOF bars only. `calc_on_order_fills` keeps its audited chart
+    scheduler, realtime updates fall back per tick, and empty or
+    cap-intersected buckets fall back per bar. Semantics validated against
+    TradingView's public documentation and a deterministic 352-run
+    differential matrix vs an independent C++ Pine engine
+    (`test/fixtures/bar-magnifier/`); no continuous segment is ever invented
+    across an LTF row boundary, and fill timestamps are the sub-bar's open
+    time. See `docs/pine-semantics.md` §9 and `docs/architecture.md` §6.1.
+  - **Optional `StrategyReport.barMagnifier` block** reports effective state
+    (`active`, `magnifiedBars`, `intrabarsUsed`, `capFallbackBars`,
+    `dataFallbackBars`, coverage). Present only when requested — flag-off
+    serialized reports are byte-identical to 0.10.0. Portfolio reports carry
+    per-sleeve blocks plus an aggregate.
+
+### Fixed
+
+- **Stop-limit entries whose limit is beyond the stop no longer fill at
+  untraded prices.** A just-armed stop-limit filled at its limit level
+  whenever the bar's extreme crossed it — with `stop = 100, limit = 101` on a
+  bar with high 100.5 the fill was 101, above the bar's high; a gap-open past
+  the stop also filled at prices the bar never traded. Per the documented
+  emulator rules (fills confined to the bar's range; a marketable limit fills
+  without waiting; gap fills use the market coordinate, not the level), a
+  limit that is marketable the moment its stop trips now fills at the
+  activation price — `max(open, stop)` for longs, mirrored for shorts. The
+  retrace configuration (limit on the near side of the stop, as in
+  TradingView's own stop-limit demo) is unchanged. **Backtests using
+  far-side stop-limit entries produce different — correct — fills than
+  0.10.0.**
+
 ## [0.10.0]
 
 ### Added
@@ -533,6 +589,7 @@ Initial release: clean-room Pine Script v6 engine. `compile(src)` lexes → pars
 → analyzes → emits JS and an interpreter oracle, cross-checked for identical
 output. Real indicators (SMA/EMA cross, RSI, Bollinger, ATR, …) run end-to-end.
 
+[0.11.0]: https://github.com/heyphat/piner/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/heyphat/piner/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/heyphat/piner/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/heyphat/piner/compare/v0.8.0...v0.8.1

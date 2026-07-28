@@ -24,7 +24,7 @@ import { AliasResolver } from '../sema/alias.js';
 import { resolveLibraryClosure, type AsyncLibrarySource } from '../sema/resolve.js';
 import { emit } from '../codegen/emit.js';
 import { makeInterpreted } from '../interp/interpreter.js';
-import type { Program, Call, Expr, ImportStmt } from '../parser/ast.js';
+import type { Program, Call, Expr, ImportStmt, Stmt } from '../parser/ast.js';
 import type { ScriptFn } from './driver.js';
 import type { StrategySettings } from '../runtime/builtins/strategy.js';
 
@@ -122,7 +122,10 @@ export function compile(source: string, options?: CompileOptions): CompiledScrip
   // Inline user-defined (and now merged imported) function calls before analysis.
   const inlined = inlineUserFunctions(toCompile);
   const analysis = analyze(inlined.program);
-  const diagnostics = [...inlined.diagnostics, ...analysis.diagnostics];
+  const metadataDiagnostics: Diagnostic[] = [];
+  const reassignedGlobalNames = collectReassignedGlobalNames(analysis.program);
+  const metadata = extractMetadata(program, metadataDiagnostics, reassignedGlobalNames);
+  const diagnostics = [...inlined.diagnostics, ...analysis.diagnostics, ...metadataDiagnostics];
 
   throwIfErrors(diagnostics);
 
@@ -135,7 +138,7 @@ export function compile(source: string, options?: CompileOptions): CompiledScrip
     source: jsSource,
     metadata: {
       // Metadata is always the Consumer_Script's (merged library decls carry none).
-      ...extractMetadata(program),
+      ...metadata,
       historySlotCount: analysis.historySlotCount,
       stateSiteCount: analysis.stateSiteCount,
       varSlotCount: analysis.varSlotCount,
@@ -272,8 +275,140 @@ function boolConst(v: Expr | undefined, resolve: ConstResolve): boolean | undefi
   return typeof value === 'boolean' ? value : undefined;
 }
 
+/**
+ * Collect mutable global bindings after semantic resolution has visited the
+ * complete executable statement tree. Metadata extraction intentionally reads
+ * the original consumer program, but it must not treat a declaration as const
+ * merely because its `:=` appears after strategy() or inside control flow.
+ *
+ * Function definitions are skipped: invoked bodies have already been expanded
+ * at their call sites by the inliner (and therefore carry resolved symbols),
+ * while an uncalled function cannot mutate runtime state. Checking SymRef.global
+ * also avoids invalidating a same-named global for a reassigned local shadow.
+ */
+function collectReassignedGlobalNames(program: Program): ReadonlySet<string> {
+  const names = new Set<string>();
+
+  const visitBody = (body: readonly Stmt[]): void => {
+    for (const statement of body) visitStmt(statement);
+  };
+
+  const visitStmt = (statement: Stmt): void => {
+    switch (statement.kind) {
+      case 'VarDecl':
+      case 'TupleDecl':
+        visitExpr(statement.init);
+        break;
+      case 'Reassign': {
+        if (statement.target.kind === 'Ident') {
+          const sym = statement.sym ?? statement.target.sym;
+          if (sym?.global) names.add(sym.name);
+        } else {
+          visitExpr(statement.target);
+        }
+        visitExpr(statement.value);
+        break;
+      }
+      case 'ExprStmt':
+        visitExpr(statement.expr);
+        break;
+      case 'FuncDef':
+        break;
+      case 'TypeDef':
+        for (const field of statement.fields) {
+          if (field.default) visitExpr(field.default);
+        }
+        break;
+      case 'Import':
+      case 'Break':
+      case 'Continue':
+        break;
+      case 'If':
+        visitExpr(statement.cond);
+        visitBody(statement.then);
+        for (const branch of statement.elifs) {
+          visitExpr(branch.cond);
+          visitBody(branch.body);
+        }
+        if (statement.else) visitBody(statement.else);
+        break;
+      case 'Switch':
+        if (statement.subject) visitExpr(statement.subject);
+        for (const branch of statement.cases) {
+          if (branch.test) visitExpr(branch.test);
+          visitBody(branch.body);
+        }
+        break;
+      case 'For':
+        visitExpr(statement.from);
+        visitExpr(statement.to);
+        if (statement.step) visitExpr(statement.step);
+        visitBody(statement.body);
+        break;
+      case 'ForIn':
+        visitExpr(statement.iterable);
+        visitBody(statement.body);
+        break;
+      case 'While':
+        visitExpr(statement.cond);
+        visitBody(statement.body);
+        break;
+    }
+  };
+
+  const visitExpr = (expr: Expr): void => {
+    switch (expr.kind) {
+      case 'Number':
+      case 'String':
+      case 'Bool':
+      case 'Color':
+      case 'Na':
+      case 'Ident':
+        break;
+      case 'Member':
+        visitExpr(expr.object);
+        break;
+      case 'Call':
+        visitExpr(expr.callee);
+        for (const arg of expr.args) visitExpr(arg.value);
+        break;
+      case 'History':
+        visitExpr(expr.base);
+        visitExpr(expr.offset);
+        break;
+      case 'Unary':
+        visitExpr(expr.operand);
+        break;
+      case 'Binary':
+        visitExpr(expr.left);
+        visitExpr(expr.right);
+        break;
+      case 'Ternary':
+        visitExpr(expr.cond);
+        visitExpr(expr.then);
+        visitExpr(expr.else);
+        break;
+      case 'Tuple':
+        for (const item of expr.items) visitExpr(item);
+        break;
+      case 'If':
+      case 'Switch':
+      case 'For':
+      case 'ForIn':
+      case 'While':
+        visitStmt(expr);
+        break;
+    }
+  };
+
+  visitBody(program.body);
+  return names;
+}
+
 function extractMetadata(
   program: Program,
+  diagnostics: Diagnostic[],
+  reassignedGlobalNames: ReadonlySet<string>,
 ): Pick<
   ScriptMetadata,
   | 'title'
@@ -298,9 +433,12 @@ function extractMetadata(
     maxPolylinesCount = 100;
   for (const s of program.body) {
     // Mirror the analyzer's global const environment: ordinary declarations are
-    // candidates while `var`/`varip` and reassigned names are runtime values.
+    // candidates only when no resolved global reassignment exists anywhere in
+    // the executable tree. `var`/`varip` and mutable names are runtime values.
     if (s.kind === 'VarDecl') {
-      if (s.mode === 'none') consts.set(s.name, s.init);
+      if (s.mode === 'none' && !reassignedGlobalNames.has(s.name)) {
+        consts.set(s.name, s.init);
+      }
       continue;
     }
     if (s.kind === 'Reassign' && s.target.kind === 'Ident') {
@@ -328,7 +466,7 @@ function extractMetadata(
     maxLabelsCount = cap('max_labels_count', 50);
     maxBoxesCount = cap('max_boxes_count', 50);
     maxPolylinesCount = cap('max_polylines_count', 100);
-    if (isStrategy) strategy = extractStrategySettings(call, resolveConst);
+    if (isStrategy) strategy = extractStrategySettings(call, resolveConst, diagnostics);
     break;
   }
   return {
@@ -347,6 +485,7 @@ function extractMetadata(
 function extractStrategySettings(
   call: Call,
   resolveConst: ConstResolve,
+  diagnostics: Diagnostic[],
 ): Partial<StrategySettings> {
   const s: Partial<StrategySettings> = {};
   const num = (n: string): number | undefined => {
@@ -402,6 +541,24 @@ function extractStrategySettings(
     resolveConst,
   );
   if (coet !== undefined) s.calcOnEveryTick = coet;
+  // use_bar_magnifier is a Pine `const bool`. Silently treating a supplied
+  // runtime/wrong-type value as omission would select the standard broker path,
+  // so reject it at compile time instead.
+  const ubmArg = call.args.find((a) => a.name === 'use_bar_magnifier');
+  if (ubmArg) {
+    const ubm = boolConst(ubmArg.value, resolveConst);
+    if (ubm === undefined) {
+      const loc = ubmArg.value.loc ?? call.loc ?? { line: 1, col: 1 };
+      diagnostics.push({
+        severity: 'error',
+        message: 'strategy() use_bar_magnifier must be a const bool',
+        line: loc.line,
+        col: loc.col,
+      });
+    } else {
+      s.useBarMagnifier = ubm;
+    }
+  }
   return s;
 }
 

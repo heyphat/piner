@@ -1,0 +1,139 @@
+{
+ "A_tp_before_sl": {
+  "scenario_bar_ohlc": [
+   98.0,
+   106.0,
+   94.0,
+   99.0
+  ],
+  "inputs": {},
+  "expect": "magnifier: exit at TP 105. whole-bar: chart bar is O98 H106 L94 C99, same as scenario B, so a path-blind engine must answer identically for both."
+ },
+ "B_sl_before_tp": {
+  "scenario_bar_ohlc": [
+   98.0,
+   106.0,
+   94.0,
+   99.0
+  ],
+  "inputs": {},
+  "expect": "magnifier: exit at SL 95. Chart OHLC identical to scenario A."
+ },
+ "C_tp_touched_before_limit_entry": {
+  "scenario_bar_ohlc": [
+   102.0,
+   106.0,
+   99.0,
+   101.0
+  ],
+  "inputs": {
+   "3. Entry order": "Limit"
+  },
+  "expect": "magnifier: no exit on the entry bar (105 printed pre-entry); trade closes at SL 95 on the settling bar. whole-bar: entry 100 then H106 >= 105 -> TP same bar."
+ },
+ "D_subbar_gap_entry": {
+  "scenario_bar_ohlc": [
+   98.0,
+   103.0,
+   98.0,
+   102.0
+  ],
+  "inputs": {},
+  "expect": "magnifier: entry fills at the gapped sub-bar open 101.2. whole-bar: chart bar opens 98 < 100 with H103, so a path-blind engine fills at the stop level 100."
+ },
+ "E_short_tp_before_sl": {
+  "scenario_bar_ohlc": [
+   98.0,
+   102.0,
+   90.0,
+   97.0
+  ],
+  "inputs": {
+   "2. Direction": "Short",
+   "5. Entry level": "96",
+   "6. Stop-loss level": "101",
+   "7. Take-profit level": "91"
+  },
+  "expect": "magnifier: short entry ~96 then TP 91 before SL 101."
+ },
+ "L_trail_peak_then_dip": {
+  "scenario_bar_ohlc": [
+   102.0,
+   104.0,
+   101.5,
+   103.0
+  ],
+  "inputs": {},
+  "expect": "peak 104 FIRST, then a 2.5 retrace. A 2.00 trail armed at 104 stops out at 102."
+ },
+ "M_trail_dip_then_peak": {
+  "scenario_bar_ohlc": [
+   102.0,
+   104.0,
+   101.5,
+   103.0
+  ],
+  "inputs": {},
+  "expect": "the dip to 101.5 comes BEFORE the peak 104, so the trail is never armed above the dip and there is no exit. Chart OHLC identical to L."
+ },
+ "F_tie_same_subbar": {
+  "scenario_bar_ohlc": [
+   98.0,
+   106.0,
+   94.0,
+   98.0
+  ],
+  "inputs": {},
+  "expect": "one M1 bar spans 94->106, touching SL 95 and TP 105 inside a single sub-bar. Pins the intrabar tie policy; magnifier and whole-bar may agree by accident, so read this row against F's sibling scenarios."
+ },
+ "G_exact_touch": {
+  "scenario_bar_ohlc": [
+   98.0,
+   105.0,
+   95.0,
+   99.0
+  ],
+  "inputs": {},
+  "expect": "the path reaches exactly 105 then exactly 95 \u2014 no overshoot. Pins inclusive (<=/>=) trigger comparison at the level itself."
+ },
+ "H_empty_bucket": {
+  "scenario_bar_ohlc": [
+   98.0,
+   106.0,
+   94.0,
+   99.0
+  ],
+  "inputs": {},
+  "expect": "the scenario bar's M1 rows are dropped after generation, so its bucket is empty: that one chart bar must fall back to chart OHLC and be counted in dataFallbackBars while its neighbours stay magnified."
+ },
+ "I_trail_retrace": {
+  "scenario_bar_ohlc": [
+   98.0,
+   104.0,
+   98.0,
+   103.0
+  ],
+  "inputs": {},
+  "expect": "monotonic rise to 104 then a 2.5 retrace, then a deeper drop on the settling bar. Trailing-stop activation and offset are pure path questions the chart bar cannot answer."
+ },
+ "J_exit_gap": {
+  "scenario_bar_ohlc": [
+   98.0,
+   106.5,
+   98.0,
+   106.2
+  ],
+  "inputs": {},
+  "expect": "the take-profit at 105 is never traded \u2014 the path gaps 99 -> 106.5 between two M1 rows. Pins exit gap-fill pricing (fill at the sub-bar open, not at the level)."
+ },
+ "K_two_roundtrips": {
+  "scenario_bar_ohlc": [
+   98.0,
+   106.0,
+   98.0,
+   99.0
+  ],
+  "inputs": {},
+  "expect": "TP, then a drop through SL, then a second TP \u2014 multiple magnified round trips in one run."
+ }
+}
