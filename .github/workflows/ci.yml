@@ -15,7 +15,11 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          # Pinned for byte-reproducible builds: bun's bundler emits different
+          # CJS interop scaffolding across versions, so 'latest' makes it
+          # impossible to binary-verify a published artifact against a local
+          # build. Keep in sync with RELEASING.md; bump deliberately.
+          bun-version: 1.2.5
 
       - name: Install dependencies
         run: bun install --frozen-lockfile

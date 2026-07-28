@@ -29,7 +29,12 @@ refresh downstreams (pinestack)
 
 ## Prerequisites (one-time)
 
-- **Bun ≥ 1.2** locally (`engines.node` is `>=18` for consumers; the toolchain is Bun).
+- **Bun** locally, at the exact version pinned in `.github/workflows/release.yml`
+  (`bun-version:`). Consumers only need `engines.node >= 18`; the pin exists so a
+  local `bun run build` is **byte-identical** to what CI publishes — bun's
+  bundler changes its CJS interop scaffolding between versions, which otherwise
+  makes binary verification of a published artifact impossible. Check with
+  `bun --version`; bump the pin (both workflows + this line) deliberately.
 - **npm publish rights** to the `@heyphat` scope. CI publishes with an **`NPM_TOKEN`**
   repo secret (an npm _automation_ token) — confirm it exists in
   _Settings → Secrets and variables → Actions_. Provenance is enabled
@@ -173,20 +178,36 @@ field) must land **after** the piner version it needs is published.
 
 `.github/workflows/release.yml`, triggered on `push` of tags matching `v*`:
 
-| Step      | Command                                    |
-| --------- | ------------------------------------------ |
-| Checkout  | `actions/checkout@v4`                      |
-| Bun       | `oven-sh/setup-bun@v2` (latest)            |
-| Node      | `actions/setup-node@v4` (20, npm registry) |
-| Install   | `bun install --frozen-lockfile`            |
-| Typecheck | `bun run typecheck`                        |
-| Test      | `bun test`                                 |
-| Build     | `bun run build`                            |
-| Publish   | `npm publish --provenance --access public` |
+| Step      | Command                                       |
+| --------- | --------------------------------------------- |
+| Checkout  | `actions/checkout@v4`                         |
+| Bun       | `oven-sh/setup-bun@v2` (pinned `bun-version`) |
+| Node      | `actions/setup-node@v4` (20, npm registry)    |
+| Install   | `bun install --frozen-lockfile`               |
+| Typecheck | `bun run typecheck`                           |
+| Test      | `bun test`                                    |
+| Build     | `bun run build`                               |
+| Publish   | `npm publish --provenance --access public`    |
 
 Only `dist/` ships (`package.json` `files`), and `prepublishOnly` re-runs `build` as a
 safety net. Entry points: `.` (browser/Node ESM + CJS) and `./node` (Node-only
 filesystem/async helpers).
+
+## Verifying a published artifact
+
+Because the Bun version is pinned, a release is binary-verifiable: build the
+tagged tree locally with the same Bun and diff against the npm tarball.
+
+```bash
+git checkout vX.Y.Z && bun install --frozen-lockfile && bun run build
+curl -sL "$(npm view @heyphat/piner@X.Y.Z dist.tarball)" | tar xz -C /tmp
+diff -rq dist /tmp/package/dist   # empty = CI published exactly this tree
+```
+
+If only `*.cjs` / `*.map` files differ, the Bun versions differ — compare
+`bun --version` against the workflow pin before suspecting the source. A
+squash-merged release PR also means npm's `gitHead` may not be an ancestor of
+`main`; compare **trees** (`git diff vX.Y.Z main -- .`), not SHAs.
 
 ## Fixing a botched release
 
