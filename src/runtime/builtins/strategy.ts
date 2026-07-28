@@ -1361,13 +1361,29 @@ export class StrategyBroker {
           const p = or.limit!;
           // a limit resting since a PRIOR tick is open-bounded like any limit order
           if (wasTriggered && (or.dir === DIR_LONG ? o <= p : o >= p)) this.fill(or, o);
-          else if (!wasTriggered && directional) {
-            // Just triggered on a MONOTONE segment (audit 2026-07 §5): the limit
-            // may only fill at prices on the REMAINING travel — never at a price
-            // the segment visited before the stop activated.
+          else if (!wasTriggered) {
+            // Just armed on THIS pass (audit 2026-07 §5): the resting limit may
+            // only fill at a price reachable AFTER activation — never at one the
+            // bar/segment visited before the stop fired. TV-doc verified
+            // (calc-parity-findings.md 2026-07-28): the emulator fills only
+            // within the bar's high-low range, and a limit already marketable
+            // fills at the market coordinate without waiting — never snapped to
+            // its level (the docs' gap rule states the same principle).
+            //
+            // At the activation coordinate the market IS `act`. A limit already
+            // through it (long: limit >= act) is marketable there and fills at
+            // `act`, which is what the trader actually pays — collapsing that to
+            // the limit price invents a worse fill, and when limit > bar high it
+            // invents a price that never traded at all.
+            //
+            // A limit on the far side (long: limit < act — the "buy the retrace"
+            // setup) is NOT marketable, so it needs the price to come back: on a
+            // monotone segment only the remaining travel counts, on a whole bar
+            // the bar's own extreme does.
             const act = or.dir === DIR_LONG ? Math.max(o, or.price!) : Math.min(o, or.price!);
+            const reach = directional ? marketPx : or.dir === DIR_LONG ? l : h;
             if (or.dir === DIR_LONG ? act <= p : act >= p) this.fill(or, act);
-            else if (or.dir === DIR_LONG ? marketPx <= p : marketPx >= p) this.fill(or, p);
+            else if (or.dir === DIR_LONG ? reach <= p : reach >= p) this.fill(or, p);
             else stillPending.push(or); // stays an armed limit for later segments/bars
           } else if (or.dir === DIR_LONG ? l <= p : h >= p) this.fill(or, p);
           else stillPending.push(or); // keep `triggered`

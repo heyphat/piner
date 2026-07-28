@@ -349,6 +349,46 @@ describe('strategy — broker simulator', () => {
     expect(noFill.outputs.plots.get(0)!.data[9]).toBe(0); // armed but limit 90 never hit
   });
 
+  it('stop-limit entry marketable at activation fills THERE, never at an untraded limit', async () => {
+    // The case above has the limit BELOW the stop ("buy the retrace"), so the
+    // limit is not marketable when the stop fires and the fill is the limit.
+    // With the limit ABOVE the stop the order is marketable the moment the stop
+    // trips, so the trader pays the activation price — filling at the limit
+    // would invent a worse price, and can invent one that never traded at all.
+    const px = (b: { open: number; high: number; low: number; close: number }) => [
+      { time: 0, open: 99, high: 99, low: 99, close: 99, volume: 1 },
+      { time: 60_000, ...b, volume: 1 },
+      ...Array.from({ length: 3 }, (_, i) => ({
+        time: 120_000 + i * 60_000,
+        open: 100,
+        high: 100,
+        low: 100,
+        close: 100,
+        volume: 1,
+      })),
+    ];
+    const SRC =
+      '//@version=6\nstrategy("s")\nif bar_index == 0\n    strategy.entry("E", strategy.long, stop = 100, limit = 101)\nif bar_index == 3\n    strategy.close("E")\nplot(strategy.position_size)\n';
+
+    // Limit 101 is never traded (bar high 100.5) — the fill must be the stop, 100.
+    const reg = await bothBackends(SRC, undefined, px({ open: 99, high: 100.5, low: 99, close: 100.5 }));
+    expect(reg.strategy.closedTrades[0].entryPrice).toBe(100);
+
+    // Even when the bar DOES reach 101 later, activation came first at 100.
+    const through = await bothBackends(SRC, undefined, px({ open: 99, high: 102, low: 99, close: 102 }));
+    expect(through.strategy.closedTrades[0].entryPrice).toBe(100);
+
+    // Gapping past the stop activates at the open, not at the stop level.
+    const gapped = await bothBackends(SRC, undefined, px({ open: 100.4, high: 100.6, low: 100.4, close: 100.6 }));
+    expect(gapped.strategy.closedTrades[0].entryPrice).toBe(100.4);
+
+    // Gapping clean past the limit is not marketable at all: it stays armed and
+    // fills only once price returns to <= 101 (the next bar's open, 100).
+    const beyond = await bothBackends(SRC, undefined, px({ open: 103, high: 104, low: 103, close: 104 }));
+    expect(beyond.strategy.closedTrades[0].entryBar).toBe(2);
+    expect(beyond.strategy.closedTrades[0].entryPrice).toBe(100);
+  });
+
   it('exit take-profit (limit) closes when price reaches the target', async () => {
     const eng = await bothBackends(
       '//@version=6\nstrategy("s")\nif bar_index == 0\n    strategy.entry("L", strategy.long)\nstrategy.exit("X", "L", limit = 105, stop = 98)\nplot(strategy.position_size)\n',
