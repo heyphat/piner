@@ -8,11 +8,29 @@ A clean-room **Pine Script v6** engine in TypeScript — compile and run Pine
 indicators and strategies anywhere, browser-first. Designed from the public
 TradingView v6 docs only.
 
-Piner is the engine behind [fractalchart.com](https://fractalchart.com), which
-is its primary use case, and it's published here as a standalone open-source
-library.
+Piner is published here as a standalone open-source library, and it powers two
+primary use cases:
+
+- **[fractalchart.com](https://fractalchart.com)** — the charting front end:
+  author Pine in the browser and see indicators, strategies, and drawings render
+  on a live chart.
+- **[pinestack](https://github.com/heyphat/pinestack)** — the headless side.
+  Where TradingView keeps Pine inside one chart, one symbol, and one timeframe,
+  pinestack turns the engine into a programmable, parallel execution surface for
+  scanning universes, backtesting, parameter sweeps, walk-forward validation,
+  portfolio aggregation, and forward execution — driven by the `pinerun` CLI or
+  the `pinetop` terminal UI. **If you want to run Pine outside a chart, start
+  there** rather than wiring the engine up yourself.
+
+Piner itself stays a pure, browser-safe library; both layers build on top of it.
 
 ![Fractal Chart, powered by Piner](./docs/assets/fractalchart.png)
+
+_[fractalchart.com](https://fractalchart.com) — Pine authored and rendered on a live chart._
+
+![The pinetop BACKTEST page: strategy list and backtest flags on the left, price chart with entry/exit markers plus equity and drawdown curves in the middle, tearsheet (returns, risk, trades, top drawdowns) on the right, monthly returns and trades below](./docs/assets/pinestack.png)
+
+_[pinestack](https://github.com/heyphat/pinestack) — the same engine headless: `pinetop`'s backtest page over a `pinerun` run._
 
 > `compile(src)` lexes → parses → analyzes → emits JS **and** an interpreter
 > oracle; the two backends are cross-checked for byte-for-byte identical output.
@@ -77,6 +95,14 @@ engine.tick(liveBar, /* isClose */ false);
 `compiled.interpret` is the AST-interpreter backend over the same runtime — used
 as the correctness oracle (cross-checked against the generated JS). The runtime
 can also execute a hand-written `ScriptFn` directly (see `test/runtime-core.test.ts`).
+
+> Need to run this across many symbols and timeframes, from a CLI, with data
+> providers and caching already wired up? Don't build that here — use
+> **[pinestack](https://github.com/heyphat/pinestack)**, which layers an OHLCV
+> data ring (`pinery`), a job model with parallel workers and a determinism cache
+> (`pinerun`), a terminal UI (`pinetop`), and a forward-execution runner
+> (`pinelive`) on top of this engine. It installs as self-contained binaries —
+> no Node or Bun needed.
 
 ### Library `import` / `export`
 
